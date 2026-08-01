@@ -1,446 +1,281 @@
 """
-AgentGuard SDK — Observabilité + Sécurité intégrée
-Intercepte les appels OpenAI, scanne les inputs/outputs, applique les policies.
+AgentGuard Collector — Reçoit les spans, stocke en SQLite, sert le dashboard.
+Compatible Render.com (utilise la variable d'environnement PORT).
 """
 
+import os
 import json
-import hashlib
+import sqlite3
 import time
-import re
-import requests
-from typing import Optional, Dict, Any, List, Callable
-from dataclasses import dataclass, field, asdict
-from enum import Enum
+from datetime import datetime
+from flask import Flask, request, jsonify, render_template_string
 
-class RiskLevel(Enum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
+app = Flask(__name__)
+DB_PATH = "/tmp/agentguard.db"  # /tmp est writable sur Render
 
-@dataclass
-class SecurityCheck:
-    check_name: str
-    passed: bool
-    risk_level: RiskLevel
-    details: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-@dataclass
-class GuardSpan:
-    span_id: str
-    trace_id: str
-    span_type: str  # "llm_call", "tool_call", "agent_message"
-    timestamp: float
-    latency_ms: float
-    input_data: Dict[str, Any]
-    output_data: Dict[str, Any]
-    security_checks: List[SecurityCheck] = field(default_factory=list)
-    blocked: bool = False
-    block_reason: Optional[str] = None
-    cost_usd: float = 0.0
-
-class PolicyEngine:
-    """DSL minimal pour définir des règles de sécurité."""
-
-    def __init__(self, policies: List[Dict[str, Any]]):
-        self.policies = policies
-        self._compile_patterns()
-
-    def _compile_patterns(self):
-        self.injection_patterns = [
-            r"ignore previous instructions",
-            r"ignore all (prior|previous) (instructions|rules)",
-            r"you are now (in |entering )?DAN mode",
-            r"jailbreak",
-            r"system override",
-            r"disregard (your|the) (instructions|training)",
-            r"new instructions?:",
-            r"pretend you are",
-            r"roleplay as",
-            r"developer mode",
-            r"\[system\]",
-            r"\[admin\]",
-            r"\[override\]",
-        ]
-        self.injection_regex = re.compile(
-            r"(" + "|".join(self.injection_patterns) + r")",
-            re.IGNORECASE
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS spans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trace_id TEXT,
+            span_id TEXT,
+            span_type TEXT,
+            timestamp REAL,
+            latency_ms REAL,
+            input_data TEXT,
+            output_data TEXT,
+            security_checks TEXT,
+            blocked INTEGER,
+            block_reason TEXT,
+            cost_usd REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
+    """)
+    c.execute("""
+        CREATE INDEX IF NOT EXISTS idx_trace ON spans(trace_id)
+    """)
+    conn.commit()
+    conn.close()
 
-    def check_injection(self, text: str) -> SecurityCheck:
-        matches = self.injection_regex.findall(text.lower())
-        if matches:
-            return SecurityCheck(
-                check_name="prompt_injection",
-                passed=False,
-                risk_level=RiskLevel.HIGH,
-                details=f"Injection patterns detected: {matches[:3]}",
-                metadata={"patterns_found": matches[:5]}
-            )
-        return SecurityCheck(
-            check_name="prompt_injection",
-            passed=True,
-            risk_level=RiskLevel.LOW,
-            details="No injection patterns detected"
-        )
+@app.route("/span", methods=["POST"])
+def receive_span():
+    data = request.json
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO spans (trace_id, span_id, span_type, timestamp, latency_ms,
+                          input_data, output_data, security_checks, blocked,
+                          block_reason, cost_usd)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        data["trace_id"],
+        data["span_id"],
+        data["span_type"],
+        data["timestamp"],
+        data["latency_ms"],
+        json.dumps(data["input_data"]),
+        json.dumps(data["output_data"]),
+        json.dumps(data["security_checks"]),
+        1 if data["blocked"] else 0,
+        data.get("block_reason"),
+        data["cost_usd"]
+    ))
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok"}), 201
 
-    def check_pii(self, text: str) -> SecurityCheck:
-        pii_patterns = {
-            "email": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
-            "ssn": r"\b\d{3}-\d{2}-\d{4}\b",
-            "credit_card": r"\b(?:\d{4}[- ]?){3}\d{4}\b",
-            "phone": r"\b\+?\d{1,4}?[-.\s]?\(?\d{1,3}?\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9}\b",
-            "api_key": r"\b(sk-|pk-|Bearer\s)[A-Za-z0-9_-]{20,}\b",
+@app.route("/api/traces")
+def list_traces():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("""
+        SELECT trace_id, COUNT(*) as span_count, 
+               SUM(blocked) as blocked_count,
+               SUM(cost_usd) as total_cost,
+               MAX(created_at) as last_seen
+        FROM spans
+        GROUP BY trace_id
+        ORDER BY last_seen DESC
+        LIMIT 100
+    """)
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return jsonify(rows)
+
+@app.route("/api/traces/<trace_id>")
+def get_trace(trace_id):
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM spans WHERE trace_id = ? ORDER BY timestamp", (trace_id,))
+    rows = [dict(r) for r in c.fetchall()]
+    for r in rows:
+        r["input_data"] = json.loads(r["input_data"])
+        r["output_data"] = json.loads(r["output_data"])
+        r["security_checks"] = json.loads(r["security_checks"])
+        r["blocked"] = bool(r["blocked"])
+    conn.close()
+    return jsonify(rows)
+
+@app.route("/api/metrics")
+def get_metrics():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("SELECT COUNT(*) FROM spans")
+    total_spans = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(DISTINCT trace_id) FROM spans")
+    total_traces = c.fetchone()[0]
+
+    c.execute("SELECT SUM(blocked) FROM spans")
+    blocked = c.fetchone()[0] or 0
+
+    c.execute("SELECT SUM(cost_usd) FROM spans")
+    total_cost = c.fetchone()[0] or 0
+
+    c.execute("""
+        SELECT json_extract(security_checks, '$') as checks
+        FROM spans
+    """)
+    risk_counts = {"low": 0, "medium": 0, "high": 0, "critical": 0}
+    for row in c.fetchall():
+        checks = json.loads(row[0])
+        for check in checks:
+            level = check.get("risk_level", "low")
+            risk_counts[level] = risk_counts.get(level, 0) + 1
+
+    conn.close()
+    return jsonify({
+        "total_spans": total_spans,
+        "total_traces": total_traces,
+        "blocked_operations": blocked,
+        "total_cost_usd": round(total_cost, 6),
+        "risk_distribution": risk_counts
+    })
+
+DASHBOARD_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🛡️ AgentGuard Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
+               background: #0f172a; color: #e2e8f0; padding: 20px; }
+        h1 { color: #38bdf8; margin-bottom: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }
+        .card { background: #1e293b; padding: 20px; border-radius: 12px; border: 1px solid #334155; }
+        .card h3 { color: #94a3b8; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+        .card .value { font-size: 2rem; font-weight: 700; }
+        .value.critical { color: #ef4444; }
+        .value.high { color: #f97316; }
+        .value.safe { color: #22c55e; }
+        table { width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 12px; overflow: hidden; }
+        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #334155; }
+        th { background: #0f172a; color: #94a3b8; font-size: 0.8rem; text-transform: uppercase; }
+        tr:hover { background: #334155; }
+        .badge { padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+        .badge-blocked { background: #ef444420; color: #ef4444; border: 1px solid #ef4444; }
+        .badge-safe { background: #22c55e20; color: #22c55e; border: 1px solid #22c55e; }
+        .trace-link { color: #38bdf8; text-decoration: none; }
+        .trace-link:hover { text-decoration: underline; }
+        .refresh { position: fixed; top: 20px; right: 20px; background: #38bdf8; color: #0f172a; 
+                   border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+        .refresh:hover { background: #7dd3fc; }
+    </style>
+</head>
+<body>
+    <h1>🛡️ AgentGuard Dashboard</h1>
+    <button class="refresh" onclick="location.reload()">🔄 Refresh</button>
+
+    <div class="grid" id="metrics">
+        <div class="card"><h3>Total Spans</h3><div class="value" id="total-spans">-</div></div>
+        <div class="card"><h3>Traces</h3><div class="value" id="total-traces">-</div></div>
+        <div class="card"><h3>Blocked</h3><div class="value critical" id="blocked">-</div></div>
+        <div class="card"><h3>Cost (USD)</h3><div class="value" id="cost">-</div></div>
+        <div class="card"><h3>High Risk</h3><div class="value high" id="high-risk">-</div></div>
+        <div class="card"><h3>Critical</h3><div class="value critical" id="critical">-</div></div>
+    </div>
+
+    <h2 style="margin-bottom: 15px;">Recent Traces</h2>
+    <table>
+        <thead>
+            <tr><th>Trace ID</th><th>Spans</th><th>Blocked</th><th>Cost</th><th>Last Seen</th><th>Action</th></tr>
+        </thead>
+        <tbody id="traces-body"></tbody>
+    </table>
+
+    <script>
+        async function loadMetrics() {
+            const r = await fetch('/api/metrics');
+            const d = await r.json();
+            document.getElementById('total-spans').textContent = d.total_spans;
+            document.getElementById('total-traces').textContent = d.total_traces;
+            document.getElementById('blocked').textContent = d.blocked_operations;
+            document.getElementById('cost').textContent = '$' + d.total_cost_usd.toFixed(4);
+            document.getElementById('high-risk').textContent = d.risk_distribution.high;
+            document.getElementById('critical').textContent = d.risk_distribution.critical;
         }
-        findings = {}
-        for name, pattern in pii_patterns.items():
-            matches = re.findall(pattern, text)
-            if matches:
-                findings[name] = len(matches)
+        async function loadTraces() {
+            const r = await fetch('/api/traces');
+            const traces = await r.json();
+            const tbody = document.getElementById('traces-body');
+            tbody.innerHTML = traces.map(t => `
+                <tr>
+                    <td><code>${t.trace_id.substring(0,16)}...</code></td>
+                    <td>${t.span_count}</td>
+                    <td>${t.blocked_count > 0 ? '<span class="badge badge-blocked">BLOCKED</span>' : '<span class="badge badge-safe">SAFE</span>'}</td>
+                    <td>$${t.total_cost?.toFixed(4) || '0.0000'}</td>
+                    <td>${t.last_seen}</td>
+                    <td><a class="trace-link" href="/trace/${t.trace_id}">View →</a></td>
+                </tr>
+            `).join('');
+        }
+        loadMetrics();
+        loadTraces();
+        setInterval(() => { loadMetrics(); loadTraces(); }, 3000);
+    </script>
+</body>
+</html>
+"""
 
-        if findings:
-            return SecurityCheck(
-                check_name="pii_detection",
-                passed=False,
-                risk_level=RiskLevel.MEDIUM,
-                details=f"PII detected: {findings}",
-                metadata={"pii_types": findings}
-            )
-        return SecurityCheck(
-            check_name="pii_detection",
-            passed=True,
-            risk_level=RiskLevel.LOW,
-            details="No PII detected"
-        )
+@app.route("/")
+def dashboard():
+    return render_template_string(DASHBOARD_HTML)
 
-    def check_tool_policy(self, tool_name: str, params: Dict[str, Any], 
-                          budget_remaining: float) -> SecurityCheck:
-        # Vérifier whitelist
-        allowed_tools = [p.get("allowed_tools", []) for p in self.policies 
-                        if p["type"] == "tool_whitelist"]
-        allowed_tools = [t for sublist in allowed_tools for t in sublist]
+@app.route("/trace/<trace_id>")
+def trace_detail(trace_id):
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM spans WHERE trace_id = ? ORDER BY timestamp", (trace_id,))
+    rows = c.fetchall()
+    conn.close()
 
-        if allowed_tools and tool_name not in allowed_tools:
-            return SecurityCheck(
-                check_name="tool_policy",
-                passed=False,
-                risk_level=RiskLevel.CRITICAL,
-                details=f"Tool '{tool_name}' not in whitelist",
-                metadata={"tool": tool_name, "allowed": allowed_tools}
-            )
-
-        # Vérifier budget
-        if budget_remaining < 0:
-            return SecurityCheck(
-                check_name="budget_policy",
-                passed=False,
-                risk_level=RiskLevel.HIGH,
-                details="Budget exceeded",
-                metadata={"budget_remaining": budget_remaining}
-            )
-
-        # Vérifier paramètres dangereux
-        dangerous_keywords = ["delete_all", "drop", "truncate", "rm -rf", 
-                             "transfer", "password", "secret"]
-        params_str = json.dumps(params).lower()
-        found = [kw for kw in dangerous_keywords if kw in params_str]
-
-        if found:
-            return SecurityCheck(
-                check_name="dangerous_params",
-                passed=False,
-                risk_level=RiskLevel.HIGH,
-                details=f"Dangerous keywords in params: {found}",
-                metadata={"keywords": found}
-            )
-
-        return SecurityCheck(
-            check_name="tool_policy",
-            passed=True,
-            risk_level=RiskLevel.LOW,
-            details="Tool call approved"
-        )
-
-    def check_budget(self, cost: float, max_budget: float, total_spent: float) -> SecurityCheck:
-        if total_spent + cost > max_budget:
-            return SecurityCheck(
-                check_name="budget",
-                passed=False,
-                risk_level=RiskLevel.HIGH,
-                details=f"Budget would be exceeded: {total_spent + cost:.4f} > {max_budget}",
-                metadata={"total_spent": total_spent, "cost": cost, "max_budget": max_budget}
-            )
-        return SecurityCheck(
-            check_name="budget",
-            passed=True,
-            risk_level=RiskLevel.LOW,
-            details="Within budget"
-        )
-
-
-class AgentGuard:
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Trace Detail</title>
+        <style>
+            body { font-family: sans-serif; background: #0f172a; color: #e2e8f0; padding: 20px; }
+            .span-card { background: #1e293b; padding: 20px; margin-bottom: 15px; border-radius: 12px; border-left: 4px solid #38bdf8; }
+            .span-card.blocked { border-left-color: #ef4444; }
+            .span-type { color: #38bdf8; font-weight: 700; text-transform: uppercase; font-size: 0.8rem; }
+            .check { padding: 8px 12px; margin: 5px 0; border-radius: 6px; font-size: 0.9rem; }
+            .check-pass { background: #22c55e20; border: 1px solid #22c55e; }
+            .check-fail { background: #ef444420; border: 1px solid #ef4444; }
+            pre { background: #0f172a; padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 0.85rem; }
+            .back { color: #38bdf8; text-decoration: none; margin-bottom: 20px; display: inline-block; }
+        </style>
+    </head>
+    <body>
+        <a class="back" href="/">← Back to Dashboard</a>
+        <h1>Trace: """ + trace_id[:16] + """...</h1>
     """
-    Middleware principal.
-    S'utilise comme wrapper autour des appels OpenAI.
-    """
+    for row in rows:
+        checks = json.loads(row["security_checks"])
+        blocked = bool(row["blocked"])
+        html += f"""
+        <div class="span-card {'blocked' if blocked else ''}">
+            <div class="span-type">{row["span_type"]} — {row["latency_ms"]:.0f}ms — ${row["cost_usd"]:.6f}</div>
+            <h3 style="margin: 10px 0;">Input</h3>
+            <pre>{json.dumps(json.loads(row["input_data"]), indent=2)}</pre>
+            <h3 style="margin: 10px 0;">Output</h3>
+            <pre>{json.dumps(json.loads(row["output_data"]), indent=2)}</pre>
+            <h3 style="margin: 10px 0;">Security Checks</h3>
+            {''.join(f'<div class="check check-{"pass" if c["passed"] else "fail"}">{"✅" if c["passed"] else "🚨"} {c["check_name"]} — {c["risk_level"]} — {c["details"]}</div>' for c in checks)}
+        </div>
+        """
+    html += "</body></html>"
+    return html
 
-    def __init__(self, 
-                 collector_url: str = "http://localhost:8080",
-                 api_key: Optional[str] = None,
-                 policies: Optional[List[Dict]] = None,
-                 max_budget: float = 10.0,
-                 block_on_high: bool = True):
-        self.collector_url = collector_url
-        self.api_key = api_key
-        self.policy_engine = PolicyEngine(policies or [])
-        self.max_budget = max_budget
-        self.block_on_high = block_on_high
-        self.total_spent = 0.0
-        self.trace_id = self._generate_id()
-        self.spans: List[GuardSpan] = []
-
-    def _generate_id(self) -> str:
-        return hashlib.sha256(str(time.time()).encode()).hexdigest()[:16]
-
-    def _send_to_collector(self, span: GuardSpan):
-        """Envoie la span au collector de manière asynchrone (fire-and-forget)."""
-        try:
-            payload = {
-                "trace_id": span.trace_id,
-                "span_id": span.span_id,
-                "span_type": span.span_type,
-                "timestamp": span.timestamp,
-                "latency_ms": span.latency_ms,
-                "input_data": span.input_data,
-                "output_data": span.output_data,
-                "security_checks": [
-                    {
-                        "check_name": c.check_name,
-                        "passed": c.passed,
-                        "risk_level": c.risk_level.value,
-                        "details": c.details,
-                        "metadata": c.metadata
-                    }
-                    for c in span.security_checks
-                ],
-                "blocked": span.blocked,
-                "block_reason": span.block_reason,
-                "cost_usd": span.cost_usd
-            }
-            requests.post(
-                f"{self.collector_url}/span",
-                json=payload,
-                timeout=0.5,
-                headers={"Content-Type": "application/json"}
-            )
-        except Exception:
-            pass  # Ne jamais bloquer le flow à cause du collector
-
-    def guard_llm_call(self, func: Callable) -> Callable:
-        """Décorateur pour wrapper les appels LLM."""
-        def wrapper(*args, **kwargs):
-            span_id = self._generate_id()
-            start = time.time()
-
-            # --- PHASE 1 : SCAN INPUT ---
-            input_text = ""
-            if "messages" in kwargs:
-                input_text = " ".join([
-                    m.get("content", "") 
-                    for m in kwargs["messages"] 
-                    if isinstance(m.get("content"), str)
-                ])
-            elif args and isinstance(args[0], str):
-                input_text = args[0]
-
-            checks = []
-            checks.append(self.policy_engine.check_injection(input_text))
-            checks.append(self.policy_engine.check_pii(input_text))
-
-            # Vérifier si on doit bloquer
-            high_risk = [c for c in checks if c.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL)]
-            if high_risk and self.block_on_high:
-                latency = (time.time() - start) * 1000
-                span = GuardSpan(
-                    span_id=span_id,
-                    trace_id=self.trace_id,
-                    span_type="llm_call",
-                    timestamp=start,
-                    latency_ms=latency,
-                    input_data={"prompt": input_text[:500]},
-                    output_data={"blocked": True},
-                    security_checks=checks,
-                    blocked=True,
-                    block_reason=f"HIGH RISK: {[c.check_name for c in high_risk]}"
-                )
-                self.spans.append(span)
-                self._send_to_collector(span)
-                raise SecurityException(
-                    f"🛡️ AgentGuard BLOCKED: {span.block_reason}"
-                )
-
-            # --- PHASE 2 : EXÉCUTION ---
-            try:
-                result = func(*args, **kwargs)
-                latency = (time.time() - start) * 1000
-
-                # Estimer le coût (simplifié)
-                cost = self._estimate_cost(kwargs, result)
-                self.total_spent += cost
-
-                # Scan output
-                output_text = ""
-                if hasattr(result, "choices"):
-                    output_text = " ".join([
-                        c.message.content or "" 
-                        for c in result.choices
-                    ])
-                elif isinstance(result, str):
-                    output_text = result
-
-                checks.append(self.policy_engine.check_pii(output_text))
-                checks.append(self.policy_engine.check_budget(
-                    cost, self.max_budget, self.total_spent - cost
-                ))
-
-                # Vérifier output
-                high_risk_output = [c for c in checks if not c.passed and c.risk_level == RiskLevel.HIGH]
-
-                span = GuardSpan(
-                    span_id=span_id,
-                    trace_id=self.trace_id,
-                    span_type="llm_call",
-                    timestamp=start,
-                    latency_ms=latency,
-                    input_data={"prompt": input_text[:500]},
-                    output_data={"response": output_text[:500]},
-                    security_checks=checks,
-                    blocked=bool(high_risk_output),
-                    block_reason=f"Output risk: {[c.check_name for c in high_risk_output]}" if high_risk_output else None,
-                    cost_usd=cost
-                )
-                self.spans.append(span)
-                self._send_to_collector(span)
-
-                if span.blocked:
-                    raise SecurityException(f"🛡️ Output blocked: {span.block_reason}")
-
-                return result
-
-            except SecurityException:
-                raise
-            except Exception as e:
-                latency = (time.time() - start) * 1000
-                span = GuardSpan(
-                    span_id=span_id,
-                    trace_id=self.trace_id,
-                    span_type="llm_call",
-                    timestamp=start,
-                    latency_ms=latency,
-                    input_data={"prompt": input_text[:500]},
-                    output_data={"error": str(e)},
-                    security_checks=checks,
-                    cost_usd=0.0
-                )
-                self.spans.append(span)
-                self._send_to_collector(span)
-                raise
-
-        return wrapper
-
-    def guard_tool_call(self, tool_name: str, params: Dict[str, Any], 
-                        func: Callable) -> Any:
-        """Wrapper pour les appels d'outils."""
-        span_id = self._generate_id()
-        start = time.time()
-
-        budget_remaining = self.max_budget - self.total_spent
-        check = self.policy_engine.check_tool_policy(tool_name, params, budget_remaining)
-
-        if not check.passed and self.block_on_high:
-            latency = (time.time() - start) * 1000
-            span = GuardSpan(
-                span_id=span_id,
-                trace_id=self.trace_id,
-                span_type="tool_call",
-                timestamp=start,
-                latency_ms=latency,
-                input_data={"tool": tool_name, "params": params},
-                output_data={"blocked": True},
-                security_checks=[check],
-                blocked=True,
-                block_reason=check.details
-            )
-            self.spans.append(span)
-            self._send_to_collector(span)
-            raise SecurityException(f"🛡️ Tool blocked: {check.details}")
-
-        result = func(**params)
-        latency = (time.time() - start) * 1000
-
-        span = GuardSpan(
-            span_id=span_id,
-            trace_id=self.trace_id,
-            span_type="tool_call",
-            timestamp=start,
-            latency_ms=latency,
-            input_data={"tool": tool_name, "params": params},
-            output_data={"result": str(result)[:500]},
-            security_checks=[check],
-            cost_usd=0.0
-        )
-        self.spans.append(span)
-        self._send_to_collector(span)
-        return result
-
-    def _estimate_cost(self, kwargs, result) -> float:
-        """Estimation simplifiée du coût OpenAI."""
-        model = kwargs.get("model", "gpt-4o")
-        messages = kwargs.get("messages", [])
-        input_tokens = sum(len(m.get("content", "").split()) * 1.3 for m in messages)
-
-        output_tokens = 0
-        if hasattr(result, "choices"):
-            output_tokens = sum(
-                len(c.message.content.split()) * 1.3 
-                for c in result.choices if c.message.content
-            )
-
-        pricing = {
-            "gpt-4o": (2.5e-6, 1.0e-5),
-            "gpt-4o-mini": (1.5e-7, 6.0e-7),
-            "gpt-3.5-turbo": (5.0e-7, 1.5e-6),
-        }
-        inp_p, out_p = pricing.get(model, (2.5e-6, 1.0e-5))
-        return (input_tokens * inp_p) + (output_tokens * out_p)
-
-    def get_report(self) -> Dict:
-        """Génère un rapport de sécurité pour la session."""
-        total_checks = sum(len(s.security_checks) for s in self.spans)
-        failed_checks = sum(
-            1 for s in self.spans for c in s.security_checks if not c.passed
-        )
-        blocked = sum(1 for s in self.spans if s.blocked)
-
-        return {
-            "trace_id": self.trace_id,
-            "total_spans": len(self.spans),
-            "total_checks": total_checks,
-            "failed_checks": failed_checks,
-            "blocked_operations": blocked,
-            "total_cost_usd": round(self.total_spent, 6),
-            "budget_remaining": round(self.max_budget - self.total_spent, 6),
-            "risk_summary": self._risk_summary()
-        }
-
-    def _risk_summary(self) -> Dict[str, int]:
-        summary = {"low": 0, "medium": 0, "high": 0, "critical": 0}
-        for span in self.spans:
-            for check in span.security_checks:
-                summary[check.risk_level.value] += 1
-        return summary
-
-
-class SecurityException(Exception):
-    pass
+if __name__ == "__main__":
+    init_db()
+    port = int(os.environ.get("PORT", 8080))
+    print(f"🛡️ AgentGuard Collector running on http://0.0.0.0:{port}")
+    app.run(host="0.0.0.0", port=port, debug=False)
