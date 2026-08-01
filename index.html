@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentGuard — Security & Observability for AI Agents</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#0b1121; color:#e2e8f0; line-height:1.6; }
+.container { max-width:1100px; margin:0 auto; padding:0 24px; }
+
+/* Hero */
+.hero { padding:100px 0 60px; text-align:center; }
+.hero h1 { font-size:3.2rem; font-weight:800; background:linear-gradient(135deg,#38bdf8,#818cf8); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:16px; }
+.hero p { font-size:1.25rem; color:#94a3b8; max-width:600px; margin:0 auto 32px; }
+.hero .cta { display:inline-flex; gap:12px; flex-wrap:wrap; justify-content:center; }
+.btn { padding:12px 28px; border-radius:10px; font-size:1rem; font-weight:600; text-decoration:none; transition:all 0.2s; border:none; cursor:pointer; }
+.btn-primary { background:#38bdf8; color:#0b1121; }
+.btn-primary:hover { background:#7dd3fc; transform:translateY(-1px); }
+.btn-secondary { background:#1e293b; color:#e2e8f0; border:1px solid #334155; }
+.btn-secondary:hover { border-color:#38bdf8; }
+
+/* Stats bar */
+.stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; padding:40px 0; border-bottom:1px solid #1e293b; }
+.stat { text-align:center; }
+.stat .num { font-size:2rem; font-weight:800; color:#38bdf8; }
+.stat .label { color:#64748b; font-size:0.9rem; }
+
+/* Features */
+.features { padding:80px 0; }
+.features h2 { text-align:center; font-size:2rem; margin-bottom:48px; color:#f8fafc; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:24px; }
+.feature { background:#1e293b; border:1px solid #334155; border-radius:16px; padding:28px; }
+.feature .icon { font-size:2rem; margin-bottom:12px; }
+.feature h3 { font-size:1.1rem; margin-bottom:8px; color:#f8fafc; }
+.feature p { color:#94a3b8; font-size:0.95rem; }
+
+/* Code block */
+.code-section { padding:60px 0; }
+.code-block { background:#0f172a; border:1px solid #334155; border-radius:12px; padding:20px; font-family:'SF Mono',Monaco,monospace; font-size:0.85rem; overflow-x:auto; color:#e2e8f0; }
+.code-block .comment { color:#64748b; }
+.code-block .keyword { color:#f472b6; }
+.code-block .string { color:#a5f3fc; }
+
+/* Footer */
+footer { text-align:center; padding:40px 0; color:#64748b; font-size:0.9rem; border-top:1px solid #1e293b; }
+
+/* Badge */
+.badge { display:inline-block; background:#22c55e20; color:#22c55e; border:1px solid #22c55e40; padding:4px 12px; border-radius:20px; font-size:0.75rem; font-weight:700; margin-bottom:12px; }
+</style>
+<base target="_blank">
+</head>
+<body>
+
+<div class="container">
+  <section class="hero">
+    <div class="badge">🚀 Open Source — Launching 2026</div>
+    <h1>AgentGuard</h1>
+    <p>Security firewall and observability for AI agents. Detect prompt injections, block unauthorized tools, prevent data exfiltration — in real time.</p>
+    <div class="cta">
+      <a href="https://github.com/YOUR_USERNAME/agentguard" class="btn btn-secondary">⭐ Star on GitHub</a>
+      <a href="https://agentguard-aqal.onrender.com/" class="btn btn-primary">🛡️ Live Demo</a>
+    </div>
+  </section>
+
+  <section class="stats">
+    <div class="stat"><div class="num">0.5s</div><div class="label">Setup time</div></div>
+    <div class="stat"><div class="num">6</div><div class="label">Attack vectors blocked</div></div>
+    <div class="stat"><div class="num">100%</div><div class="label">Open Source</div></div>
+    <div class="stat"><div class="num">$0</div><div class="label">Self-hosted</div></div>
+  </section>
+
+  <section class="features">
+    <h2>Why AgentGuard?</h2>
+    <div class="grid">
+      <div class="feature">
+        <div class="icon">🛡️</div>
+        <h3>Prompt Injection Detection</h3>
+        <p>Blocks DAN mode, jailbreaks, and system prompt leaks before they reach your LLM. 15+ detection patterns with real-time scoring.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">🔒</div>
+        <h3>Tool Misuse Prevention</h3>
+        <p>Whitelist authorized tools, detect dangerous parameters, and enforce human-in-the-loop for sensitive operations like transfers or deletions.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">📊</div>
+        <h3>Real-time Observability</h3>
+        <p>Trace every LLM call, tool execution, and agent decision. Latency, cost, and risk metrics in a single dark-mode dashboard.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">⚡</div>
+        <h3>One-line Integration</h3>
+        <p>Drop-in decorator for OpenAI, DeepSeek, Anthropic. Zero changes to your agent logic. Works with any Python agent framework.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">💰</div>
+        <h3>Budget Protection</h3>
+        <p>Set a max spend per session. AgentGuard blocks expensive loops, infinite reflections, and runaway API costs automatically.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">📜</div>
+        <h3>AI Act Ready</h3>
+        <p>Full audit trail, incident detection, and compliance logging. Be ready for EU AI Act enforcement starting August 2026.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="code-section">
+    <h2 style="text-align:center; margin-bottom:32px;">Get started in 30 seconds</h2>
+    <div class="code-block">
+<span class="comment"># 1. Install</span>
+pip install agentguard
+
+<span class="comment"># 2. Wrap your agent</span>
+<span class="keyword">from</span> agentguard <span class="keyword">import</span> AgentGuard
+
+guard = AgentGuard(
+    collector_url=<span class="string">"https://your-collector.render.com"</span>,
+    api_key=<span class="string">"ag-your-key"</span>,
+    max_budget=<span class="string">10.0</span>
+)
+
+<span class="keyword">@guard</span>.guard_llm_call
+<span class="keyword">def</span> <span class="string">call_openai</span>(model, messages):
+    <span class="keyword">return</span> client.chat.completions.create(
+        model=model, messages=messages
+    )
+    </div>
+  </section>
+
+  <footer>
+    <p>Built with 💻 by a solo dev who thinks AI security shouldn't be an afterthought.</p>
+    <p style="margin-top:8px;"><a href="https://github.com/YOUR_USERNAME/agentguard" style="color:#38bdf8;text-decoration:none;">GitHub</a> · <a href="https://agentguard-aqal.onrender.com/" style="color:#38bdf8;text-decoration:none;">Live Demo</a></p>
+  </footer>
+</div>
+
+</body>
+</html>
