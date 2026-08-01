@@ -1,0 +1,446 @@
+"""
+AgentGuard SDK — Observabilité + Sécurité intégrée
+Intercepte les appels OpenAI, scanne les inputs/outputs, applique les policies.
+"""
+
+import json
+import hashlib
+import time
+import re
+import requests
+from typing import Optional, Dict, Any, List, Callable
+from dataclasses import dataclass, field, asdict
+from enum import Enum
+
+class RiskLevel(Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+@dataclass
+class SecurityCheck:
+    check_name: str
+    passed: bool
+    risk_level: RiskLevel
+    details: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class GuardSpan:
+    span_id: str
+    trace_id: str
+    span_type: str  # "llm_call", "tool_call", "agent_message"
+    timestamp: float
+    latency_ms: float
+    input_data: Dict[str, Any]
+    output_data: Dict[str, Any]
+    security_checks: List[SecurityCheck] = field(default_factory=list)
+    blocked: bool = False
+    block_reason: Optional[str] = None
+    cost_usd: float = 0.0
+
+class PolicyEngine:
+    """DSL minimal pour définir des règles de sécurité."""
+
+    def __init__(self, policies: List[Dict[str, Any]]):
+        self.policies = policies
+        self._compile_patterns()
+
+    def _compile_patterns(self):
+        self.injection_patterns = [
+            r"ignore previous instructions",
+            r"ignore all (prior|previous) (instructions|rules)",
+            r"you are now (in |entering )?DAN mode",
+            r"jailbreak",
+            r"system override",
+            r"disregard (your|the) (instructions|training)",
+            r"new instructions?:",
+            r"pretend you are",
+            r"roleplay as",
+            r"developer mode",
+            r"\[system\]",
+            r"\[admin\]",
+            r"\[override\]",
+        ]
+        self.injection_regex = re.compile(
+            r"(" + "|".join(self.injection_patterns) + r")",
+            re.IGNORECASE
+        )
+
+    def check_injection(self, text: str) -> SecurityCheck:
+        matches = self.injection_regex.findall(text.lower())
+        if matches:
+            return SecurityCheck(
+                check_name="prompt_injection",
+                passed=False,
+                risk_level=RiskLevel.HIGH,
+                details=f"Injection patterns detected: {matches[:3]}",
+                metadata={"patterns_found": matches[:5]}
+            )
+        return SecurityCheck(
+            check_name="prompt_injection",
+            passed=True,
+            risk_level=RiskLevel.LOW,
+            details="No injection patterns detected"
+        )
+
+    def check_pii(self, text: str) -> SecurityCheck:
+        pii_patterns = {
+            "email": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+            "ssn": r"\b\d{3}-\d{2}-\d{4}\b",
+            "credit_card": r"\b(?:\d{4}[- ]?){3}\d{4}\b",
+            "phone": r"\b\+?\d{1,4}?[-.\s]?\(?\d{1,3}?\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9}\b",
+            "api_key": r"\b(sk-|pk-|Bearer\s)[A-Za-z0-9_-]{20,}\b",
+        }
+        findings = {}
+        for name, pattern in pii_patterns.items():
+            matches = re.findall(pattern, text)
+            if matches:
+                findings[name] = len(matches)
+
+        if findings:
+            return SecurityCheck(
+                check_name="pii_detection",
+                passed=False,
+                risk_level=RiskLevel.MEDIUM,
+                details=f"PII detected: {findings}",
+                metadata={"pii_types": findings}
+            )
+        return SecurityCheck(
+            check_name="pii_detection",
+            passed=True,
+            risk_level=RiskLevel.LOW,
+            details="No PII detected"
+        )
+
+    def check_tool_policy(self, tool_name: str, params: Dict[str, Any], 
+                          budget_remaining: float) -> SecurityCheck:
+        # Vérifier whitelist
+        allowed_tools = [p.get("allowed_tools", []) for p in self.policies 
+                        if p["type"] == "tool_whitelist"]
+        allowed_tools = [t for sublist in allowed_tools for t in sublist]
+
+        if allowed_tools and tool_name not in allowed_tools:
+            return SecurityCheck(
+                check_name="tool_policy",
+                passed=False,
+                risk_level=RiskLevel.CRITICAL,
+                details=f"Tool '{tool_name}' not in whitelist",
+                metadata={"tool": tool_name, "allowed": allowed_tools}
+            )
+
+        # Vérifier budget
+        if budget_remaining < 0:
+            return SecurityCheck(
+                check_name="budget_policy",
+                passed=False,
+                risk_level=RiskLevel.HIGH,
+                details="Budget exceeded",
+                metadata={"budget_remaining": budget_remaining}
+            )
+
+        # Vérifier paramètres dangereux
+        dangerous_keywords = ["delete_all", "drop", "truncate", "rm -rf", 
+                             "transfer", "password", "secret"]
+        params_str = json.dumps(params).lower()
+        found = [kw for kw in dangerous_keywords if kw in params_str]
+
+        if found:
+            return SecurityCheck(
+                check_name="dangerous_params",
+                passed=False,
+                risk_level=RiskLevel.HIGH,
+                details=f"Dangerous keywords in params: {found}",
+                metadata={"keywords": found}
+            )
+
+        return SecurityCheck(
+            check_name="tool_policy",
+            passed=True,
+            risk_level=RiskLevel.LOW,
+            details="Tool call approved"
+        )
+
+    def check_budget(self, cost: float, max_budget: float, total_spent: float) -> SecurityCheck:
+        if total_spent + cost > max_budget:
+            return SecurityCheck(
+                check_name="budget",
+                passed=False,
+                risk_level=RiskLevel.HIGH,
+                details=f"Budget would be exceeded: {total_spent + cost:.4f} > {max_budget}",
+                metadata={"total_spent": total_spent, "cost": cost, "max_budget": max_budget}
+            )
+        return SecurityCheck(
+            check_name="budget",
+            passed=True,
+            risk_level=RiskLevel.LOW,
+            details="Within budget"
+        )
+
+
+class AgentGuard:
+    """
+    Middleware principal.
+    S'utilise comme wrapper autour des appels OpenAI.
+    """
+
+    def __init__(self, 
+                 collector_url: str = "http://localhost:8080",
+                 api_key: Optional[str] = None,
+                 policies: Optional[List[Dict]] = None,
+                 max_budget: float = 10.0,
+                 block_on_high: bool = True):
+        self.collector_url = collector_url
+        self.api_key = api_key
+        self.policy_engine = PolicyEngine(policies or [])
+        self.max_budget = max_budget
+        self.block_on_high = block_on_high
+        self.total_spent = 0.0
+        self.trace_id = self._generate_id()
+        self.spans: List[GuardSpan] = []
+
+    def _generate_id(self) -> str:
+        return hashlib.sha256(str(time.time()).encode()).hexdigest()[:16]
+
+    def _send_to_collector(self, span: GuardSpan):
+        """Envoie la span au collector de manière asynchrone (fire-and-forget)."""
+        try:
+            payload = {
+                "trace_id": span.trace_id,
+                "span_id": span.span_id,
+                "span_type": span.span_type,
+                "timestamp": span.timestamp,
+                "latency_ms": span.latency_ms,
+                "input_data": span.input_data,
+                "output_data": span.output_data,
+                "security_checks": [
+                    {
+                        "check_name": c.check_name,
+                        "passed": c.passed,
+                        "risk_level": c.risk_level.value,
+                        "details": c.details,
+                        "metadata": c.metadata
+                    }
+                    for c in span.security_checks
+                ],
+                "blocked": span.blocked,
+                "block_reason": span.block_reason,
+                "cost_usd": span.cost_usd
+            }
+            requests.post(
+                f"{self.collector_url}/span",
+                json=payload,
+                timeout=0.5,
+                headers={"Content-Type": "application/json"}
+            )
+        except Exception:
+            pass  # Ne jamais bloquer le flow à cause du collector
+
+    def guard_llm_call(self, func: Callable) -> Callable:
+        """Décorateur pour wrapper les appels LLM."""
+        def wrapper(*args, **kwargs):
+            span_id = self._generate_id()
+            start = time.time()
+
+            # --- PHASE 1 : SCAN INPUT ---
+            input_text = ""
+            if "messages" in kwargs:
+                input_text = " ".join([
+                    m.get("content", "") 
+                    for m in kwargs["messages"] 
+                    if isinstance(m.get("content"), str)
+                ])
+            elif args and isinstance(args[0], str):
+                input_text = args[0]
+
+            checks = []
+            checks.append(self.policy_engine.check_injection(input_text))
+            checks.append(self.policy_engine.check_pii(input_text))
+
+            # Vérifier si on doit bloquer
+            high_risk = [c for c in checks if c.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL)]
+            if high_risk and self.block_on_high:
+                latency = (time.time() - start) * 1000
+                span = GuardSpan(
+                    span_id=span_id,
+                    trace_id=self.trace_id,
+                    span_type="llm_call",
+                    timestamp=start,
+                    latency_ms=latency,
+                    input_data={"prompt": input_text[:500]},
+                    output_data={"blocked": True},
+                    security_checks=checks,
+                    blocked=True,
+                    block_reason=f"HIGH RISK: {[c.check_name for c in high_risk]}"
+                )
+                self.spans.append(span)
+                self._send_to_collector(span)
+                raise SecurityException(
+                    f"🛡️ AgentGuard BLOCKED: {span.block_reason}"
+                )
+
+            # --- PHASE 2 : EXÉCUTION ---
+            try:
+                result = func(*args, **kwargs)
+                latency = (time.time() - start) * 1000
+
+                # Estimer le coût (simplifié)
+                cost = self._estimate_cost(kwargs, result)
+                self.total_spent += cost
+
+                # Scan output
+                output_text = ""
+                if hasattr(result, "choices"):
+                    output_text = " ".join([
+                        c.message.content or "" 
+                        for c in result.choices
+                    ])
+                elif isinstance(result, str):
+                    output_text = result
+
+                checks.append(self.policy_engine.check_pii(output_text))
+                checks.append(self.policy_engine.check_budget(
+                    cost, self.max_budget, self.total_spent - cost
+                ))
+
+                # Vérifier output
+                high_risk_output = [c for c in checks if not c.passed and c.risk_level == RiskLevel.HIGH]
+
+                span = GuardSpan(
+                    span_id=span_id,
+                    trace_id=self.trace_id,
+                    span_type="llm_call",
+                    timestamp=start,
+                    latency_ms=latency,
+                    input_data={"prompt": input_text[:500]},
+                    output_data={"response": output_text[:500]},
+                    security_checks=checks,
+                    blocked=bool(high_risk_output),
+                    block_reason=f"Output risk: {[c.check_name for c in high_risk_output]}" if high_risk_output else None,
+                    cost_usd=cost
+                )
+                self.spans.append(span)
+                self._send_to_collector(span)
+
+                if span.blocked:
+                    raise SecurityException(f"🛡️ Output blocked: {span.block_reason}")
+
+                return result
+
+            except SecurityException:
+                raise
+            except Exception as e:
+                latency = (time.time() - start) * 1000
+                span = GuardSpan(
+                    span_id=span_id,
+                    trace_id=self.trace_id,
+                    span_type="llm_call",
+                    timestamp=start,
+                    latency_ms=latency,
+                    input_data={"prompt": input_text[:500]},
+                    output_data={"error": str(e)},
+                    security_checks=checks,
+                    cost_usd=0.0
+                )
+                self.spans.append(span)
+                self._send_to_collector(span)
+                raise
+
+        return wrapper
+
+    def guard_tool_call(self, tool_name: str, params: Dict[str, Any], 
+                        func: Callable) -> Any:
+        """Wrapper pour les appels d'outils."""
+        span_id = self._generate_id()
+        start = time.time()
+
+        budget_remaining = self.max_budget - self.total_spent
+        check = self.policy_engine.check_tool_policy(tool_name, params, budget_remaining)
+
+        if not check.passed and self.block_on_high:
+            latency = (time.time() - start) * 1000
+            span = GuardSpan(
+                span_id=span_id,
+                trace_id=self.trace_id,
+                span_type="tool_call",
+                timestamp=start,
+                latency_ms=latency,
+                input_data={"tool": tool_name, "params": params},
+                output_data={"blocked": True},
+                security_checks=[check],
+                blocked=True,
+                block_reason=check.details
+            )
+            self.spans.append(span)
+            self._send_to_collector(span)
+            raise SecurityException(f"🛡️ Tool blocked: {check.details}")
+
+        result = func(**params)
+        latency = (time.time() - start) * 1000
+
+        span = GuardSpan(
+            span_id=span_id,
+            trace_id=self.trace_id,
+            span_type="tool_call",
+            timestamp=start,
+            latency_ms=latency,
+            input_data={"tool": tool_name, "params": params},
+            output_data={"result": str(result)[:500]},
+            security_checks=[check],
+            cost_usd=0.0
+        )
+        self.spans.append(span)
+        self._send_to_collector(span)
+        return result
+
+    def _estimate_cost(self, kwargs, result) -> float:
+        """Estimation simplifiée du coût OpenAI."""
+        model = kwargs.get("model", "gpt-4o")
+        messages = kwargs.get("messages", [])
+        input_tokens = sum(len(m.get("content", "").split()) * 1.3 for m in messages)
+
+        output_tokens = 0
+        if hasattr(result, "choices"):
+            output_tokens = sum(
+                len(c.message.content.split()) * 1.3 
+                for c in result.choices if c.message.content
+            )
+
+        pricing = {
+            "gpt-4o": (2.5e-6, 1.0e-5),
+            "gpt-4o-mini": (1.5e-7, 6.0e-7),
+            "gpt-3.5-turbo": (5.0e-7, 1.5e-6),
+        }
+        inp_p, out_p = pricing.get(model, (2.5e-6, 1.0e-5))
+        return (input_tokens * inp_p) + (output_tokens * out_p)
+
+    def get_report(self) -> Dict:
+        """Génère un rapport de sécurité pour la session."""
+        total_checks = sum(len(s.security_checks) for s in self.spans)
+        failed_checks = sum(
+            1 for s in self.spans for c in s.security_checks if not c.passed
+        )
+        blocked = sum(1 for s in self.spans if s.blocked)
+
+        return {
+            "trace_id": self.trace_id,
+            "total_spans": len(self.spans),
+            "total_checks": total_checks,
+            "failed_checks": failed_checks,
+            "blocked_operations": blocked,
+            "total_cost_usd": round(self.total_spent, 6),
+            "budget_remaining": round(self.max_budget - self.total_spent, 6),
+            "risk_summary": self._risk_summary()
+        }
+
+    def _risk_summary(self) -> Dict[str, int]:
+        summary = {"low": 0, "medium": 0, "high": 0, "critical": 0}
+        for span in self.spans:
+            for check in span.security_checks:
+                summary[check.risk_level.value] += 1
+        return summary
+
+
+class SecurityException(Exception):
+    pass
