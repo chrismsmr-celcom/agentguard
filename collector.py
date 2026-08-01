@@ -9,8 +9,10 @@ import sqlite3
 import time
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template_string
+from flask_cors import CORS  # AJOUTER
 
 app = Flask(__name__)
+CORS(app)  # AJOUTER — autorise toutes les origines
 DB_PATH = "/tmp/agentguard.db"  # /tmp est writable sur Render
 
 def init_db():
