@@ -1,6 +1,6 @@
 """
 AgentGuard SDK — Observabilité + Sécurité intégrée
-Intercepte les appels OpenAI, scanne les inputs/outputs, applique les policies.
+Intercepte les appels LLM, scanne les inputs/outputs, applique les policies.
 """
 
 import json
@@ -9,7 +9,7 @@ import time
 import re
 import requests
 from typing import Optional, Dict, Any, List, Callable
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
 
 class RiskLevel(Enum):
@@ -30,7 +30,7 @@ class SecurityCheck:
 class GuardSpan:
     span_id: str
     trace_id: str
-    span_type: str  # "llm_call", "tool_call", "agent_message"
+    span_type: str
     timestamp: float
     latency_ms: float
     input_data: Dict[str, Any]
@@ -116,7 +116,6 @@ class PolicyEngine:
 
     def check_tool_policy(self, tool_name: str, params: Dict[str, Any], 
                           budget_remaining: float) -> SecurityCheck:
-        # Vérifier whitelist
         allowed_tools = [p.get("allowed_tools", []) for p in self.policies 
                         if p["type"] == "tool_whitelist"]
         allowed_tools = [t for sublist in allowed_tools for t in sublist]
@@ -130,7 +129,6 @@ class PolicyEngine:
                 metadata={"tool": tool_name, "allowed": allowed_tools}
             )
 
-        # Vérifier budget
         if budget_remaining < 0:
             return SecurityCheck(
                 check_name="budget_policy",
@@ -140,7 +138,6 @@ class PolicyEngine:
                 metadata={"budget_remaining": budget_remaining}
             )
 
-        # Vérifier paramètres dangereux
         dangerous_keywords = ["delete_all", "drop", "truncate", "rm -rf", 
                              "transfer", "password", "secret"]
         params_str = json.dumps(params).lower()
@@ -182,7 +179,7 @@ class PolicyEngine:
 class AgentGuard:
     """
     Middleware principal.
-    S'utilise comme wrapper autour des appels OpenAI.
+    S'utilise comme wrapper autour des appels OpenAI/DeepSeek.
     """
 
     def __init__(self, 
@@ -190,52 +187,107 @@ class AgentGuard:
                  api_key: Optional[str] = None,
                  policies: Optional[List[Dict]] = None,
                  max_budget: float = 10.0,
-                 block_on_high: bool = True):
-        self.collector_url = collector_url
+                 block_on_high: bool = True,
+                 debug: bool = True):
+        self.collector_url = collector_url.rstrip("/")
         self.api_key = api_key
         self.policy_engine = PolicyEngine(policies or [])
         self.max_budget = max_budget
         self.block_on_high = block_on_high
+        self.debug = debug
         self.total_spent = 0.0
         self.trace_id = self._generate_id()
         self.spans: List[GuardSpan] = []
+        self._pending_spans: List[Dict] = []  # Buffer local si le collector est down
+
+        if self.debug:
+            print(f"[AgentGuard] Initialisé — collector: {self.collector_url}")
+            self._test_connection()
+
+    def _test_connection(self):
+        """Vérifie que le collector est accessible."""
+        try:
+            r = requests.get(f"{self.collector_url}/api/metrics", timeout=10)
+            if r.status_code == 200:
+                print(f"[AgentGuard] ✅ Collector connecté ({r.status_code})")
+            else:
+                print(f"[AgentGuard] ⚠️ Collector répond mais code {r.status_code}")
+        except Exception as e:
+            print(f"[AgentGuard] ❌ Collector inaccessible: {e}")
+            print(f"[AgentGuard]    URL: {self.collector_url}/api/metrics")
+            print(f"[AgentGuard]    Les spans seront bufferisées en local.")
 
     def _generate_id(self) -> str:
         return hashlib.sha256(str(time.time()).encode()).hexdigest()[:16]
 
     def _send_to_collector(self, span: GuardSpan):
-        """Envoie la span au collector de manière asynchrone (fire-and-forget)."""
+        """Envoie la span au collector avec retry et logging."""
+        payload = {
+            "trace_id": span.trace_id,
+            "span_id": span.span_id,
+            "span_type": span.span_type,
+            "timestamp": span.timestamp,
+            "latency_ms": span.latency_ms,
+            "input_data": span.input_data,
+            "output_data": span.output_data,
+            "security_checks": [
+                {
+                    "check_name": c.check_name,
+                    "passed": c.passed,
+                    "risk_level": c.risk_level.value,
+                    "details": c.details,
+                    "metadata": c.metadata
+                }
+                for c in span.security_checks
+            ],
+            "blocked": span.blocked,
+            "block_reason": span.block_reason,
+            "cost_usd": span.cost_usd
+        }
+
+        # Essai d'envoi
         try:
-            payload = {
-                "trace_id": span.trace_id,
-                "span_id": span.span_id,
-                "span_type": span.span_type,
-                "timestamp": span.timestamp,
-                "latency_ms": span.latency_ms,
-                "input_data": span.input_data,
-                "output_data": span.output_data,
-                "security_checks": [
-                    {
-                        "check_name": c.check_name,
-                        "passed": c.passed,
-                        "risk_level": c.risk_level.value,
-                        "details": c.details,
-                        "metadata": c.metadata
-                    }
-                    for c in span.security_checks
-                ],
-                "blocked": span.blocked,
-                "block_reason": span.block_reason,
-                "cost_usd": span.cost_usd
-            }
-            requests.post(
+            r = requests.post(
                 f"{self.collector_url}/span",
                 json=payload,
-                timeout=0.5,
+                timeout=10,  # Augmenté de 0.5s à 10s
                 headers={"Content-Type": "application/json"}
             )
-        except Exception:
-            pass  # Ne jamais bloquer le flow à cause du collector
+            if r.status_code == 201:
+                if self.debug:
+                    print(f"[AgentGuard] 📤 Span envoyée ({span.span_type}, blocked={span.blocked})")
+                # Si on avait des spans en attente, on les envoie aussi
+                self._flush_pending()
+            else:
+                if self.debug:
+                    print(f"[AgentGuard] ⚠️ Collector a rejeté la span: HTTP {r.status_code}")
+                self._pending_spans.append(payload)
+        except Exception as e:
+            if self.debug:
+                print(f"[AgentGuard] ⚠️ Échec envoi span: {e}")
+            self._pending_spans.append(payload)
+
+    def _flush_pending(self):
+        """Réessaie d'envoyer les spans en attente."""
+        if not self._pending_spans:
+            return
+        flushed = []
+        for payload in self._pending_spans:
+            try:
+                r = requests.post(
+                    f"{self.collector_url}/span",
+                    json=payload,
+                    timeout=10,
+                    headers={"Content-Type": "application/json"}
+                )
+                if r.status_code == 201:
+                    flushed.append(payload)
+            except Exception:
+                break
+        for p in flushed:
+            self._pending_spans.remove(p)
+        if flushed and self.debug:
+            print(f"[AgentGuard] 🔄 {len(flushed)} spans en attente envoyées")
 
     def guard_llm_call(self, func: Callable) -> Callable:
         """Décorateur pour wrapper les appels LLM."""
@@ -395,7 +447,7 @@ class AgentGuard:
         return result
 
     def _estimate_cost(self, kwargs, result) -> float:
-        """Estimation simplifiée du coût OpenAI."""
+        """Estimation simplifiée du coût LLM."""
         model = kwargs.get("model", "gpt-4o")
         messages = kwargs.get("messages", [])
         input_tokens = sum(len(m.get("content", "").split()) * 1.3 for m in messages)
@@ -411,6 +463,8 @@ class AgentGuard:
             "gpt-4o": (2.5e-6, 1.0e-5),
             "gpt-4o-mini": (1.5e-7, 6.0e-7),
             "gpt-3.5-turbo": (5.0e-7, 1.5e-6),
+            "deepseek-chat": (1.4e-7, 2.8e-7),
+            "deepseek-reasoner": (5.5e-7, 2.19e-6),
         }
         inp_p, out_p = pricing.get(model, (2.5e-6, 1.0e-5))
         return (input_tokens * inp_p) + (output_tokens * out_p)
@@ -431,6 +485,7 @@ class AgentGuard:
             "blocked_operations": blocked,
             "total_cost_usd": round(self.total_spent, 6),
             "budget_remaining": round(self.max_budget - self.total_spent, 6),
+            "pending_spans": len(self._pending_spans),
             "risk_summary": self._risk_summary()
         }
 
