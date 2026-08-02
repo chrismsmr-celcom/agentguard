@@ -2,7 +2,7 @@
 
 > Un seul fichier SDK. Un seul fichier Collector. Zero bullshit.
 
-## 🚀 Démarrage en 2 minutes
+## 🚀 Démarrage en 2 minutes (Python direct)
 
 ```bash
 # 1. Clone / copie les fichiers
@@ -18,6 +18,32 @@ python collector.py
 # 4. Lance l'agent de démo (terminal 2)
 python example_agent.py
 ```
+
+## 🐳 Ou en une commande avec Docker
+
+```bash
+cp .env.example .env
+# Génère une clé et colle-la dans .env :
+python3 -c "import secrets; print('ag-' + secrets.token_urlsafe(32))"
+
+docker compose up
+# → http://localhost:8080/?key=TA_CLE
+```
+
+Persistant (volume Docker), auto-restart, healthcheck inclus. Voir `.env.example`
+pour les variables optionnelles.
+
+## 🔌 Intégrations frameworks
+
+| Framework | Fichier | Point d'interception |
+|---|---|---|
+| LangChain | [`integrations/langchain_example.py`](integrations/langchain_example.py) | fonction d'appel du modèle |
+| CrewAI | [`integrations/crewai_example.py`](integrations/crewai_example.py) | monkey-patch de `LLM.call` (voir commentaires — `crewai.LLM` a un pattern factory qui empêche le subclassing classique) + `BaseTool._run` |
+
+Les deux tournent tels quels (`python integrations/langchain_example.py`) sans
+clé d'API modèle — l'exemple LangChain utilise un modèle factice pour que tu
+puisses vérifier l'intégration avant de brancher un vrai LLM.
+
 
 ## 📁 Structure
 
