@@ -66,6 +66,9 @@ def redact_pii(obj):
 import sqlite3
 
 DB_SQLITE_PATH = os.environ.get("AGENTGUARD_DB_PATH", "/tmp/agentguard.db")
+_sqlite_dir = os.path.dirname(DB_SQLITE_PATH)
+if _sqlite_dir and not os.path.isdir(_sqlite_dir):
+    os.makedirs(_sqlite_dir, exist_ok=True)
 
 def get_pg_conn():
     """Connexion PostgreSQL (production Render)."""
