@@ -49,36 +49,67 @@ class PolicyEngine:
         self._compile_patterns()
 
     def _compile_patterns(self):
-        self.injection_patterns = [
-            r"ignore previous instructions",
-            r"ignore all (prior|previous) (instructions|rules)",
-            r"you are now (in |entering )?DAN mode",
-            r"jailbreak",
+        # Patterns FORTS : indicateurs de contournement sans ambiguïté raisonnable
+        # (peu de contextes légitimes les utilisent tels quels). Bloquants seuls.
+        self.strong_patterns = [
+            r"ignore (all )?(previous|prior|above) (instructions|rules|prompts)",
+            r"disregard (your|the|all) (instructions|rules|training)",
+            r"you are now (in |entering )?(DAN|developer) mode",
+            r"jailbreak(ing)?",
             r"system override",
-            r"disregard (your|the) (instructions|training)",
-            r"new instructions?:",
+            r"new instructions?\s*:",
+            r"\[system\]", r"\[admin\]", r"\[override\]",
+            r"reveal (your |the )?system prompt",
+            r"repeat\b.{0,25}\babove\b",
+            r"(with|that has|and) no (restrictions|limits|filters)",
+            r"do anything now",
+            # Équivalents FR — la version originale ne couvrait que l'anglais
+            r"ignore (tes|vos|les) instructions (précédentes|pr[ée]c[ée]dentes)",
+            r"oublie (tes|vos) instructions",
+            r"tu es maintenant en mode (développeur|admin|dan)",
+            r"nouvelles? instructions?\s*:",
+            r"r[ée]v[èe]le (ton|le) (prompt|invite) syst[èe]me",
+            r"ignore (ce )?qui pr[ée]c[èe]de",
+        ]
+        # Patterns FAIBLES : apparaissent aussi dans des demandes créatives
+        # légitimes (écriture, jeu de rôle demandé sciemment). Seuls, ils ne
+        # doivent PAS bloquer — juste déclencher une vérification sémantique
+        # (llm_judge) si disponible, sinon rester en MEDIUM non-bloquant.
+        self.weak_patterns = [
             r"pretend you are",
             r"roleplay as",
-            r"developer mode",
-            r"\[system\]",
-            r"\[admin\]",
-            r"\[override\]",
+            r"act as if you (are|were)",
+            r"comme si tu (es|étais)",
+            r"joue le r[ôo]le de",
         ]
-        self.injection_regex = re.compile(
-            r"(" + "|".join(self.injection_patterns) + r")",
-            re.IGNORECASE
+        self.strong_regex = re.compile(
+            r"(" + "|".join(self.strong_patterns) + r")", re.IGNORECASE
+        )
+        self.weak_regex = re.compile(
+            r"(" + "|".join(self.weak_patterns) + r")", re.IGNORECASE
         )
 
     def check_injection(self, text: str) -> SecurityCheck:
-        matches = self.injection_regex.findall(text.lower())
-        if matches:
+        strong_matches = self.strong_regex.findall(text)
+        if strong_matches:
             return SecurityCheck(
                 check_name="prompt_injection",
                 passed=False,
                 risk_level=RiskLevel.HIGH,
-                details=f"Injection patterns detected: {matches[:3]}",
-                metadata={"patterns_found": matches[:5]}
+                details=f"Strong injection pattern(s): {strong_matches[:3]}",
+                metadata={"patterns_found": strong_matches[:5], "confidence": "high"}
             )
+
+        weak_matches = self.weak_regex.findall(text)
+        if weak_matches:
+            return SecurityCheck(
+                check_name="prompt_injection",
+                passed=False,
+                risk_level=RiskLevel.MEDIUM,
+                details=f"Ambiguous pattern(s), needs semantic review: {weak_matches[:3]}",
+                metadata={"patterns_found": weak_matches[:5], "confidence": "ambiguous"}
+            )
+
         return SecurityCheck(
             check_name="prompt_injection",
             passed=True,
@@ -367,8 +398,18 @@ class AgentGuard:
                 input_text = args[0]
 
             checks = []
-            checks.append(self.policy_engine.check_injection(input_text))
+            injection_check = self.policy_engine.check_injection(input_text)
+            checks.append(injection_check)
             checks.append(self.policy_engine.check_pii(input_text))
+
+            # Le regex seul est bruyant sur les tournures ambiguës (ex: une
+            # vraie demande créative de jeu de rôle). On ne sollicite le LLM
+            # judge (coût + latence) QUE dans ce cas précis — jamais sur les
+            # patterns forts (déjà tranchés) ni sur les textes propres.
+            if injection_check.metadata.get("confidence") == "ambiguous":
+                judge_check = self.policy_engine.llm_judge(input_text, context="input")
+                if judge_check:
+                    checks.append(judge_check)
 
             # Vérifier si on doit bloquer
             high_risk = [c for c in checks if c.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL)]
