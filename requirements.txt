@@ -1,3 +1,4 @@
+# Dépendances existantes
 flask>=2.3.0
 requests>=2.31.0
 gunicorn>=21.0.0
@@ -5,3 +6,10 @@ flask-cors>=4.0.0
 flask-limiter>=3.5.0
 psycopg2-binary>=2.9.9
 pytest>=8.0.0
+
+# Nouvelles dépendances pour le ML
+transformers>=4.36.0
+torch>=2.0.0
+torchvision>=0.15.0
+datasets>=2.14.0
+scikit-learn>=1.3.0
