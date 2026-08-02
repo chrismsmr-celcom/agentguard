@@ -1560,6 +1560,15 @@ def trace_detail(trace_id):
         cur = conn.cursor()
         cur.execute("SELECT * FROM spans WHERE trace_id = ? ORDER BY timestamp", (trace_id,))
     rows = [dict_from_row(r, is_pg) for r in cur.fetchall()]
+    <% if (row.get('detection_layer') === 'llm_judge') { %>
+    <span class="badge badge-llm">🎯 LLM Judge</span>
+    <% if (row.get('llm_score')) { %>
+        <span style="color:#f59e0b;font-size:0.7rem;">
+            Score: <%= (row.get('llm_score') * 100).toFixed(1) %>% 
+            (<%= row.get('llm_score') > 0.85 ? '🔴 Risque' : row.get('llm_score') > 0.7 ? '🟠 Douteux' : '🟢 Safe' %>)
+        </span>
+    <% } %>
+<% } %>
     for r in rows:
         r["input_data"] = json.loads(r["input_data"])
         r["output_data"] = json.loads(r["output_data"])
