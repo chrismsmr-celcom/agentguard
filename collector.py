@@ -3,25 +3,52 @@ AgentGuard Collector v3 — PostgreSQL production + SQLite local fallback
 """
 
 import os
+import re
 import json
 import time
 import secrets
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template_string
-from flask_cors import CORS
+from flask import Flask, request, jsonify, render_template_string, make_response
+from flask_cors import CORS, cross_origin
 
 app = Flask(__name__)
-CORS(app, origins=["*"])
+app.secret_key = os.environ.get("AGENTGUARD_FLASK_SECRET", secrets.token_urlsafe(32))
+# CORS n'est nécessaire QUE si un SDK tourne côté navigateur et appelle le
+# collector en cross-origin. Le dashboard lui-même est same-origin.
+# On ne l'ouvre donc que sur /span, jamais sur les routes API/dashboard.
 
 # ── CONFIG ──
 DB_TYPE = os.environ.get("AGENTGUARD_DB_TYPE", "sqlite")  # "sqlite" ou "postgres"
 DATABASE_URL = os.environ.get("DATABASE_URL", "")  # Render injecte ça auto
 API_KEY = os.environ.get("AGENTGUARD_API_KEY", None)
+ADMIN_SECRET = os.environ.get("AGENTGUARD_ADMIN_SECRET")  # pas de valeur par défaut !
+AUTH_COOKIE = "ag_auth"
 
 # Génère une clé si aucune n'est définie
 if not API_KEY:
     API_KEY = "ag-" + secrets.token_urlsafe(32)
     print(f"[AG] ⚠️  Aucune API_KEY. Temporaire: {API_KEY[:20]}...")
+
+# ── PII REDACTION (avant stockage, pas juste détection) ──
+_PII_PATTERNS = {
+    "EMAIL": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
+    "SSN": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+    "CARD": re.compile(r"\b(?:\d{4}[- ]?){3}\d{4}\b"),
+    "API_KEY": re.compile(r"\b(sk-|pk-|Bearer\s)[A-Za-z0-9_-]{20,}\b"),
+}
+
+def redact_pii(obj):
+    """Masque récursivement le PII connu dans les strings avant stockage en DB."""
+    if isinstance(obj, str):
+        text = obj
+        for name, pattern in _PII_PATTERNS.items():
+            text = pattern.sub(f"[REDACTED_{name}]", text)
+        return text
+    if isinstance(obj, dict):
+        return {k: redact_pii(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [redact_pii(v) for v in obj]
+    return obj
 
 # ── DATABASE SETUP ──
 import sqlite3
@@ -107,25 +134,58 @@ def dict_from_row(row, is_pg=False):
     return dict(row)
 
 # ── AUTH ──
+# Toutes les routes qui donnent accès à des données (spans, traces, metrics,
+# dashboard) exigent la clé — via header, ?key=, ou un cookie posé une fois
+# que la clé a été fournie une première fois (pour que le dashboard reste
+# utilisable au navigateur sans exposer les données sans authentification).
+PROTECTED_ENDPOINTS = {
+    "receive_span", "list_traces", "get_trace", "get_metrics",
+    "dashboard", "trace_detail",
+}
+
 def require_auth():
     if not API_KEY:
         return True
     key = request.headers.get("X-API-Key", "")
-    if key != API_KEY:
-        key = request.args.get("api_key", "")
-    return key == API_KEY
+    if key == API_KEY:
+        return True
+    key = request.args.get("api_key") or request.args.get("key") or ""
+    if key == API_KEY:
+        return True
+    return secrets.compare_digest(request.cookies.get(AUTH_COOKIE, ""), API_KEY)
+
+def set_auth_cookie_if_valid(resp):
+    """Si la clé a été fournie en query param, pose un cookie httponly pour
+    que les prochaines requêtes (dont les fetch() same-origin du dashboard)
+    soient authentifiées sans avoir à toucher au JS existant."""
+    key = request.args.get("api_key") or request.args.get("key")
+    if key == API_KEY:
+        resp.set_cookie(AUTH_COOKIE, API_KEY, httponly=True, samesite="Lax",
+                         secure=True, max_age=60 * 60 * 24 * 30)
+    return resp
 
 @app.before_request
 def check_auth():
-    if request.method == "GET":
+    if request.endpoint not in PROTECTED_ENDPOINTS:
         return None
-    if request.endpoint == "receive_span" and not require_auth():
-        return jsonify({"error": "Unauthorized — X-API-Key header required"}), 401
+    if not require_auth():
+        if request.endpoint in ("dashboard", "trace_detail"):
+            return (
+                "<h3>🛡️ AgentGuard — accès protégé</h3>"
+                "<p>Ajoute ta clé à l'URL : <code>?key=TA_CLE</code></p>",
+                401,
+            )
+        return jsonify({"error": "Unauthorized — X-API-Key header or ?key= required"}), 401
 
 # ── API ──
 @app.route("/span", methods=["POST"])
+@cross_origin(origins="*")  # seul endpoint appelable par un SDK cross-origin
 def receive_span():
     data = request.json
+    # On redacte le PII connu AVANT stockage — pas seulement à la détection —
+    # pour que la donnée sensible ne finisse jamais en DB ni sur le dashboard.
+    data["input_data"] = redact_pii(data.get("input_data", {}))
+    data["output_data"] = redact_pii(data.get("output_data", {}))
     is_pg = DB_TYPE == "postgres" and DATABASE_URL
 
     if is_pg:
@@ -1329,7 +1389,8 @@ setTimeout(() => {
 
 @app.route("/")
 def dashboard():
-    return render_template_string(DASHBOARD_HTML)
+    resp = make_response(render_template_string(DASHBOARD_HTML))
+    return set_auth_cookie_if_valid(resp)
 
 @app.route("/trace/<trace_id>")
 def trace_detail(trace_id):
@@ -1390,12 +1451,17 @@ def trace_detail(trace_id):
         </div>
         """
     html += "</body></html>"
-    return html
+    resp = make_response(html)
+    return set_auth_cookie_if_valid(resp)
 
 @app.route("/api/key")
 def show_key():
-    admin_secret = request.args.get("admin")
-    if admin_secret == os.environ.get("AGENTGUARD_ADMIN_SECRET", "changeme"):
+    # Pas de valeur par défaut : si AGENTGUARD_ADMIN_SECRET n'est pas configuré,
+    # l'endpoint est désactivé plutôt que de tomber sur un secret devinable.
+    if not ADMIN_SECRET:
+        return jsonify({"error": "AGENTGUARD_ADMIN_SECRET not configured — endpoint disabled"}), 404
+    admin_secret = request.args.get("admin", "")
+    if secrets.compare_digest(admin_secret, ADMIN_SECRET):
         return jsonify({"api_key": API_KEY})
     return jsonify({"error": "Admin secret required"}), 403
 
