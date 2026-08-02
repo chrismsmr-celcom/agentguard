@@ -10,9 +10,18 @@ import secrets
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template_string, make_response
 from flask_cors import CORS, cross_origin
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("AGENTGUARD_FLASK_SECRET", secrets.token_urlsafe(32))
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["120 per minute"],  # garde-fou global raisonnable
+    storage_uri=os.environ.get("AGENTGUARD_LIMITER_STORAGE", "memory://"),
+)
 # CORS n'est nécessaire QUE si un SDK tourne côté navigateur et appelle le
 # collector en cross-origin. Le dashboard lui-même est same-origin.
 # On ne l'ouvre donc que sur /span, jamais sur les routes API/dashboard.
@@ -25,9 +34,12 @@ ADMIN_SECRET = os.environ.get("AGENTGUARD_ADMIN_SECRET")  # pas de valeur par d�
 AUTH_COOKIE = "ag_auth"
 
 # Génère une clé si aucune n'est définie
+_API_KEY_WAS_GENERATED = API_KEY is None
 if not API_KEY:
     API_KEY = "ag-" + secrets.token_urlsafe(32)
-    print(f"[AG] ⚠️  Aucune API_KEY. Temporaire: {API_KEY[:20]}...")
+    print("[AG] ⚠️  Aucune AGENTGUARD_API_KEY fournie — clé générée en mémoire "
+          "pour cette instance (elle changera au prochain redémarrage, et n'est "
+          "PAS affichée dans les logs). Configure AGENTGUARD_API_KEY pour la fixer.")
 
 # ── PII REDACTION (avant stockage, pas juste détection) ──
 _PII_PATTERNS = {
@@ -179,6 +191,7 @@ def check_auth():
 
 # ── API ──
 @app.route("/span", methods=["POST"])
+@limiter.limit("30 per minute")
 @cross_origin(origins="*")  # seul endpoint appelable par un SDK cross-origin
 def receive_span():
     data = request.json
@@ -1455,6 +1468,7 @@ def trace_detail(trace_id):
     return set_auth_cookie_if_valid(resp)
 
 @app.route("/api/key")
+@limiter.limit("5 per minute")
 def show_key():
     # Pas de valeur par défaut : si AGENTGUARD_ADMIN_SECRET n'est pas configuré,
     # l'endpoint est désactivé plutôt que de tomber sur un secret devinable.
@@ -1465,10 +1479,14 @@ def show_key():
         return jsonify({"api_key": API_KEY})
     return jsonify({"error": "Admin secret required"}), 403
 
+if _API_KEY_WAS_GENERATED and DB_TYPE == "postgres":
+    print("[AG] 🚨 PostgreSQL actif (config prod) mais AGENTGUARD_API_KEY n'est "
+          "pas fixée — chaque redémarrage invalidera les intégrations SDK "
+          "existantes. Configure AGENTGUARD_API_KEY dans les variables d'env Render.")
+
 if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("PORT", 8080))
     print(f"🛡️ AgentGuard Collector v3 running on http://0.0.0.0:{port}")
     print(f"   DB: {DB_TYPE}")
-    print(f"   API Key: {API_KEY[:10]}...")
     app.run(host="0.0.0.0", port=port, debug=False)
