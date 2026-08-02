@@ -178,6 +178,11 @@ def set_auth_cookie_if_valid(resp):
 
 @app.before_request
 def check_auth():
+    # Le preflight CORS (OPTIONS) ne porte jamais les headers custom du navigateur
+    # (X-API-Key) — c'est normal et ce n'est pas la vraie requête. Le bloquer ici
+    # casse la négociation CORS avant même que la vraie requête parte.
+    if request.method == "OPTIONS":
+        return None
     if request.endpoint not in PROTECTED_ENDPOINTS:
         return None
     if not require_auth():
@@ -192,7 +197,7 @@ def check_auth():
 # ── API ──
 @app.route("/span", methods=["POST"])
 @limiter.limit("30 per minute")
-@cross_origin(origins="*")  # seul endpoint appelable par un SDK cross-origin
+@cross_origin(origins="*", headers=["Content-Type", "X-API-Key"])  # seul endpoint appelable par un SDK cross-origin
 def receive_span():
     data = request.json
     # On redacte le PII connu AVANT stockage — pas seulement à la détection —
