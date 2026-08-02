@@ -200,8 +200,8 @@ def check_auth():
 
 # ── API ──
 @app.route("/span", methods=["POST"])
-@limiter.limit("60 per minute")
-@cross_origin(origins="*", headers=["Content-Type", "X-API-Key"])
+@limiter.limit("150 per minute")
+@cross_origin(origins="*", allow_headers=["Content-Type", "X-API-Key"])  # ✅ CORRECTION: allow_headers au lieu de headers
 def receive_span():
     data = request.json
     data["input_data"] = redact_pii(data.get("input_data", {}))
