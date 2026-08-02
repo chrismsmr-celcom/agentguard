@@ -29,6 +29,7 @@ if not DEEPSEEK_API_KEY:
 # ── INIT GUARD ──
 guard = AgentGuard(
     collector_url=COLLECTOR_URL,
+    api_key=os.environ.get("AGENTGUARD_API_KEY"),
     max_budget=5.0,
     block_on_high=True
 )
