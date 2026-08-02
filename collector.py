@@ -1,81 +1,184 @@
 """
-AgentGuard Collector — Reçoit les spans, stocke en SQLite, sert le dashboard.
-Compatible Render.com (utilise la variable d'environnement PORT).
+AgentGuard Collector v3 — PostgreSQL production + SQLite local fallback
 """
 
 import os
 import json
-import sqlite3
 import time
+import secrets
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template_string
-from flask_cors import CORS  # AJOUTER
+from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)  # AJOUTER — autorise toutes les origines
-DB_PATH = "/tmp/agentguard.db"  # /tmp est writable sur Render
+CORS(app, origins=["*"])
+
+# ── CONFIG ──
+DB_TYPE = os.environ.get("AGENTGUARD_DB_TYPE", "sqlite")  # "sqlite" ou "postgres"
+DATABASE_URL = os.environ.get("DATABASE_URL", "")  # Render injecte ça auto
+API_KEY = os.environ.get("AGENTGUARD_API_KEY", None)
+
+# Génère une clé si aucune n'est définie
+if not API_KEY:
+    API_KEY = "ag-" + secrets.token_urlsafe(32)
+    print(f"[AG] ⚠️  Aucune API_KEY. Temporaire: {API_KEY[:20]}...")
+
+# ── DATABASE SETUP ──
+import sqlite3
+
+DB_SQLITE_PATH = os.environ.get("AGENTGUARD_DB_PATH", "/tmp/agentguard.db")
+
+def get_pg_conn():
+    """Connexion PostgreSQL (production Render)."""
+    import psycopg2
+    import psycopg2.extras
+    conn = psycopg2.connect(DATABASE_URL, sslmode="require")
+    return conn
+
+def get_sqlite_conn():
+    """Connexion SQLite (local dev)."""
+    conn = sqlite3.connect(DB_SQLITE_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def get_db():
+    """Retourne la bonne connexion selon l'environnement."""
+    if DB_TYPE == "postgres" and DATABASE_URL:
+        return get_pg_conn()
+    return get_sqlite_conn()
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS spans (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            trace_id TEXT,
-            span_id TEXT,
-            span_type TEXT,
-            timestamp REAL,
-            latency_ms REAL,
-            input_data TEXT,
-            output_data TEXT,
-            security_checks TEXT,
-            blocked INTEGER,
-            block_reason TEXT,
-            cost_usd REAL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    c.execute("""
-        CREATE INDEX IF NOT EXISTS idx_trace ON spans(trace_id)
-    """)
-    conn.commit()
-    conn.close()
+    """Initialise les tables (PostgreSQL ou SQLite)."""
+    if DB_TYPE == "postgres" and DATABASE_URL:
+        conn = get_pg_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS spans (
+                id SERIAL PRIMARY KEY,
+                trace_id TEXT,
+                span_id TEXT,
+                span_type TEXT,
+                timestamp DOUBLE PRECISION,
+                latency_ms DOUBLE PRECISION,
+                input_data JSONB,
+                output_data JSONB,
+                security_checks JSONB,
+                blocked BOOLEAN DEFAULT FALSE,
+                block_reason TEXT,
+                cost_usd DOUBLE PRECISION DEFAULT 0.0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_trace_pg ON spans(trace_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_created_pg ON spans(created_at)")
+        conn.commit()
+        conn.close()
+        print("[AG] ✅ PostgreSQL initialisé")
+    else:
+        conn = sqlite3.connect(DB_SQLITE_PATH)
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS spans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trace_id TEXT,
+                span_id TEXT,
+                span_type TEXT,
+                timestamp REAL,
+                latency_ms REAL,
+                input_data TEXT,
+                output_data TEXT,
+                security_checks TEXT,
+                blocked INTEGER,
+                block_reason TEXT,
+                cost_usd REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_trace ON spans(trace_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_created ON spans(created_at)")
+        conn.commit()
+        conn.close()
+        print("[AG] ✅ SQLite initialisé")
 
+def dict_from_row(row, is_pg=False):
+    """Normalise une row en dict (PostgreSQL ou SQLite)."""
+    if is_pg:
+        return dict(row)
+    return dict(row)
+
+# ── AUTH ──
+def require_auth():
+    if not API_KEY:
+        return True
+    key = request.headers.get("X-API-Key", "")
+    if key != API_KEY:
+        key = request.args.get("api_key", "")
+    return key == API_KEY
+
+@app.before_request
+def check_auth():
+    if request.method == "GET":
+        return None
+    if request.endpoint == "receive_span" and not require_auth():
+        return jsonify({"error": "Unauthorized — X-API-Key header required"}), 401
+
+# ── API ──
 @app.route("/span", methods=["POST"])
 def receive_span():
     data = request.json
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""
-        INSERT INTO spans (trace_id, span_id, span_type, timestamp, latency_ms,
-                          input_data, output_data, security_checks, blocked,
-                          block_reason, cost_usd)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        data["trace_id"],
-        data["span_id"],
-        data["span_type"],
-        data["timestamp"],
-        data["latency_ms"],
-        json.dumps(data["input_data"]),
-        json.dumps(data["output_data"]),
-        json.dumps(data["security_checks"]),
-        1 if data["blocked"] else 0,
-        data.get("block_reason"),
-        data["cost_usd"]
-    ))
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+
+    if is_pg:
+        conn = get_pg_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO spans (trace_id, span_id, span_type, timestamp, latency_ms,
+                              input_data, output_data, security_checks, blocked,
+                              block_reason, cost_usd)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            data["trace_id"], data["span_id"], data["span_type"],
+            data["timestamp"], data["latency_ms"],
+            json.dumps(data["input_data"]),
+            json.dumps(data["output_data"]),
+            json.dumps(data["security_checks"]),
+            data["blocked"], data.get("block_reason"), data["cost_usd"]
+        ))
+    else:
+        conn = sqlite3.connect(DB_SQLITE_PATH)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO spans (trace_id, span_id, span_type, timestamp, latency_ms,
+                              input_data, output_data, security_checks, blocked,
+                              block_reason, cost_usd)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data["trace_id"], data["span_id"], data["span_type"],
+            data["timestamp"], data["latency_ms"],
+            json.dumps(data["input_data"]),
+            json.dumps(data["output_data"]),
+            json.dumps(data["security_checks"]),
+            1 if data["blocked"] else 0,
+            data.get("block_reason"), data["cost_usd"]
+        ))
+
     conn.commit()
     conn.close()
     return jsonify({"status": "ok"}), 201
 
 @app.route("/api/traces")
 def list_traces():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    c.execute("""
-        SELECT trace_id, COUNT(*) as span_count, 
-               SUM(blocked) as blocked_count,
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_db()
+
+    if is_pg:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    else:
+        cur = conn.cursor()
+
+    cur.execute("""
+        SELECT trace_id, COUNT(*) as span_count,
+               SUM(CASE WHEN blocked THEN 1 ELSE 0 END) as blocked_count,
                SUM(cost_usd) as total_cost,
                MAX(created_at) as last_seen
         FROM spans
@@ -83,17 +186,24 @@ def list_traces():
         ORDER BY last_seen DESC
         LIMIT 100
     """)
-    rows = [dict(r) for r in c.fetchall()]
+
+    rows = [dict_from_row(r, is_pg) for r in cur.fetchall()]
     conn.close()
     return jsonify(rows)
 
 @app.route("/api/traces/<trace_id>")
 def get_trace(trace_id):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    c.execute("SELECT * FROM spans WHERE trace_id = ? ORDER BY timestamp", (trace_id,))
-    rows = [dict(r) for r in c.fetchall()]
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_db()
+
+    if is_pg:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT * FROM spans WHERE trace_id = %s ORDER BY timestamp", (trace_id,))
+    else:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM spans WHERE trace_id = ? ORDER BY timestamp", (trace_id,))
+
+    rows = [dict_from_row(r, is_pg) for r in cur.fetchall()]
     for r in rows:
         r["input_data"] = json.loads(r["input_data"])
         r["output_data"] = json.loads(r["output_data"])
@@ -104,41 +214,72 @@ def get_trace(trace_id):
 
 @app.route("/api/metrics")
 def get_metrics():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_db()
 
-    c.execute("SELECT COUNT(*) FROM spans")
-    total_spans = c.fetchone()[0]
+    if is_pg:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    else:
+        cur = conn.cursor()
 
-    c.execute("SELECT COUNT(DISTINCT trace_id) FROM spans")
-    total_traces = c.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM spans")
+    total_spans = cur.fetchone()[0]
 
-    c.execute("SELECT SUM(blocked) FROM spans")
-    blocked = c.fetchone()[0] or 0
+    cur.execute("SELECT COUNT(DISTINCT trace_id) FROM spans")
+    total_traces = cur.fetchone()[0]
 
-    c.execute("SELECT SUM(cost_usd) FROM spans")
-    total_cost = c.fetchone()[0] or 0
+    cur.execute("SELECT SUM(CASE WHEN blocked THEN 1 ELSE 0 END) FROM spans")
+    blocked = cur.fetchone()[0] or 0
 
-    c.execute("""
-        SELECT json_extract(security_checks, '$') as checks
-        FROM spans
-    """)
+    cur.execute("SELECT SUM(cost_usd) FROM spans")
+    total_cost = cur.fetchone()[0] or 0
+
+    # Risques
+    if is_pg:
+        cur.execute("""
+            SELECT jsonb_array_elements(security_checks) as check
+            FROM spans
+            WHERE created_at > NOW() - INTERVAL '1 day'
+        """)
+    else:
+        cur.execute("""
+            SELECT json_extract(security_checks, '$') as checks
+            FROM spans
+            WHERE created_at > datetime('now', '-1 day')
+        """)
+
     risk_counts = {"low": 0, "medium": 0, "high": 0, "critical": 0}
-    for row in c.fetchall():
-        checks = json.loads(row[0])
-        for check in checks:
-            level = check.get("risk_level", "low")
-            risk_counts[level] = risk_counts.get(level, 0) + 1
+    for row in cur.fetchall():
+        if is_pg:
+            check = row[0]
+        else:
+            checks = json.loads(row[0])
+            for check in checks:
+                level = check.get("risk_level", "low")
+                risk_counts[level] = risk_counts.get(level, 0) + 1
+
+    # Top threats
+    cur.execute("""
+        SELECT block_reason, COUNT(*) as count
+        FROM spans
+        WHERE blocked = TRUE
+        GROUP BY block_reason
+        ORDER BY count DESC
+        LIMIT 5
+    """)
+    top_threats = [{"reason": r[0], "count": r[1]} for r in cur.fetchall()]
 
     conn.close()
     return jsonify({
         "total_spans": total_spans,
         "total_traces": total_traces,
         "blocked_operations": blocked,
-        "total_cost_usd": round(total_cost, 6),
-        "risk_distribution": risk_counts
+        "total_cost_usd": round(float(total_cost or 0), 6),
+        "risk_distribution": risk_counts,
+        "top_threats": top_threats
     })
 
+# ── DASHBOARD (le même sci-fi) ──
 DASHBOARD_HTML = """
 <!DOCTYPE html>
 <html lang="fr">
@@ -1192,33 +1333,46 @@ def dashboard():
 
 @app.route("/trace/<trace_id>")
 def trace_detail(trace_id):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    c.execute("SELECT * FROM spans WHERE trace_id = ? ORDER BY timestamp", (trace_id,))
-    rows = c.fetchall()
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_db()
+    if is_pg:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT * FROM spans WHERE trace_id = %s ORDER BY timestamp", (trace_id,))
+    else:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM spans WHERE trace_id = ? ORDER BY timestamp", (trace_id,))
+    rows = [dict_from_row(r, is_pg) for r in cur.fetchall()]
+    for r in rows:
+        r["input_data"] = json.loads(r["input_data"])
+        r["output_data"] = json.loads(r["output_data"])
+        r["security_checks"] = json.loads(r["security_checks"])
+        r["blocked"] = bool(r["blocked"])
     conn.close()
 
     html = """
     <!DOCTYPE html>
     <html>
     <head>
+        <meta charset="UTF-8">
         <title>Trace Detail</title>
         <style>
-            body { font-family: sans-serif; background: #0f172a; color: #e2e8f0; padding: 20px; }
-            .span-card { background: #1e293b; padding: 20px; margin-bottom: 15px; border-radius: 12px; border-left: 4px solid #38bdf8; }
-            .span-card.blocked { border-left-color: #ef4444; }
-            .span-type { color: #38bdf8; font-weight: 700; text-transform: uppercase; font-size: 0.8rem; }
-            .check { padding: 8px 12px; margin: 5px 0; border-radius: 6px; font-size: 0.9rem; }
-            .check-pass { background: #22c55e20; border: 1px solid #22c55e; }
-            .check-fail { background: #ef444420; border: 1px solid #ef4444; }
-            pre { background: #0f172a; padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 0.85rem; }
-            .back { color: #38bdf8; text-decoration: none; margin-bottom: 20px; display: inline-block; }
+            body { font-family: -apple-system, sans-serif; background: #0b1121; color: #e2e8f0; padding: 24px; }
+            .back { color: #38bdf8; text-decoration: none; font-size: 0.9rem; margin-bottom: 20px; display: inline-block; }
+            h1 { font-size: 1.3rem; margin-bottom: 20px; }
+            .span-card { background: #1e293b; border: 1px solid #334155; border-radius: 14px; padding: 20px; margin-bottom: 16px; border-left: 4px solid #38bdf8; }
+            .span-card.blocked { border-left-color: #ef4444; background: #1e293b; }
+            .span-type { color: #38bdf8; font-weight: 700; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }
+            .meta { color: #64748b; font-size: 0.82rem; margin-top: 4px; }
+            .check { padding: 10px 14px; margin: 6px 0; border-radius: 8px; font-size: 0.88rem; }
+            .check-pass { background: #22c55e15; border: 1px solid #22c55e40; }
+            .check-fail { background: #ef444415; border: 1px solid #ef444440; }
+            pre { background: #0f172a; padding: 14px; border-radius: 10px; overflow-x: auto; font-size: 0.82rem; line-height: 1.5; border: 1px solid #334155; }
+            h3 { font-size: 0.85rem; color: #94a3b8; text-transform: uppercase; margin: 16px 0 8px; letter-spacing: 0.03em; }
         </style>
     </head>
     <body>
-        <a class="back" href="/">← Back to Dashboard</a>
-        <h1>Trace: """ + trace_id[:16] + """...</h1>
+        <a class="back" href="/">← Retour au Dashboard</a>
+        <h1>Trace <code style="color:#94a3b8">""" + trace_id[:20] + """...</code></h1>
     """
     for row in rows:
         checks = json.loads(row["security_checks"])
@@ -1226,19 +1380,29 @@ def trace_detail(trace_id):
         html += f"""
         <div class="span-card {'blocked' if blocked else ''}">
             <div class="span-type">{row["span_type"]} — {row["latency_ms"]:.0f}ms — ${row["cost_usd"]:.6f}</div>
-            <h3 style="margin: 10px 0;">Input</h3>
-            <pre>{json.dumps(json.loads(row["input_data"]), indent=2)}</pre>
-            <h3 style="margin: 10px 0;">Output</h3>
-            <pre>{json.dumps(json.loads(row["output_data"]), indent=2)}</pre>
-            <h3 style="margin: 10px 0;">Security Checks</h3>
-            {''.join(f'<div class="check check-{"pass" if c["passed"] else "fail"}">{"✅" if c["passed"] else "🚨"} {c["check_name"]} — {c["risk_level"]} — {c["details"]}</div>' for c in checks)}
+            <div class="meta">{row["created_at"]}</div>
+            <h3>📥 Input</h3>
+            <pre>{json.dumps(json.loads(row["input_data"]), indent=2, ensure_ascii=False)}</pre>
+            <h3>📤 Output</h3>
+            <pre>{json.dumps(json.loads(row["output_data"]), indent=2, ensure_ascii=False)}</pre>
+            <h3>🛡️ Security Checks ({len(checks)})</h3>
+            {''.join(f'<div class="check check-{"pass" if c["passed"] else "fail"}">{"✅" if c["passed"] else "🚨"} <strong>{c["check_name"]}</strong> — <span style="color:{"#22c55e" if c["risk_level"]=="low" else "#f59e0b" if c["risk_level"]=="medium" else "#ef4444"}">{c["risk_level"]}</span><br><span style="color:#94a3b8;font-size:0.8rem">{c["details"]}</span></div>' for c in checks)}
         </div>
         """
     html += "</body></html>"
     return html
 
+@app.route("/api/key")
+def show_key():
+    admin_secret = request.args.get("admin")
+    if admin_secret == os.environ.get("AGENTGUARD_ADMIN_SECRET", "changeme"):
+        return jsonify({"api_key": API_KEY})
+    return jsonify({"error": "Admin secret required"}), 403
+
 if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("PORT", 8080))
-    print(f"🛡️ AgentGuard Collector running on http://0.0.0.0:{port}")
+    print(f"🛡️ AgentGuard Collector v3 running on http://0.0.0.0:{port}")
+    print(f"   DB: {DB_TYPE}")
+    print(f"   API Key: {API_KEY[:10]}...")
     app.run(host="0.0.0.0", port=port, debug=False)
