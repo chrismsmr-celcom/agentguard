@@ -1,8 +1,10 @@
 """
-WSGI entry point for Render / Gunicorn.
-Initialise la DB au démarrage du worker.
+WSGI entry point for Gunicorn
 """
 from collector import app, init_db
 
-# Initialise la base de données au premier import
+# Initialise la DB au démarrage
 init_db()
+
+if __name__ == "__main__":
+    app.run()
