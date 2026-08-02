@@ -8,6 +8,20 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: AGENTGUARD_DB_TYPE
+        value: postgres
       - key: AGENTGUARD_ENV
         value: production
-    healthCheckPath: /api/metrics
+    envVarGroups:
+      - name: agentguard-secrets
+        envVars:
+          - key: AGENTGUARD_API_KEY
+            generateValue: true
+          - key: AGENTGUARD_ADMIN_SECRET
+            generateValue: true
+
+databases:
+  - name: agentguard-db
+    databaseName: agentguard
+    user: agentguard
+    plan: free
