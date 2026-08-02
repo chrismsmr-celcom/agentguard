@@ -1,23 +1,54 @@
-# 🛡️ AgentGuard — MVP Observabilité + Sécurité pour Agents IA
+# 🛡️ AgentGuard — Observabilité + Sécurité pour Agents IA
 
-> Un seul fichier SDK. Un seul fichier Collector. Zero bullshit.
+> Un seul fichier SDK. Un seul fichier Collector. Zero bullshit. Détection 3-couches (Regex + ML + LLM Judge).
 
-## 🚀 Démarrage en 2 minutes (Python direct)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Status: Production Ready](https://img.shields.io/badge/status-production_ready-green.svg)](https://github.com/chrismsmr-celcom/agentguard)
+
+---
+
+## 📋 Table des matières
+
+- [🚀 Démarrage rapide](#-démarrage-rapide)
+- [🐳 Docker](#-docker)
+- [🔌 Intégrations](#-intégrations)
+- [🛡️ Sécurité 3-couches](#️-sécurité-3-couches)
+- [📁 Structure](#-structure)
+- [🔧 Configuration](#-configuration)
+- [🧠 Modèle ML](#-modèle-ml)
+- [🎯 LLM Judge](#-llm-judge)
+- [📊 Dashboard](#-dashboard)
+- [🎯 Roadmap](#-roadmap)
+- [📜 License](#-license)
+
+---
+
+## 🚀 Démarrage rapide
+
+### Prérequis
+- Python 3.11+
+- pip
+
+### Installation en 2 minutes
 
 ```bash
-# 1. Clone / copie les fichiers
+# 1. Clone le repo
+git clone https://github.com/chrismsmr-celcom/agentguard.git
 cd agentguard
 
-# 2. Installe les dépendances
+# 2. Installe les dépendances (version légère sans ML)
 pip install -r requirements.txt
 
-# 3. Démarre le collector (terminal 1)
+# 3. (Optionnel) Pour le support ML
+pip install -r requirements-ml.txt  # transformeurs + torch
+
+# 4. Démarre le collector (terminal 1)
 python collector.py
 # → http://localhost:8080
 
-# 4. Lance l'agent de démo (terminal 2)
+# 5. Lance l'agent de démo (terminal 2)
 python example_agent.py
-```
 
 ## 🐳 Ou en une commande avec Docker
 
