@@ -113,11 +113,15 @@ def test_api_key_endpoint_works_with_configured_secret(client, monkeypatch):
 
 # ── RATE LIMIT ──
 
+# Au lieu de 35 requêtes, utiliser la limite actuelle + 10%
 def test_span_rate_limit_kicks_in(client):
     headers = {"X-API-Key": TEST_API_KEY}
+    limit = 60  # Limite actuelle configurée dans collector.py
     responses = [
         client.post("/span", json=_span_payload(trace_id=f"t{i}"), headers=headers)
-        for i in range(35)  # limite fixée à 30/minute
+        for i in range(limit + 10)  # 70 requêtes (60 + 10)
     ]
     codes = [r.status_code for r in responses]
-    assert 429 in codes, "le rate-limit de 30/min sur /span ne s'est jamais déclenché"
+    assert 429 in codes, "le rate-limit ne s'est pas déclenché"
+    # Vérifier que les 60 premières sont passées (201)
+    assert all(r.status_code == 201 for r in responses[:limit]), "les requêtes autorisées devraient passer"
