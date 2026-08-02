@@ -1,6 +1,7 @@
 """
 AgentGuard Collector v4 — PostgreSQL production + SQLite local fallback
 Support de la détection multi-couches (ML + LLM Judge)
+Stats avancées et badges de détection dans le dashboard
 """
 
 import os
@@ -107,16 +108,18 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 detection_layer TEXT,
                 ml_score DOUBLE PRECISION,
-                llm_score DOUBLE PRECISION
+                llm_score DOUBLE PRECISION,
+                llm_reason TEXT
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_trace_pg ON spans(trace_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_created_pg ON spans(created_at)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_pg ON spans(blocked)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_detection_layer_pg ON spans(detection_layer)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_score_pg ON spans(llm_score)")
         conn.commit()
         conn.close()
-        print("[AG] ✅ PostgreSQL initialisé v4")
+        print("[AG] ✅ PostgreSQL initialisé v4.1")
     else:
         conn = sqlite3.connect(DB_SQLITE_PATH)
         c = conn.cursor()
@@ -137,16 +140,18 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 detection_layer TEXT,
                 ml_score REAL,
-                llm_score REAL
+                llm_score REAL,
+                llm_reason TEXT
             )
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_trace ON spans(trace_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_created ON spans(created_at)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_blocked ON spans(blocked)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_detection_layer ON spans(detection_layer)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_llm_score ON spans(llm_score)")
         conn.commit()
         conn.close()
-        print("[AG] ✅ SQLite initialisé v4")
+        print("[AG] ✅ SQLite initialisé v4.1")
 
 def dict_from_row(row, is_pg=False):
     """Normalise une row en dict."""
@@ -208,19 +213,22 @@ def receive_span():
     detection_layer = None
     ml_score = None
     llm_score = None
+    llm_reason = None
     
     if "metadata" in data:
-        detection_layer = data.get("metadata", {}).get("layer")
+        detection_layer = data.get("metadata", {}).get("detection_layer") or data.get("metadata", {}).get("layer")
         ml_score = data.get("metadata", {}).get("ml_score")
         llm_score = data.get("metadata", {}).get("llm_score")
+        llm_reason = data.get("metadata", {}).get("llm_reason")
     
     # Si la détection est dans les security_checks, on l'extrait aussi
     if not detection_layer and data.get("security_checks"):
         for check in data["security_checks"]:
-            if check.get("check_name") == "prompt_injection":
+            if check.get("check_name") in ["prompt_injection", "llm_judge"]:
                 detection_layer = check.get("metadata", {}).get("layer")
                 ml_score = check.get("metadata", {}).get("ml_score")
                 llm_score = check.get("metadata", {}).get("llm_score")
+                llm_reason = check.get("details")
                 break
 
     if is_pg:
@@ -230,8 +238,8 @@ def receive_span():
             INSERT INTO spans (
                 trace_id, span_id, span_type, timestamp, latency_ms,
                 input_data, output_data, security_checks, blocked,
-                block_reason, cost_usd, detection_layer, ml_score, llm_score
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                block_reason, cost_usd, detection_layer, ml_score, llm_score, llm_reason
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             data["trace_id"], data["span_id"], data["span_type"],
             data["timestamp"], data["latency_ms"],
@@ -239,7 +247,7 @@ def receive_span():
             json.dumps(data["output_data"]),
             json.dumps(data["security_checks"]),
             data["blocked"], data.get("block_reason"), data["cost_usd"],
-            detection_layer, ml_score, llm_score
+            detection_layer, ml_score, llm_score, llm_reason
         ))
     else:
         conn = sqlite3.connect(DB_SQLITE_PATH)
@@ -248,8 +256,8 @@ def receive_span():
             INSERT INTO spans (
                 trace_id, span_id, span_type, timestamp, latency_ms,
                 input_data, output_data, security_checks, blocked,
-                block_reason, cost_usd, detection_layer, ml_score, llm_score
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                block_reason, cost_usd, detection_layer, ml_score, llm_score, llm_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data["trace_id"], data["span_id"], data["span_type"],
             data["timestamp"], data["latency_ms"],
@@ -258,7 +266,7 @@ def receive_span():
             json.dumps(data["security_checks"]),
             1 if data["blocked"] else 0,
             data.get("block_reason"), data["cost_usd"],
-            detection_layer, ml_score, llm_score
+            detection_layer, ml_score, llm_score, llm_reason
         ))
 
     conn.commit()
@@ -362,6 +370,17 @@ def get_metrics():
         cur.execute("SELECT AVG(ml_score) FROM spans WHERE ml_score IS NOT NULL")
     avg_ml_score = cur.fetchone()[0] or 0
 
+    # Score LLM moyen
+    if is_pg:
+        cur.execute("SELECT AVG(llm_score) FROM spans WHERE llm_score IS NOT NULL")
+    else:
+        cur.execute("SELECT AVG(llm_score) FROM spans WHERE llm_score IS NOT NULL")
+    avg_llm_score = cur.fetchone()[0] or 0
+
+    # Nombre de spans LLM Judge
+    cur.execute("SELECT COUNT(*) FROM spans WHERE detection_layer = 'llm_judge'")
+    llm_count = cur.fetchone()[0] or 0
+
     # Risques
     if is_pg:
         cur.execute("""
@@ -405,10 +424,12 @@ def get_metrics():
         "total_cost_usd": round(float(total_cost or 0), 6),
         "avg_latency_ms": round(float(avg_latency or 0), 2),
         "avg_ml_score": round(float(avg_ml_score or 0), 3),
+        "avg_llm_score": round(float(avg_llm_score or 0), 3),
+        "llm_judge_count": llm_count,
         "risk_distribution": risk_counts,
         "top_threats": top_threats,
         "detection_layers": detection_stats,
-        "version": "v4.0.0"
+        "version": "v4.1.0"
     })
 
 @app.route("/api/detection/stats")
@@ -469,12 +490,80 @@ def get_detection_stats():
     """)
     ml_score_distribution = [{"range": r[0], "count": r[1]} for r in cur.fetchall()]
 
+    # Distribution des scores LLM
+    cur.execute("""
+        SELECT
+            CASE
+                WHEN llm_score >= 0.9 THEN 'high_risk'
+                WHEN llm_score >= 0.7 THEN 'medium_risk'
+                ELSE 'low_risk'
+            END as risk_category,
+            COUNT(*) as count
+        FROM spans
+        WHERE llm_score IS NOT NULL
+        GROUP BY risk_category
+    """)
+    llm_score_distribution = [{"category": r[0], "count": r[1]} for r in cur.fetchall()]
+
     conn.close()
     return jsonify({
         "layer_distribution": layer_distribution,
         "layer_accuracy": layer_accuracy,
         "ml_score_distribution": ml_score_distribution,
+        "llm_score_distribution": llm_score_distribution,
         "total_analyzed": sum(l["count"] for l in layer_distribution) if layer_distribution else 0
+    })
+
+@app.route("/api/llm/stats")
+@limiter.limit("10 per minute")
+def get_llm_stats():
+    """Statistiques spécifiques au LLM Judge."""
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_db()
+
+    if is_pg:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    else:
+        cur = conn.cursor()
+
+    # Nombre de spans analysées par LLM
+    cur.execute("""
+        SELECT COUNT(*) as total_llm_analysis
+        FROM spans
+        WHERE detection_layer = 'llm_judge'
+    """)
+    total_llm = cur.fetchone()[0]
+
+    # Taux de blocage du LLM
+    cur.execute("""
+        SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN blocked THEN 1 ELSE 0 END) as blocked
+        FROM spans
+        WHERE detection_layer = 'llm_judge'
+    """)
+    row = cur.fetchone()
+    block_rate = round((row[1] / row[0] * 100), 2) if row[0] > 0 else 0
+
+    # Top raisons LLM
+    cur.execute("""
+        SELECT llm_reason, COUNT(*) as count
+        FROM spans
+        WHERE llm_reason IS NOT NULL AND detection_layer = 'llm_judge'
+        GROUP BY llm_reason
+        ORDER BY count DESC
+        LIMIT 5
+    """)
+    top_reasons = [{"reason": r[0], "count": r[1]} for r in cur.fetchall()] if is_pg else \
+                  [{"reason": r[0], "count": r[1]} for r in cur.fetchall()]
+
+    conn.close()
+    
+    return jsonify({
+        "total_analyzed": total_llm,
+        "block_rate": block_rate,
+        "top_reasons": top_reasons,
+        "status": "operational" if total_llm > 0 else "idle"
     })
 
 # ── DASHBOARD (version améliorée) ──
@@ -484,7 +573,7 @@ DASHBOARD_HTML = """
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AGENTGUARD // SECURE TERMINAL v4.0</title>
+<title>AGENTGUARD // SECURE TERMINAL v4.1</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700;800&family=Rajdhani:wght@300;500;600;700&display=swap');
@@ -522,7 +611,6 @@ body {
   min-height: 100vh;
 }
 
-/* Scanline effect */
 body::before {
   content: '';
   position: fixed;
@@ -538,7 +626,6 @@ body::before {
   z-index: 9999;
 }
 
-/* Grid background */
 .bg-grid {
   position: fixed;
   top:0; left:0; right:0; bottom:0;
@@ -550,7 +637,6 @@ body::before {
   z-index: 0;
 }
 
-/* HEADER */
 .header {
   position: relative;
   z-index: 10;
@@ -563,73 +649,19 @@ body::before {
   backdrop-filter: blur(10px);
 }
 
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.logo {
-  font-family: var(--font-display);
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: 4px;
-  color: var(--cyan);
-  text-shadow: 0 0 20px rgba(0,240,255,0.4);
-}
-
+.header-left { display: flex; align-items: center; gap: 16px; }
+.logo { font-family: var(--font-display); font-size: 22px; font-weight: 700; letter-spacing: 4px; color: var(--cyan); text-shadow: 0 0 20px rgba(0,240,255,0.4); }
 .logo span { color: var(--text-dim); font-weight: 300; }
 .logo .version { font-size: 12px; color: var(--text-dark); margin-left: 8px; }
 
-.badge-class {
-  font-size: 9px;
-  letter-spacing: 2px;
-  padding: 3px 10px;
-  border: 1px solid var(--red);
-  color: var(--red);
-  background: rgba(255,42,109,0.08);
-  font-family: var(--font-display);
-  font-weight: 600;
-}
+.badge-class { font-size: 9px; letter-spacing: 2px; padding: 3px 10px; border: 1px solid var(--red); color: var(--red); background: rgba(255,42,109,0.08); font-family: var(--font-display); font-weight: 600; }
 
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
+.header-right { display: flex; align-items: center; gap: 20px; }
+.status-indicator { display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 2px; color: var(--green); }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green), 0 0 20px var(--green-dim); animation: pulse-dot 2s ease-in-out infinite; }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.8); } }
+.clock { font-family: var(--font-display); font-size: 18px; font-weight: 600; color: var(--cyan); letter-spacing: 2px; }
 
-.status-indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 10px;
-  letter-spacing: 2px;
-  color: var(--green);
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--green);
-  box-shadow: 0 0 10px var(--green), 0 0 20px var(--green-dim);
-  animation: pulse-dot 2s ease-in-out infinite;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.8); }
-}
-
-.clock {
-  font-family: var(--font-display);
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--cyan);
-  letter-spacing: 2px;
-}
-
-/* MAIN GRID */
 .main-grid {
   position: relative;
   z-index: 5;
@@ -641,344 +673,101 @@ body::before {
   height: calc(100vh - 60px);
 }
 
-/* PANELS */
-.panel {
-  background: var(--bg-panel);
-  border: 1px solid var(--border-dim);
-  border-radius: 4px;
-  position: relative;
-  overflow: hidden;
-}
+.panel { background: var(--bg-panel); border: 1px solid var(--border-dim); border-radius: 4px; position: relative; overflow: hidden; }
+.panel::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--cyan-dim), transparent); opacity: 0.5; }
+.panel-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border-dim); font-family: var(--font-display); font-size: 11px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: var(--cyan); }
+.panel-header .panel-id { color: var(--text-dark); font-size: 9px; font-family: var(--font-mono); }
 
-.panel::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--cyan-dim), transparent);
-  opacity: 0.5;
-}
-
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border-dim);
-  font-family: var(--font-display);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: var(--cyan);
-}
-
-.panel-header .panel-id {
-  color: var(--text-dark);
-  font-size: 9px;
-  font-family: var(--font-mono);
-}
-
-/* CORNER DECORATIONS */
-.corner {
-  position: absolute;
-  width: 8px;
-  height: 8px;
-  border: 1px solid var(--cyan-dim);
-  opacity: 0.6;
-}
+.corner { position: absolute; width: 8px; height: 8px; border: 1px solid var(--cyan-dim); opacity: 0.6; }
 .corner-tl { top: 4px; left: 4px; border-right: none; border-bottom: none; }
 .corner-tr { top: 4px; right: 4px; border-left: none; border-bottom: none; }
 .corner-bl { bottom: 4px; left: 4px; border-right: none; border-top: none; }
 .corner-br { bottom: 4px; right: 4px; border-left: none; border-top: none; }
 
-/* LEFT COLUMN */
-.left-col {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
+.left-col { display: flex; flex-direction: column; gap: 12px; }
+.center-col { display: flex; flex-direction: column; gap: 12px; }
+.right-col { display: flex; flex-direction: column; gap: 12px; }
 
-/* THREAT LEVEL */
-.threat-level {
-  padding: 16px;
-  text-align: center;
-}
-
-.threat-label {
-  font-family: var(--font-display);
-  font-size: 10px;
-  letter-spacing: 3px;
-  color: var(--text-dim);
-  margin-bottom: 8px;
-}
-
-.threat-value {
-  font-family: var(--font-display);
-  font-size: 42px;
-  font-weight: 800;
-  color: var(--green);
-  text-shadow: 0 0 30px var(--green-dim);
-  line-height: 1;
-}
-
+.threat-level { padding: 16px; text-align: center; }
+.threat-label { font-family: var(--font-display); font-size: 10px; letter-spacing: 3px; color: var(--text-dim); margin-bottom: 8px; }
+.threat-value { font-family: var(--font-display); font-size: 42px; font-weight: 800; color: var(--green); text-shadow: 0 0 30px var(--green-dim); line-height: 1; }
 .threat-value.warning { color: var(--orange); text-shadow: 0 0 30px rgba(255,159,28,0.4); }
 .threat-value.critical { color: var(--red); text-shadow: 0 0 30px var(--red-dim); animation: flicker 1.5s infinite; }
+@keyframes flicker { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } 75% { opacity: 0.9; } }
+.threat-sub { font-size: 10px; color: var(--text-dim); margin-top: 6px; letter-spacing: 1px; }
 
-@keyframes flicker {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-  75% { opacity: 0.9; }
-}
-
-.threat-sub {
-  font-size: 10px;
-  color: var(--text-dim);
-  margin-top: 6px;
-  letter-spacing: 1px;
-}
-
-/* KPI LIST */
-.kpi-list {
-  padding: 8px 0;
-}
-
-.kpi-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  border-bottom: 1px solid rgba(26,35,66,0.5);
-  transition: background 0.2s;
-}
+.kpi-list { padding: 8px 0; }
+.kpi-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid rgba(26,35,66,0.5); transition: background 0.2s; }
 .kpi-item:hover { background: var(--bg-panel-hover); }
 .kpi-item:last-child { border-bottom: none; }
-
-.kpi-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 10px;
-  color: var(--text-dim);
-  letter-spacing: 1px;
-}
-
+.kpi-label { display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--text-dim); letter-spacing: 1px; }
 .kpi-icon { font-size: 14px; }
-
-.kpi-value {
-  font-family: var(--font-display);
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
+.kpi-value { font-family: var(--font-display); font-size: 16px; font-weight: 700; color: var(--text-primary); }
 .kpi-value.alert { color: var(--red); text-shadow: 0 0 10px var(--red-dim); }
 .kpi-value.warn { color: var(--orange); }
 .kpi-value.ok { color: var(--green); }
 
-/* CENTER COLUMN */
-.center-col {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* CHART CONTAINER */
-.chart-container {
-  position: relative;
-  padding: 14px;
-  flex: 1;
-  min-height: 0;
-}
-
-.chart-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
-  gap: 12px;
-  height: 100%;
-}
-
-.chart-box {
-  background: rgba(10,15,30,0.5);
-  border: 1px solid var(--border-dim);
-  border-radius: 4px;
-  padding: 10px;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-}
-
-.chart-box .chart-title {
-  font-family: var(--font-display);
-  font-size: 10px;
-  letter-spacing: 2px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  margin-bottom: 8px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.chart-box .chart-title .live-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--green);
-  animation: pulse-dot 2s infinite;
-}
-
+.chart-container { position: relative; padding: 14px; flex: 1; min-height: 0; }
+.chart-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 12px; height: 100%; }
+.chart-box { background: rgba(10,15,30,0.5); border: 1px solid var(--border-dim); border-radius: 4px; padding: 10px; position: relative; display: flex; flex-direction: column; }
+.chart-box .chart-title { font-family: var(--font-display); font-size: 10px; letter-spacing: 2px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+.chart-box .chart-title .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse-dot 2s infinite; }
 .chart-box .chart-title .live-dot.alert { background: var(--red); }
+.chart-wrapper { flex: 1; min-height: 0; position: relative; }
 
-.chart-wrapper {
-  flex: 1;
-  min-height: 0;
-  position: relative;
-}
-
-/* RIGHT COLUMN */
-.right-col {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* LOG TERMINAL */
-.terminal {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  font-family: var(--font-mono);
-  font-size: 10px;
-}
-
-.terminal-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 10px 14px;
-  line-height: 1.8;
-}
-
-.terminal-line {
-  display: flex;
-  gap: 10px;
-  opacity: 0;
-  animation: fade-in 0.3s forwards;
-}
-
-@keyframes fade-in {
-  to { opacity: 1; }
-}
-
+.terminal { flex: 1; display: flex; flex-direction: column; font-family: var(--font-mono); font-size: 10px; }
+.terminal-body { flex: 1; overflow-y: auto; padding: 10px 14px; line-height: 1.8; }
+.terminal-line { display: flex; gap: 10px; opacity: 0; animation: fade-in 0.3s forwards; }
+@keyframes fade-in { to { opacity: 1; } }
 .terminal-time { color: var(--text-dark); min-width: 70px; }
-.terminal-tag { 
-  min-width: 60px; 
-  font-weight: 600; 
-  font-size: 9px;
-  letter-spacing: 1px;
-}
+.terminal-tag { min-width: 60px; font-weight: 600; font-size: 9px; letter-spacing: 1px; }
 .terminal-tag.info { color: var(--cyan); }
 .terminal-tag.warn { color: var(--orange); }
 .terminal-tag.alert { color: var(--red); }
 .terminal-tag.ok { color: var(--green); }
 .terminal-tag.ml { color: var(--purple); }
+.terminal-tag.llm { color: var(--yellow); }
 .terminal-msg { color: var(--text-dim); }
 .terminal-msg.alert { color: var(--red); }
 
-/* GAUGE STYLES */
-.gauge-container {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px;
-}
+.gauge-container { display: flex; align-items: center; justify-content: center; padding: 10px; }
+.gauge-value { position: absolute; text-align: center; }
+.gauge-value .num { font-family: var(--font-display); font-size: 28px; font-weight: 800; color: var(--cyan); }
+.gauge-value .label { font-size: 9px; color: var(--text-dim); letter-spacing: 2px; }
 
-.gauge-value {
-  position: absolute;
-  text-align: center;
-}
-.gauge-value .num {
-  font-family: var(--font-display);
-  font-size: 28px;
-  font-weight: 800;
-  color: var(--cyan);
-}
-.gauge-value .label {
-  font-size: 9px;
-  color: var(--text-dim);
-  letter-spacing: 2px;
-}
+.radar-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 60%; height: 60%; border: 1px solid rgba(0,240,255,0.1); border-radius: 50%; pointer-events: none; }
+.radar-overlay::before { content: ''; position: absolute; top: 25%; left: 25%; right: 25%; bottom: 25%; border: 1px solid rgba(0,240,255,0.08); border-radius: 50%; }
 
-/* RADAR OVERLAY */
-.radar-overlay {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 60%;
-  height: 60%;
-  border: 1px solid rgba(0,240,255,0.1);
-  border-radius: 50%;
-  pointer-events: none;
-}
-.radar-overlay::before {
-  content: '';
-  position: absolute;
-  top: 25%; left: 25%; right: 25%; bottom: 25%;
-  border: 1px solid rgba(0,240,255,0.08);
-  border-radius: 50%;
-}
-
-/* SCROLLBAR */
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: var(--bg-primary); }
 ::-webkit-scrollbar-thumb { background: var(--border-dim); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-glow); }
 
-/* RESPONSIVE */
-@media (max-width: 1200px) {
-  .main-grid { grid-template-columns: 240px 1fr 280px; }
-}
-@media (max-width: 900px) {
-  .main-grid { grid-template-columns: 1fr; grid-template-rows: auto; height: auto; }
-  .chart-grid { grid-template-columns: 1fr; }
-}
+@media (max-width: 1200px) { .main-grid { grid-template-columns: 240px 1fr 280px; } }
+@media (max-width: 900px) { .main-grid { grid-template-columns: 1fr; grid-template-rows: auto; height: auto; } .chart-grid { grid-template-columns: 1fr; } }
 </style>
 <base target="_blank">
 </head>
 <body>
 <div class="bg-grid"></div>
 
-<!-- HEADER -->
 <div class="header">
   <div class="header-left">
-    <div class="logo">AGENT<span>GUARD</span><span class="version">v4.0</span></div>
+    <div class="logo">AGENT<span>GUARD</span><span class="version">v4.1</span></div>
     <div class="badge-class">CLASSIFIED // LEVEL 4</div>
   </div>
   <div class="header-right">
-    <div class="status-indicator">
-      <div class="status-dot"></div>
-      <span>SYSTEM OPERATIONAL</span>
-    </div>
+    <div class="status-indicator"><div class="status-dot"></div><span>SYSTEM OPERATIONAL</span></div>
     <div class="clock" id="clock">00:00:00</div>
   </div>
 </div>
 
-<!-- MAIN GRID -->
 <div class="main-grid">
-
-  <!-- LEFT COLUMN -->
   <div class="left-col">
-
-    <!-- THREAT LEVEL -->
     <div class="panel">
       <div class="corner corner-tl"></div><div class="corner corner-tr"></div>
       <div class="corner corner-bl"></div><div class="corner corner-br"></div>
-      <div class="panel-header">
-        <span>Niveau de Menace</span>
-        <span class="panel-id">SYS-THR-01</span>
-      </div>
+      <div class="panel-header"><span>Niveau de Menace</span><span class="panel-id">SYS-THR-01</span></div>
       <div class="threat-level">
         <div class="threat-label">GLOBAL THREAT INDEX</div>
         <div class="threat-value" id="threatValue">LOW</div>
@@ -986,195 +775,81 @@ body::before {
       </div>
     </div>
 
-    <!-- KPIs -->
     <div class="panel" style="flex:1;">
       <div class="corner corner-tl"></div><div class="corner corner-tr"></div>
       <div class="corner corner-bl"></div><div class="corner corner-br"></div>
-      <div class="panel-header">
-        <span>Métriques Clés</span>
-        <span class="panel-id">KPI-MON-02</span>
-      </div>
+      <div class="panel-header"><span>Métriques Clés</span><span class="panel-id">KPI-MON-02</span></div>
       <div class="kpi-list" id="kpiList">
-        <div class="kpi-item">
-          <div class="kpi-label"><span class="kpi-icon">📡</span> SPANS TOTALES</div>
-          <div class="kpi-value" id="kpiSpans">0</div>
-        </div>
-        <div class="kpi-item">
-          <div class="kpi-label"><span class="kpi-icon">🛡️</span> BLOQUÉES</div>
-          <div class="kpi-value alert" id="kpiBlocked">0</div>
-        </div>
-        <div class="kpi-item">
-          <div class="kpi-label"><span class="kpi-icon">🧠</span> DÉTECTION ML</div>
-          <div class="kpi-value" id="kpiML">0%</div>
-        </div>
-        <div class="kpi-item">
-          <div class="kpi-label"><span class="kpi-icon">⚡</span> LATENCE MOY</div>
-          <div class="kpi-value ok" id="kpiLatency">0ms</div>
-        </div>
-        <div class="kpi-item">
-          <div class="kpi-label"><span class="kpi-icon">💰</span> COÛT (USD)</div>
-          <div class="kpi-value" id="kpiCost">$0.0000</div>
-        </div>
-        <div class="kpi-item">
-          <div class="kpi-label"><span class="kpi-icon">🔴</span> RISQUE CRITIQUE</div>
-          <div class="kpi-value" id="kpiCritical">0</div>
-        </div>
-        <div class="kpi-item">
-          <div class="kpi-label"><span class="kpi-icon">🟠</span> RISQUE ÉLEVÉ</div>
-          <div class="kpi-value warn" id="kpiHigh">0</div>
-        </div>
-        <div class="kpi-item">
-          <div class="kpi-label"><span class="kpi-icon">📊</span> TRACES ACTIVES</div>
-          <div class="kpi-value" id="kpiTraces">0</div>
-        </div>
-        <div class="kpi-item">
-          <div class="kpi-label"><span class="kpi-icon">🧠</span> AGENTS PROTÉGÉS</div>
-          <div class="kpi-value ok" id="kpiAgents">1</div>
-        </div>
+        <div class="kpi-item"><div class="kpi-label"><span class="kpi-icon">📡</span> SPANS TOTALES</div><div class="kpi-value" id="kpiSpans">0</div></div>
+        <div class="kpi-item"><div class="kpi-label"><span class="kpi-icon">🛡️</span> BLOQUÉES</div><div class="kpi-value alert" id="kpiBlocked">0</div></div>
+        <div class="kpi-item"><div class="kpi-label"><span class="kpi-icon">🧠</span> DÉTECTION ML</div><div class="kpi-value" id="kpiML">0%</div></div>
+        <div class="kpi-item"><div class="kpi-label"><span class="kpi-icon">🎯</span> LLM JUDGE</div><div class="kpi-value" id="kpiLLM">0</div></div>
+        <div class="kpi-item"><div class="kpi-label"><span class="kpi-icon">⚡</span> LATENCE MOY</div><div class="kpi-value ok" id="kpiLatency">0ms</div></div>
+        <div class="kpi-item"><div class="kpi-label"><span class="kpi-icon">💰</span> COÛT (USD)</div><div class="kpi-value" id="kpiCost">$0.0000</div></div>
+        <div class="kpi-item"><div class="kpi-label"><span class="kpi-icon">🔴</span> RISQUE CRITIQUE</div><div class="kpi-value" id="kpiCritical">0</div></div>
+        <div class="kpi-item"><div class="kpi-label"><span class="kpi-icon">🟠</span> RISQUE ÉLEVÉ</div><div class="kpi-value warn" id="kpiHigh">0</div></div>
+        <div class="kpi-item"><div class="kpi-label"><span class="kpi-icon">📊</span> TRACES ACTIVES</div><div class="kpi-value" id="kpiTraces">0</div></div>
+        <div class="kpi-item"><div class="kpi-label"><span class="kpi-icon">🧠</span> AGENTS PROTÉGÉS</div><div class="kpi-value ok" id="kpiAgents">1</div></div>
       </div>
     </div>
 
-    <!-- BUDGET GAUGE -->
     <div class="panel">
       <div class="corner corner-tl"></div><div class="corner corner-tr"></div>
       <div class="corner corner-bl"></div><div class="corner corner-br"></div>
-      <div class="panel-header">
-        <span>Budget Restant</span>
-        <span class="panel-id">BUD-GAU-03</span>
-      </div>
+      <div class="panel-header"><span>Budget Restant</span><span class="panel-id">BUD-GAU-03</span></div>
       <div class="gauge-container" style="height:140px; position:relative;">
         <canvas id="gaugeBudget"></canvas>
-        <div class="gauge-value">
-          <div class="num" id="gaugeValue">100%</div>
-          <div class="label">BUDGET</div>
-        </div>
+        <div class="gauge-value"><div class="num" id="gaugeValue">100%</div><div class="label">BUDGET</div></div>
       </div>
     </div>
   </div>
 
-  <!-- CENTER COLUMN -->
   <div class="center-col">
-
-    <!-- MAIN CHARTS -->
     <div class="panel" style="flex:1;">
       <div class="corner corner-tl"></div><div class="corner corner-tr"></div>
       <div class="corner corner-bl"></div><div class="corner corner-br"></div>
-      <div class="panel-header">
-        <span>Analyse Temps Réel</span>
-        <span class="panel-id">ANA-RTL-04</span>
-      </div>
+      <div class="panel-header"><span>Analyse Temps Réel</span><span class="panel-id">ANA-RTL-04</span></div>
       <div class="chart-container">
         <div class="chart-grid">
-
-          <!-- LINE CHART -->
-          <div class="chart-box">
-            <div class="chart-title">
-              <span>Flux d'Activité (24h)</span>
-              <div class="live-dot"></div>
-            </div>
-            <div class="chart-wrapper">
-              <canvas id="chartActivity"></canvas>
-            </div>
-          </div>
-
-          <!-- RADAR CHART -->
-          <div class="chart-box">
-            <div class="chart-title">
-              <span>Profil de Risque</span>
-              <div class="live-dot alert"></div>
-            </div>
-            <div class="chart-wrapper" style="position:relative;">
-              <canvas id="chartRadar"></canvas>
-              <div class="radar-overlay"></div>
-            </div>
-          </div>
-
-          <!-- BAR CHART -->
-          <div class="chart-box">
-            <div class="chart-title">
-              <span>Distribution des Menaces</span>
-              <div class="live-dot"></div>
-            </div>
-            <div class="chart-wrapper">
-              <canvas id="chartBar"></canvas>
-            </div>
-          </div>
-
-          <!-- DOUGHNUT CHART -->
-          <div class="chart-box">
-            <div class="chart-title">
-              <span>Taux de Blocage</span>
-              <div class="live-dot"></div>
-            </div>
-            <div class="chart-wrapper">
-              <canvas id="chartDoughnut"></canvas>
-            </div>
-          </div>
-
+          <div class="chart-box"><div class="chart-title"><span>Flux d'Activité (24h)</span><div class="live-dot"></div></div><div class="chart-wrapper"><canvas id="chartActivity"></canvas></div></div>
+          <div class="chart-box"><div class="chart-title"><span>Profil de Risque</span><div class="live-dot alert"></div></div><div class="chart-wrapper" style="position:relative;"><canvas id="chartRadar"></canvas><div class="radar-overlay"></div></div></div>
+          <div class="chart-box"><div class="chart-title"><span>Distribution des Menaces</span><div class="live-dot"></div></div><div class="chart-wrapper"><canvas id="chartBar"></canvas></div></div>
+          <div class="chart-box"><div class="chart-title"><span>Taux de Blocage</span><div class="live-dot"></div></div><div class="chart-wrapper"><canvas id="chartDoughnut"></canvas></div></div>
         </div>
       </div>
     </div>
 
-    <!-- BOTTOM STRIP -->
     <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:12px;">
-      <div class="panel" style="padding:12px; text-align:center;">
-        <div style="font-size:9px; color:var(--text-dark); letter-spacing:2px; margin-bottom:4px;">INJECTIONS</div>
-        <div style="font-family:var(--font-display); font-size:24px; font-weight:700; color:var(--red);" id="statInjection">0</div>
-      </div>
-      <div class="panel" style="padding:12px; text-align:center;">
-        <div style="font-size:9px; color:var(--text-dark); letter-spacing:2px; margin-bottom:4px;">PII LEAKS</div>
-        <div style="font-family:var(--font-display); font-size:24px; font-weight:700; color:var(--orange);" id="statPII">0</div>
-      </div>
-      <div class="panel" style="padding:12px; text-align:center;">
-        <div style="font-size:9px; color:var(--text-dark); letter-spacing:2px; margin-bottom:4px;">TOOL MISUSE</div>
-        <div style="font-family:var(--font-display); font-size:24px; font-weight:700; color:var(--yellow);" id="statTool">0</div>
-      </div>
-      <div class="panel" style="padding:12px; text-align:center;">
-        <div style="font-size:9px; color:var(--text-dark); letter-spacing:2px; margin-bottom:4px;">BUDGET ALERTS</div>
-        <div style="font-family:var(--font-display); font-size:24px; font-weight:700; color:var(--green);" id="statBudget">0</div>
-      </div>
+      <div class="panel" style="padding:12px; text-align:center;"><div style="font-size:9px; color:var(--text-dark); letter-spacing:2px; margin-bottom:4px;">INJECTIONS</div><div style="font-family:var(--font-display); font-size:24px; font-weight:700; color:var(--red);" id="statInjection">0</div></div>
+      <div class="panel" style="padding:12px; text-align:center;"><div style="font-size:9px; color:var(--text-dark); letter-spacing:2px; margin-bottom:4px;">PII LEAKS</div><div style="font-family:var(--font-display); font-size:24px; font-weight:700; color:var(--orange);" id="statPII">0</div></div>
+      <div class="panel" style="padding:12px; text-align:center;"><div style="font-size:9px; color:var(--text-dark); letter-spacing:2px; margin-bottom:4px;">TOOL MISUSE</div><div style="font-family:var(--font-display); font-size:24px; font-weight:700; color:var(--yellow);" id="statTool">0</div></div>
+      <div class="panel" style="padding:12px; text-align:center;"><div style="font-size:9px; color:var(--text-dark); letter-spacing:2px; margin-bottom:4px;">BUDGET ALERTS</div><div style="font-family:var(--font-display); font-size:24px; font-weight:700; color:var(--green);" id="statBudget">0</div></div>
     </div>
   </div>
 
-  <!-- RIGHT COLUMN -->
   <div class="right-col">
-
-    <!-- TERMINAL -->
     <div class="panel terminal" style="flex:1;">
       <div class="corner corner-tl"></div><div class="corner corner-tr"></div>
       <div class="corner corner-bl"></div><div class="corner corner-br"></div>
-      <div class="panel-header">
-        <span>Journal d'Événements</span>
-        <span class="panel-id">LOG-EVN-05</span>
-      </div>
+      <div class="panel-header"><span>Journal d'Événements</span><span class="panel-id">LOG-EVN-05</span></div>
       <div class="terminal-body" id="terminalBody">
-        <div class="terminal-line"><span class="terminal-time">00:00:00</span><span class="terminal-tag ok">[INIT]</span><span class="terminal-msg">AgentGuard Secure Terminal v4.0</span></div>
+        <div class="terminal-line"><span class="terminal-time">00:00:00</span><span class="terminal-tag ok">[INIT]</span><span class="terminal-msg">AgentGuard Secure Terminal v4.1</span></div>
         <div class="terminal-line"><span class="terminal-time">00:00:00</span><span class="terminal-tag info">[SYS]</span><span class="terminal-msg">Détection multi-couches activée</span></div>
         <div class="terminal-line"><span class="terminal-time">00:00:00</span><span class="terminal-tag info">[SYS]</span><span class="terminal-msg">Surveillance active — Regex + ML + LLM Judge</span></div>
       </div>
     </div>
 
-    <!-- TOP THREATS -->
     <div class="panel" style="height:200px;">
       <div class="corner corner-tl"></div><div class="corner corner-tr"></div>
       <div class="corner corner-bl"></div><div class="corner corner-br"></div>
-      <div class="panel-header">
-        <span>Menaces Prioritaires</span>
-        <span class="panel-id">THR-LST-06</span>
-      </div>
-      <div id="threatList" style="padding:10px 14px; font-size:10px;">
-        <div style="color:var(--text-dark); text-align:center; padding:20px;">Aucune menace détectée</div>
-      </div>
+      <div class="panel-header"><span>Menaces Prioritaires</span><span class="panel-id">THR-LST-06</span></div>
+      <div id="threatList" style="padding:10px 14px; font-size:10px;"><div style="color:var(--text-dark); text-align:center; padding:20px;">Aucune menace détectée</div></div>
     </div>
 
-    <!-- SYSTEM STATUS -->
     <div class="panel">
       <div class="corner corner-tl"></div><div class="corner corner-tr"></div>
       <div class="corner corner-bl"></div><div class="corner corner-br"></div>
-      <div class="panel-header">
-        <span>État des Sous-systèmes</span>
-        <span class="panel-id">SUB-SYS-07</span>
-      </div>
+      <div class="panel-header"><span>État des Sous-systèmes</span><span class="panel-id">SUB-SYS-07</span></div>
       <div style="padding:10px 14px;">
         <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border-dim);">
           <span style="font-size:10px; color:var(--text-dim);">🔍 Scanner Regex</span>
@@ -1202,47 +877,28 @@ body::before {
 </div>
 
 <script>
-// ── CONFIG ──
 const COLLECTOR = window.location.origin;
 const REFRESH_MS = 3000;
 
-// ── CHART.JS THEME ──
 Chart.defaults.color = '#6b7a9c';
 Chart.defaults.borderColor = '#1a2342';
 Chart.defaults.font.family = "'JetBrains Mono', monospace";
 Chart.defaults.font.size = 10;
 
-// ── CLOCK ──
 function updateClock() {
   const now = new Date();
-  document.getElementById('clock').textContent = 
-    now.toLocaleTimeString('fr-FR', { hour12: false }) + ' UTC';
+  document.getElementById('clock').textContent = now.toLocaleTimeString('fr-FR', { hour12: false }) + ' UTC';
 }
 setInterval(updateClock, 1000);
 updateClock();
 
-// ── GAUGE (Budget) ──
 const gaugeCtx = document.getElementById('gaugeBudget').getContext('2d');
 const gaugeChart = new Chart(gaugeCtx, {
   type: 'doughnut',
-  data: {
-    labels: ['Utilisé', 'Restant'],
-    datasets: [{
-      data: [0, 100],
-      backgroundColor: ['#ff2a6d', '#00ff88'],
-      borderWidth: 0,
-      cutout: '75%'
-    }]
-  },
-  options: {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: { legend: { display: false }, tooltip: { enabled: false } },
-    animation: { duration: 1000, easing: 'easeOutQuart' }
-  }
+  data: { labels: ['Utilisé', 'Restant'], datasets: [{ data: [0, 100], backgroundColor: ['#ff2a6d', '#00ff88'], borderWidth: 0, cutout: '75%' }] },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, animation: { duration: 1000, easing: 'easeOutQuart' } }
 });
 
-// ── LINE CHART (Activity) ──
 const activityCtx = document.getElementById('chartActivity').getContext('2d');
 const activityGradient = activityCtx.createLinearGradient(0, 0, 0, 200);
 activityGradient.addColorStop(0, 'rgba(0,240,255,0.3)');
@@ -1250,139 +906,35 @@ activityGradient.addColorStop(1, 'rgba(0,240,255,0)');
 
 const activityChart = new Chart(activityCtx, {
   type: 'line',
-  data: {
-    labels: Array(12).fill('').map((_,i) => `-${12-i}h`),
-    datasets: [{
-      label: 'Spans',
-      data: Array(12).fill(0),
-      borderColor: '#00f0ff',
-      backgroundColor: activityGradient,
-      fill: true,
-      tension: 0.4,
-      pointRadius: 3,
-      pointBackgroundColor: '#00f0ff',
-      pointBorderColor: '#050810',
-      pointBorderWidth: 2,
-      borderWidth: 2
-    }, {
-      label: 'Bloquées',
-      data: Array(12).fill(0),
-      borderColor: '#ff2a6d',
-      backgroundColor: 'transparent',
-      fill: false,
-      tension: 0.4,
-      pointRadius: 3,
-      pointBackgroundColor: '#ff2a6d',
-      borderWidth: 2
-    }]
-  },
-  options: {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: { legend: { labels: { color: '#6b7a9c', font: { size: 10 } } } },
-    scales: {
-      x: { grid: { color: '#1a2342' }, ticks: { color: '#3a4566', font: { size: 9 } } },
-      y: { grid: { color: '#1a2342' }, ticks: { color: '#3a4566', font: { size: 9 } } }
-    },
-    animation: { duration: 800 }
-  }
+  data: { labels: Array(12).fill('').map((_,i) => `-${12-i}h`), datasets: [{ label: 'Spans', data: Array(12).fill(0), borderColor: '#00f0ff', backgroundColor: activityGradient, fill: true, tension: 0.4, pointRadius: 3, pointBackgroundColor: '#00f0ff', pointBorderColor: '#050810', pointBorderWidth: 2, borderWidth: 2 }, { label: 'Bloquées', data: Array(12).fill(0), borderColor: '#ff2a6d', backgroundColor: 'transparent', fill: false, tension: 0.4, pointRadius: 3, pointBackgroundColor: '#ff2a6d', borderWidth: 2 }] },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#6b7a9c', font: { size: 10 } } } }, scales: { x: { grid: { color: '#1a2342' }, ticks: { color: '#3a4566', font: { size: 9 } } }, y: { grid: { color: '#1a2342' }, ticks: { color: '#3a4566', font: { size: 9 } } } }, animation: { duration: 800 } }
 });
 
-// ── RADAR CHART ──
 const radarCtx = document.getElementById('chartRadar').getContext('2d');
 const radarChart = new Chart(radarCtx, {
   type: 'radar',
-  data: {
-    labels: ['Injection', 'PII', 'Tool Misuse', 'Budget', 'Exfiltration', 'Jailbreak'],
-    datasets: [{
-      label: 'Menaces détectées',
-      data: [0, 0, 0, 0, 0, 0],
-      borderColor: '#ff2a6d',
-      backgroundColor: 'rgba(255,42,109,0.15)',
-      pointBackgroundColor: '#ff2a6d',
-      pointBorderColor: '#050810',
-      pointBorderWidth: 2,
-      pointRadius: 4,
-      borderWidth: 2
-    }, {
-      label: 'Seuil critique',
-      data: [10, 10, 10, 10, 10, 10],
-      borderColor: 'rgba(0,240,255,0.3)',
-      backgroundColor: 'transparent',
-      borderDash: [5, 5],
-      pointRadius: 0,
-      borderWidth: 1
-    }]
-  },
-  options: {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: { legend: { labels: { color: '#6b7a9c', font: { size: 9 } } } },
-    scales: {
-      r: {
-        grid: { color: '#1a2342' },
-        angleLines: { color: '#1a2342' },
-        pointLabels: { color: '#6b7a9c', font: { size: 9, family: "'Rajdhani', sans-serif" } },
-        ticks: { display: false, backdropColor: 'transparent' },
-        suggestedMin: 0,
-        suggestedMax: 15
-      }
-    }
-  }
+  data: { labels: ['Injection', 'PII', 'Tool Misuse', 'Budget', 'Exfiltration', 'Jailbreak'], datasets: [{ label: 'Menaces détectées', data: [0, 0, 0, 0, 0, 0], borderColor: '#ff2a6d', backgroundColor: 'rgba(255,42,109,0.15)', pointBackgroundColor: '#ff2a6d', pointBorderColor: '#050810', pointBorderWidth: 2, pointRadius: 4, borderWidth: 2 }, { label: 'Seuil critique', data: [10, 10, 10, 10, 10, 10], borderColor: 'rgba(0,240,255,0.3)', backgroundColor: 'transparent', borderDash: [5, 5], pointRadius: 0, borderWidth: 1 }] },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#6b7a9c', font: { size: 9 } } } }, scales: { r: { grid: { color: '#1a2342' }, angleLines: { color: '#1a2342' }, pointLabels: { color: '#6b7a9c', font: { size: 9, family: "'Rajdhani', sans-serif" } }, ticks: { display: false, backdropColor: 'transparent' }, suggestedMin: 0, suggestedMax: 15 } } }
 });
 
-// ── BAR CHART ──
 const barCtx = document.getElementById('chartBar').getContext('2d');
 const barChart = new Chart(barCtx, {
   type: 'bar',
-  data: {
-    labels: ['Low', 'Medium', 'High', 'Critical'],
-    datasets: [{
-      label: 'Incidents',
-      data: [0, 0, 0, 0],
-      backgroundColor: ['#00ff88', '#ff9f1c', '#ff2a6d', '#bc13fe'],
-      borderRadius: 4,
-      borderSkipped: false
-    }]
-  },
-  options: {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: { legend: { display: false } },
-    scales: {
-      x: { grid: { display: false }, ticks: { color: '#6b7a9c', font: { size: 10 } } },
-      y: { grid: { color: '#1a2342' }, ticks: { color: '#3a4566', font: { size: 9 } } }
-    }
-  }
+  data: { labels: ['Low', 'Medium', 'High', 'Critical'], datasets: [{ label: 'Incidents', data: [0, 0, 0, 0], backgroundColor: ['#00ff88', '#ff9f1c', '#ff2a6d', '#bc13fe'], borderRadius: 4, borderSkipped: false }] },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false }, ticks: { color: '#6b7a9c', font: { size: 10 } } }, y: { grid: { color: '#1a2342' }, ticks: { color: '#3a4566', font: { size: 9 } } } } }
 });
 
-// ── DOUGHNUT CHART ──
 const doughnutCtx = document.getElementById('chartDoughnut').getContext('2d');
 const doughnutChart = new Chart(doughnutCtx, {
   type: 'doughnut',
-  data: {
-    labels: ['Safe', 'Blocked'],
-    datasets: [{
-      data: [100, 0],
-      backgroundColor: ['#00ff88', '#ff2a6d'],
-      borderWidth: 0,
-      cutout: '65%'
-    }]
-  },
-  options: {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { position: 'bottom', labels: { color: '#6b7a9c', font: { size: 10 }, padding: 15 } }
-    }
-  }
+  data: { labels: ['Safe', 'Blocked'], datasets: [{ data: [100, 0], backgroundColor: ['#00ff88', '#ff2a6d'], borderWidth: 0, cutout: '65%' }] },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#6b7a9c', font: { size: 10 }, padding: 15 } } } }
 });
 
-// ── TERMINAL ──
 function addLog(tag, msg, type = 'info') {
   const body = document.getElementById('terminalBody');
   const time = new Date().toLocaleTimeString('fr-FR', { hour12: false });
-  const tagClass = type === 'alert' ? 'alert' : type === 'warn' ? 'warn' : type === 'ok' ? 'ok' : type === 'ml' ? 'ml' : 'info';
+  const tagClass = type === 'alert' ? 'alert' : type === 'warn' ? 'warn' : type === 'ok' ? 'ok' : type === 'ml' ? 'ml' : type === 'llm' ? 'llm' : 'info';
   const msgClass = type === 'alert' ? 'alert' : '';
   const line = document.createElement('div');
   line.className = 'terminal-line';
@@ -1392,7 +944,6 @@ function addLog(tag, msg, type = 'info') {
   if (body.children.length > 50) body.removeChild(body.children[0]);
 }
 
-// ── DATA FETCH ──
 let lastData = null;
 let historyData = Array(12).fill(0);
 let blockedHistory = Array(12).fill(0);
@@ -1403,7 +954,6 @@ async function fetchData() {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
 
-    // Update KPIs
     document.getElementById('kpiSpans').textContent = d.total_spans;
     document.getElementById('kpiBlocked').textContent = d.blocked_operations;
     document.getElementById('kpiCost').textContent = '$' + d.total_cost_usd.toFixed(4);
@@ -1411,13 +961,12 @@ async function fetchData() {
     document.getElementById('kpiCritical').textContent = d.risk_distribution.critical;
     document.getElementById('kpiHigh').textContent = d.risk_distribution.high;
     document.getElementById('kpiLatency').textContent = d.avg_latency_ms + 'ms';
+    document.getElementById('kpiLLM').textContent = d.llm_judge_count || 0;
     
-    // ML Score
     const mlPct = d.avg_ml_score ? (d.avg_ml_score * 100).toFixed(0) : 0;
     document.getElementById('kpiML').textContent = mlPct + '%';
     document.getElementById('kpiML').className = 'kpi-value ' + (mlPct > 70 ? 'alert' : mlPct > 40 ? 'warn' : 'ok');
 
-    // Update status
     if (d.detection_layers && Object.keys(d.detection_layers).length > 0) {
       const layers = Object.keys(d.detection_layers);
       if (layers.includes('ml')) {
@@ -1430,7 +979,6 @@ async function fetchData() {
       }
     }
 
-    // Threat level
     const threatEl = document.getElementById('threatValue');
     const threatSub = document.getElementById('threatSub');
     if (d.risk_distribution.critical > 0) {
@@ -1447,7 +995,6 @@ async function fetchData() {
       threatSub.textContent = 'Aucune menace active détectée';
     }
 
-    // Gauge
     const total = d.total_spans || 1;
     const blocked = d.blocked_operations;
     const pct = Math.min((blocked / total) * 100, 100);
@@ -1457,7 +1004,6 @@ async function fetchData() {
     document.getElementById('gaugeValue').style.color = pct > 30 ? '#ff2a6d' : '#00ff88';
     gaugeChart.update('none');
 
-    // Activity chart
     historyData.shift();
     historyData.push(d.total_spans);
     blockedHistory.shift();
@@ -1466,7 +1012,6 @@ async function fetchData() {
     activityChart.data.datasets[1].data = blockedHistory;
     activityChart.update('none');
 
-    // Radar
     radarChart.data.datasets[0].data = [
       d.risk_distribution.high + d.risk_distribution.critical,
       d.risk_distribution.medium,
@@ -1477,7 +1022,6 @@ async function fetchData() {
     ];
     radarChart.update('none');
 
-    // Bar
     barChart.data.datasets[0].data = [
       d.risk_distribution.low,
       d.risk_distribution.medium,
@@ -1486,18 +1030,15 @@ async function fetchData() {
     ];
     barChart.update('none');
 
-    // Doughnut
     const safe = Math.max(d.total_spans - d.blocked_operations, 0);
     doughnutChart.data.datasets[0].data = [safe, d.blocked_operations];
     doughnutChart.update('none');
 
-    // Bottom stats
     document.getElementById('statInjection').textContent = d.risk_distribution.high;
     document.getElementById('statPII').textContent = d.risk_distribution.medium;
     document.getElementById('statTool').textContent = d.blocked_operations;
     document.getElementById('statBudget').textContent = d.total_cost_usd > 1 ? '1' : '0';
 
-    // Threat list
     const threatList = document.getElementById('threatList');
     if (d.top_threats && d.top_threats.length > 0) {
       threatList.innerHTML = d.top_threats.map(t => `
@@ -1510,7 +1051,6 @@ async function fetchData() {
       threatList.innerHTML = '<div style="color:var(--text-dark); text-align:center; padding:20px;">Aucune menace détectée</div>';
     }
 
-    // Logs on change
     if (lastData && d.total_spans > lastData.total_spans) {
       const newSpans = d.total_spans - lastData.total_spans;
       const newBlocked = d.blocked_operations - lastData.blocked_operations;
@@ -1528,17 +1068,14 @@ async function fetchData() {
   }
 }
 
-// ── INIT ──
 fetchData();
 setInterval(fetchData, REFRESH_MS);
 
-// Demo data if empty
 setTimeout(() => {
   if (!lastData || lastData.total_spans === 0) {
     addLog('INFO', 'Aucune donnée — utilisez le simulateur pour injecter des spans', 'warn');
   }
 }, 2000);
-
 </script>
 </body>
 </html>
@@ -1560,15 +1097,6 @@ def trace_detail(trace_id):
         cur = conn.cursor()
         cur.execute("SELECT * FROM spans WHERE trace_id = ? ORDER BY timestamp", (trace_id,))
     rows = [dict_from_row(r, is_pg) for r in cur.fetchall()]
-    <% if (row.get('detection_layer') === 'llm_judge') { %>
-    <span class="badge badge-llm">🎯 LLM Judge</span>
-    <% if (row.get('llm_score')) { %>
-        <span style="color:#f59e0b;font-size:0.7rem;">
-            Score: <%= (row.get('llm_score') * 100).toFixed(1) %>% 
-            (<%= row.get('llm_score') > 0.85 ? '🔴 Risque' : row.get('llm_score') > 0.7 ? '🟠 Douteux' : '🟢 Safe' %>)
-        </span>
-    <% } %>
-<% } %>
     for r in rows:
         r["input_data"] = json.loads(r["input_data"])
         r["output_data"] = json.loads(r["output_data"])
@@ -1588,13 +1116,17 @@ def trace_detail(trace_id):
             h1 { font-size: 1.3rem; margin-bottom: 20px; }
             .span-card { background: #1e293b; border: 1px solid #334155; border-radius: 14px; padding: 20px; margin-bottom: 16px; border-left: 4px solid #38bdf8; }
             .span-card.blocked { border-left-color: #ef4444; background: #1e293b; }
-            .span-type { color: #38bdf8; font-weight: 700; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }
+            .span-type { color: #38bdf8; font-weight: 700; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
             .meta { color: #64748b; font-size: 0.82rem; margin-top: 4px; }
-            .detection-badge { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; margin-left: 8px; }
+            .detection-badge { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; }
             .badge-regex { background: #3b82f620; color: #3b82f6; border: 1px solid #3b82f640; }
             .badge-ml { background: #8b5cf620; color: #8b5cf6; border: 1px solid #8b5cf640; }
             .badge-llm { background: #f59e0b20; color: #f59e0b; border: 1px solid #f59e0b40; }
             .badge-mixed { background: #a855f720; color: #a855f7; border: 1px solid #a855f740; }
+            .llm-score { font-size: 0.7rem; }
+            .llm-score.high { color: #ef4444; }
+            .llm-score.medium { color: #f59e0b; }
+            .llm-score.low { color: #22c55e; }
             .check { padding: 10px 14px; margin: 6px 0; border-radius: 8px; font-size: 0.88rem; }
             .check-pass { background: #22c55e15; border: 1px solid #22c55e40; }
             .check-fail { background: #ef444415; border: 1px solid #ef444440; }
@@ -1623,11 +1155,16 @@ def trace_detail(trace_id):
         # Scores
         ml_score = row.get("ml_score")
         llm_score = row.get("llm_score")
+        llm_reason = row.get("llm_reason")
+        
         scores_html = ""
         if ml_score is not None:
             scores_html += f'<span style="color:#8b5cf6;font-size:0.7rem;">ML: {(ml_score*100):.1f}%</span> '
         if llm_score is not None:
-            scores_html += f'<span style="color:#f59e0b;font-size:0.7rem;">LLM: {(llm_score*100):.1f}%</span>'
+            score_class = "high" if llm_score > 0.85 else "medium" if llm_score > 0.7 else "low"
+            scores_html += f'<span class="llm-score {score_class}">🎯 LLM: {(llm_score*100):.1f}%</span>'
+            if llm_reason:
+                scores_html += f' <span style="color:#94a3b8;font-size:0.65rem;">— {llm_reason[:60]}…</span>'
         
         html += f"""
         <div class="span-card {'blocked' if blocked else ''}">
@@ -1667,7 +1204,7 @@ if _API_KEY_WAS_GENERATED and DB_TYPE == "postgres":
 if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("PORT", 8080))
-    print(f"🛡️ AgentGuard Collector v4 running on http://0.0.0.0:{port}")
+    print(f"🛡️ AgentGuard Collector v4.1 running on http://0.0.0.0:{port}")
     print(f"   DB: {DB_TYPE}")
     print(f"   Detection: Regex + ML (if enabled) + LLM Judge (if enabled)")
     app.run(host="0.0.0.0", port=port, debug=False)
