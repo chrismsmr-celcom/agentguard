@@ -7,19 +7,84 @@ services:
       - "8080:8080"
     environment:
       - PORT=8080
-      - AGENTGUARD_DB_TYPE=sqlite
+      - AGENTGUARD_DB_TYPE=postgres  # Passage à PostgreSQL pour prod
       - AGENTGUARD_DB_PATH=/data/agentguard.db
-      - AGENTGUARD_API_KEY=${AGENTGUARD_API_KEY:?Définis AGENTGUARD_API_KEY dans ton .env (voir .env.example)}
-      - AGENTGUARD_ADMIN_SECRET=${AGENTGUARD_ADMIN_SECRET:-}
-      - AGENTGUARD_FLASK_SECRET=${AGENTGUARD_FLASK_SECRET:-}
+      - AGENTGUARD_API_KEY=${AGENTGUARD_API_KEY}
+      - AGENTGUARD_ADMIN_SECRET=${AGENTGUARD_ADMIN_SECRET}
+      - AGENTGUARD_FLASK_SECRET=${AGENTGUARD_FLASK_SECRET}
+      
+      # Activation du LLM Judge
+      - AGENTGUARD_USE_ML=true
+      - AGENTGUARD_USE_LLM_JUDGE=true
+      - AGENTGUARD_JUDGE_API_KEY=${DEEPSEEK_API_KEY}
+      - AGENTGUARD_JUDGE_MODEL=deepseek-chat
+      - AGENTGUARD_ML_THRESHOLD=0.80
+      - AGENTGUARD_BLOCK_ON_AMBIGUOUS=true
+      
+      # Rate-limiting assoupli pour les tests
+      - AGENTGUARD_RATE_LIMIT=300 per minute
+      - AGENTGUARD_SPAN_RATE_LIMIT=150 per minute
+      
+      # PostgreSQL
+      - DATABASE_URL=postgresql://agentguard:${POSTGRES_PASSWORD}@postgres:5432/agentguard
+      - AGENTGUARD_DB_TYPE=postgres
+      
+      # Performance
+      - AGENTGUARD_FLASK_DEBUG=false
+      - AGENTGUARD_LOG_LEVEL=INFO
+      
     volumes:
       - agentguard_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request,os; urllib.request.urlopen(urllib.request.Request('http://localhost:8080/api/metrics', headers={'X-API-Key': os.environ['AGENTGUARD_API_KEY']}))"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/metrics"]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 3
+    networks:
+      - agentguard_network
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=agentguard
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=agentguard
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --locale=en_US.UTF-8
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentguard"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agentguard_network
+
+  redis:  # Pour le rate-limiting et la queue
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agentguard_network
 
 volumes:
   agentguard_data:
+  postgres_data:
+  redis_data:
+
+networks:
+  agentguard_network:
+    driver: bridge
