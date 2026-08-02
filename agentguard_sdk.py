@@ -235,7 +235,7 @@ class AgentGuard:
                  block_on_high: bool = True,
                  debug: bool = True):
         self.collector_url = collector_url.rstrip("/")
-        self.api_key = api_key
+        self.api_key = api_key or os.environ.get("AGENTGUARD_API_KEY")
         self.policy_engine = PolicyEngine(policies or [])
         self.max_budget = max_budget
         self.block_on_high = block_on_high
@@ -252,9 +252,13 @@ class AgentGuard:
     def _test_connection(self):
         """Vérifie que le collector est accessible."""
         try:
-            r = requests.get(f"{self.collector_url}/api/metrics", timeout=10)
+            headers = {"X-API-Key": self.api_key} if self.api_key else {}
+            r = requests.get(f"{self.collector_url}/api/metrics", headers=headers, timeout=10)
             if r.status_code == 200:
                 print(f"[AgentGuard] ✅ Collector connecté ({r.status_code})")
+            elif r.status_code == 401:
+                print(f"[AgentGuard] ⚠️ Collector connecté mais clé API manquante/invalide (401) — "
+                      f"passe api_key= à AgentGuard() ou fixe AGENTGUARD_API_KEY.")
             else:
                 print(f"[AgentGuard] ⚠️ Collector répond mais code {r.status_code}")
         except Exception as e:
@@ -292,17 +296,25 @@ class AgentGuard:
 
         # Essai d'envoi
         try:
+            headers = {"Content-Type": "application/json"}
+            if self.api_key:
+                headers["X-API-Key"] = self.api_key
             r = requests.post(
                 f"{self.collector_url}/span",
                 json=payload,
                 timeout=10,  # Augmenté de 0.5s à 10s
-                headers={"Content-Type": "application/json"}
+                headers=headers
             )
             if r.status_code == 201:
                 if self.debug:
                     print(f"[AgentGuard] 📤 Span envoyée ({span.span_type}, blocked={span.blocked})")
                 # Si on avait des spans en attente, on les envoie aussi
                 self._flush_pending()
+            elif r.status_code == 401:
+                if self.debug:
+                    print(f"[AgentGuard] 🚨 Span rejetée (401 Unauthorized) — passe api_key= "
+                          f"à AgentGuard() ou fixe AGENTGUARD_API_KEY côté agent.")
+                self._pending_spans.append(payload)
             else:
                 if self.debug:
                     print(f"[AgentGuard] ⚠️ Collector a rejeté la span: HTTP {r.status_code}")
@@ -319,11 +331,14 @@ class AgentGuard:
         flushed = []
         for payload in self._pending_spans:
             try:
+                headers = {"Content-Type": "application/json"}
+                if self.api_key:
+                    headers["X-API-Key"] = self.api_key
                 r = requests.post(
                     f"{self.collector_url}/span",
                     json=payload,
                     timeout=10,
-                    headers={"Content-Type": "application/json"}
+                    headers=headers
                 )
                 if r.status_code == 201:
                     flushed.append(payload)
