@@ -1,5 +1,6 @@
 """
-AgentGuard Collector v3 — PostgreSQL production + SQLite local fallback
+AgentGuard Collector v4 — PostgreSQL production + SQLite local fallback
+Support de la détection multi-couches (ML + LLM Judge)
 """
 
 import os
@@ -7,7 +8,7 @@ import re
 import json
 import time
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template_string, make_response
 from flask_cors import CORS, cross_origin
 from flask_limiter import Limiter
@@ -19,29 +20,24 @@ app.secret_key = os.environ.get("AGENTGUARD_FLASK_SECRET", secrets.token_urlsafe
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=["120 per minute"],  # garde-fou global raisonnable
+    default_limits=["120 per minute"],
     storage_uri=os.environ.get("AGENTGUARD_LIMITER_STORAGE", "memory://"),
 )
-# CORS n'est nécessaire QUE si un SDK tourne côté navigateur et appelle le
-# collector en cross-origin. Le dashboard lui-même est same-origin.
-# On ne l'ouvre donc que sur /span, jamais sur les routes API/dashboard.
 
 # ── CONFIG ──
-DB_TYPE = os.environ.get("AGENTGUARD_DB_TYPE", "sqlite")  # "sqlite" ou "postgres"
-DATABASE_URL = os.environ.get("DATABASE_URL", "")  # Render injecte ça auto
+DB_TYPE = os.environ.get("AGENTGUARD_DB_TYPE", "sqlite")
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 API_KEY = os.environ.get("AGENTGUARD_API_KEY", None)
-ADMIN_SECRET = os.environ.get("AGENTGUARD_ADMIN_SECRET")  # pas de valeur par défaut !
+ADMIN_SECRET = os.environ.get("AGENTGUARD_ADMIN_SECRET")
 AUTH_COOKIE = "ag_auth"
 
 # Génère une clé si aucune n'est définie
 _API_KEY_WAS_GENERATED = API_KEY is None
 if not API_KEY:
     API_KEY = "ag-" + secrets.token_urlsafe(32)
-    print("[AG] ⚠️  Aucune AGENTGUARD_API_KEY fournie — clé générée en mémoire "
-          "pour cette instance (elle changera au prochain redémarrage, et n'est "
-          "PAS affichée dans les logs). Configure AGENTGUARD_API_KEY pour la fixer.")
+    print("[AG] ⚠️ Aucune AGENTGUARD_API_KEY fournie — clé générée en mémoire")
 
-# ── PII REDACTION (avant stockage, pas juste détection) ──
+# ── PII REDACTION ──
 _PII_PATTERNS = {
     "EMAIL": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
     "SSN": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
@@ -90,7 +86,7 @@ def get_db():
     return get_sqlite_conn()
 
 def init_db():
-    """Initialise les tables (PostgreSQL ou SQLite)."""
+    """Initialise les tables avec support des nouvelles métriques."""
     if DB_TYPE == "postgres" and DATABASE_URL:
         conn = get_pg_conn()
         cur = conn.cursor()
@@ -108,14 +104,19 @@ def init_db():
                 blocked BOOLEAN DEFAULT FALSE,
                 block_reason TEXT,
                 cost_usd DOUBLE PRECISION DEFAULT 0.0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                detection_layer TEXT,
+                ml_score DOUBLE PRECISION,
+                llm_score DOUBLE PRECISION
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_trace_pg ON spans(trace_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_created_pg ON spans(created_at)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_pg ON spans(blocked)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_detection_layer_pg ON spans(detection_layer)")
         conn.commit()
         conn.close()
-        print("[AG] ✅ PostgreSQL initialisé")
+        print("[AG] ✅ PostgreSQL initialisé v4")
     else:
         conn = sqlite3.connect(DB_SQLITE_PATH)
         c = conn.cursor()
@@ -133,29 +134,30 @@ def init_db():
                 blocked INTEGER,
                 block_reason TEXT,
                 cost_usd REAL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                detection_layer TEXT,
+                ml_score REAL,
+                llm_score REAL
             )
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_trace ON spans(trace_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_created ON spans(created_at)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_blocked ON spans(blocked)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_detection_layer ON spans(detection_layer)")
         conn.commit()
         conn.close()
-        print("[AG] ✅ SQLite initialisé")
+        print("[AG] ✅ SQLite initialisé v4")
 
 def dict_from_row(row, is_pg=False):
-    """Normalise une row en dict (PostgreSQL ou SQLite)."""
+    """Normalise une row en dict."""
     if is_pg:
         return dict(row)
     return dict(row)
 
 # ── AUTH ──
-# Toutes les routes qui donnent accès à des données (spans, traces, metrics,
-# dashboard) exigent la clé — via header, ?key=, ou un cookie posé une fois
-# que la clé a été fournie une première fois (pour que le dashboard reste
-# utilisable au navigateur sans exposer les données sans authentification).
 PROTECTED_ENDPOINTS = {
     "receive_span", "list_traces", "get_trace", "get_metrics",
-    "dashboard", "trace_detail",
+    "dashboard", "trace_detail", "get_detection_stats",
 }
 
 def require_auth():
@@ -170,9 +172,6 @@ def require_auth():
     return secrets.compare_digest(request.cookies.get(AUTH_COOKIE, ""), API_KEY)
 
 def set_auth_cookie_if_valid(resp):
-    """Si la clé a été fournie en query param, pose un cookie httponly pour
-    que les prochaines requêtes (dont les fetch() same-origin du dashboard)
-    soient authentifiées sans avoir à toucher au JS existant."""
     key = request.args.get("api_key") or request.args.get("key")
     if key == API_KEY:
         resp.set_cookie(AUTH_COOKIE, API_KEY, httponly=True, samesite="Lax",
@@ -181,9 +180,6 @@ def set_auth_cookie_if_valid(resp):
 
 @app.before_request
 def check_auth():
-    # Le preflight CORS (OPTIONS) ne porte jamais les headers custom du navigateur
-    # (X-API-Key) — c'est normal et ce n'est pas la vraie requête. Le bloquer ici
-    # casse la négociation CORS avant même que la vraie requête parte.
     if request.method == "OPTIONS":
         return None
     if request.endpoint not in PROTECTED_ENDPOINTS:
@@ -199,40 +195,61 @@ def check_auth():
 
 # ── API ──
 @app.route("/span", methods=["POST"])
-@limiter.limit("30 per minute")
-@cross_origin(origins="*", headers=["Content-Type", "X-API-Key"])  # seul endpoint appelable par un SDK cross-origin
+@limiter.limit("60 per minute")
+@cross_origin(origins="*", headers=["Content-Type", "X-API-Key"])
 def receive_span():
     data = request.json
-    # On redacte le PII connu AVANT stockage — pas seulement à la détection —
-    # pour que la donnée sensible ne finisse jamais en DB ni sur le dashboard.
     data["input_data"] = redact_pii(data.get("input_data", {}))
     data["output_data"] = redact_pii(data.get("output_data", {}))
+    
     is_pg = DB_TYPE == "postgres" and DATABASE_URL
+
+    # Extraire les métadonnées de détection
+    detection_layer = None
+    ml_score = None
+    llm_score = None
+    
+    if "metadata" in data:
+        detection_layer = data.get("metadata", {}).get("layer")
+        ml_score = data.get("metadata", {}).get("ml_score")
+        llm_score = data.get("metadata", {}).get("llm_score")
+    
+    # Si la détection est dans les security_checks, on l'extrait aussi
+    if not detection_layer and data.get("security_checks"):
+        for check in data["security_checks"]:
+            if check.get("check_name") == "prompt_injection":
+                detection_layer = check.get("metadata", {}).get("layer")
+                ml_score = check.get("metadata", {}).get("ml_score")
+                llm_score = check.get("metadata", {}).get("llm_score")
+                break
 
     if is_pg:
         conn = get_pg_conn()
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO spans (trace_id, span_id, span_type, timestamp, latency_ms,
-                              input_data, output_data, security_checks, blocked,
-                              block_reason, cost_usd)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO spans (
+                trace_id, span_id, span_type, timestamp, latency_ms,
+                input_data, output_data, security_checks, blocked,
+                block_reason, cost_usd, detection_layer, ml_score, llm_score
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             data["trace_id"], data["span_id"], data["span_type"],
             data["timestamp"], data["latency_ms"],
             json.dumps(data["input_data"]),
             json.dumps(data["output_data"]),
             json.dumps(data["security_checks"]),
-            data["blocked"], data.get("block_reason"), data["cost_usd"]
+            data["blocked"], data.get("block_reason"), data["cost_usd"],
+            detection_layer, ml_score, llm_score
         ))
     else:
         conn = sqlite3.connect(DB_SQLITE_PATH)
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO spans (trace_id, span_id, span_type, timestamp, latency_ms,
-                              input_data, output_data, security_checks, blocked,
-                              block_reason, cost_usd)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO spans (
+                trace_id, span_id, span_type, timestamp, latency_ms,
+                input_data, output_data, security_checks, blocked,
+                block_reason, cost_usd, detection_layer, ml_score, llm_score
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data["trace_id"], data["span_id"], data["span_type"],
             data["timestamp"], data["latency_ms"],
@@ -240,7 +257,8 @@ def receive_span():
             json.dumps(data["output_data"]),
             json.dumps(data["security_checks"]),
             1 if data["blocked"] else 0,
-            data.get("block_reason"), data["cost_usd"]
+            data.get("block_reason"), data["cost_usd"],
+            detection_layer, ml_score, llm_score
         ))
 
     conn.commit()
@@ -261,7 +279,8 @@ def list_traces():
         SELECT trace_id, COUNT(*) as span_count,
                SUM(CASE WHEN blocked THEN 1 ELSE 0 END) as blocked_count,
                SUM(cost_usd) as total_cost,
-               MAX(created_at) as last_seen
+               MAX(created_at) as last_seen,
+               GROUP_CONCAT(DISTINCT detection_layer) as detection_layers
         FROM spans
         GROUP BY trace_id
         ORDER BY last_seen DESC
@@ -315,6 +334,34 @@ def get_metrics():
     cur.execute("SELECT SUM(cost_usd) FROM spans")
     total_cost = cur.fetchone()[0] or 0
 
+    # Calcul de la latence moyenne
+    cur.execute("SELECT AVG(latency_ms) FROM spans WHERE latency_ms > 0")
+    avg_latency = cur.fetchone()[0] or 0
+
+    # Statistiques de détection par couche
+    if is_pg:
+        cur.execute("""
+            SELECT detection_layer, COUNT(*) as count
+            FROM spans
+            WHERE detection_layer IS NOT NULL
+            GROUP BY detection_layer
+        """)
+    else:
+        cur.execute("""
+            SELECT detection_layer, COUNT(*) as count
+            FROM spans
+            WHERE detection_layer IS NOT NULL
+            GROUP BY detection_layer
+        """)
+    detection_stats = {row[0]: row[1] for row in cur.fetchall()}
+
+    # Score ML moyen
+    if is_pg:
+        cur.execute("SELECT AVG(ml_score) FROM spans WHERE ml_score IS NOT NULL")
+    else:
+        cur.execute("SELECT AVG(ml_score) FROM spans WHERE ml_score IS NOT NULL")
+    avg_ml_score = cur.fetchone()[0] or 0
+
     # Risques
     if is_pg:
         cur.execute("""
@@ -356,18 +403,88 @@ def get_metrics():
         "total_traces": total_traces,
         "blocked_operations": blocked,
         "total_cost_usd": round(float(total_cost or 0), 6),
+        "avg_latency_ms": round(float(avg_latency or 0), 2),
+        "avg_ml_score": round(float(avg_ml_score or 0), 3),
         "risk_distribution": risk_counts,
-        "top_threats": top_threats
+        "top_threats": top_threats,
+        "detection_layers": detection_stats,
+        "version": "v4.0.0"
     })
 
-# ── DASHBOARD (le même sci-fi) ──
+@app.route("/api/detection/stats")
+def get_detection_stats():
+    """Endpoint dédié aux statistiques de détection multi-couches."""
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_db()
+
+    if is_pg:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    else:
+        cur = conn.cursor()
+
+    # Distribution par couche de détection
+    cur.execute("""
+        SELECT detection_layer, COUNT(*) as count
+        FROM spans
+        WHERE detection_layer IS NOT NULL
+        GROUP BY detection_layer
+        ORDER BY count DESC
+    """)
+    layer_distribution = [{"layer": r[0], "count": r[1]} for r in cur.fetchall()]
+
+    # Précision par couche (ratio blocages / total)
+    cur.execute("""
+        SELECT detection_layer,
+               COUNT(*) as total,
+               SUM(CASE WHEN blocked THEN 1 ELSE 0 END) as blocked
+        FROM spans
+        WHERE detection_layer IS NOT NULL
+        GROUP BY detection_layer
+    """)
+    layer_accuracy = []
+    for r in cur.fetchall():
+        layer_accuracy.append({
+            "layer": r[0],
+            "total": r[1],
+            "blocked": r[2],
+            "block_rate": round((r[2] / r[1] * 100) if r[1] > 0 else 0, 2)
+        })
+
+    # Distribution des scores ML
+    cur.execute("""
+        SELECT
+            CASE
+                WHEN ml_score >= 0.9 THEN '0.9-1.0'
+                WHEN ml_score >= 0.8 THEN '0.8-0.9'
+                WHEN ml_score >= 0.7 THEN '0.7-0.8'
+                WHEN ml_score >= 0.6 THEN '0.6-0.7'
+                WHEN ml_score >= 0.5 THEN '0.5-0.6'
+                ELSE '0.0-0.5'
+            END as score_range,
+            COUNT(*) as count
+        FROM spans
+        WHERE ml_score IS NOT NULL
+        GROUP BY score_range
+        ORDER BY score_range DESC
+    """)
+    ml_score_distribution = [{"range": r[0], "count": r[1]} for r in cur.fetchall()]
+
+    conn.close()
+    return jsonify({
+        "layer_distribution": layer_distribution,
+        "layer_accuracy": layer_accuracy,
+        "ml_score_distribution": ml_score_distribution,
+        "total_analyzed": sum(l["count"] for l in layer_distribution) if layer_distribution else 0
+    })
+
+# ── DASHBOARD (version améliorée) ──
 DASHBOARD_HTML = """
 <!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AGENTGUARD // SECURE TERMINAL v2.6.1</title>
+<title>AGENTGUARD // SECURE TERMINAL v4.0</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700;800&family=Rajdhani:wght@300;500;600;700&display=swap');
@@ -462,6 +579,7 @@ body::before {
 }
 
 .logo span { color: var(--text-dim); font-weight: 300; }
+.logo .version { font-size: 12px; color: var(--text-dark); margin-left: 8px; }
 
 .badge-class {
   font-size: 9px;
@@ -658,12 +776,6 @@ body::before {
 .kpi-value.warn { color: var(--orange); }
 .kpi-value.ok { color: var(--green); }
 
-.kpi-delta {
-  font-size: 9px;
-  color: var(--text-dark);
-  margin-left: 4px;
-}
-
 /* CENTER COLUMN */
 .center-col {
   display: flex;
@@ -761,7 +873,7 @@ body::before {
 
 .terminal-time { color: var(--text-dark); min-width: 70px; }
 .terminal-tag { 
-  min-width: 50px; 
+  min-width: 60px; 
   font-weight: 600; 
   font-size: 9px;
   letter-spacing: 1px;
@@ -770,6 +882,7 @@ body::before {
 .terminal-tag.warn { color: var(--orange); }
 .terminal-tag.alert { color: var(--red); }
 .terminal-tag.ok { color: var(--green); }
+.terminal-tag.ml { color: var(--purple); }
 .terminal-msg { color: var(--text-dim); }
 .terminal-msg.alert { color: var(--red); }
 
@@ -840,7 +953,7 @@ body::before {
 <!-- HEADER -->
 <div class="header">
   <div class="header-left">
-    <div class="logo">AGENT<span>GUARD</span></div>
+    <div class="logo">AGENT<span>GUARD</span><span class="version">v4.0</span></div>
     <div class="badge-class">CLASSIFIED // LEVEL 4</div>
   </div>
   <div class="header-right">
@@ -891,12 +1004,16 @@ body::before {
           <div class="kpi-value alert" id="kpiBlocked">0</div>
         </div>
         <div class="kpi-item">
-          <div class="kpi-label"><span class="kpi-icon">💰</span> COÛT (USD)</div>
-          <div class="kpi-value" id="kpiCost">$0.0000</div>
+          <div class="kpi-label"><span class="kpi-icon">🧠</span> DÉTECTION ML</div>
+          <div class="kpi-value" id="kpiML">0%</div>
         </div>
         <div class="kpi-item">
           <div class="kpi-label"><span class="kpi-icon">⚡</span> LATENCE MOY</div>
           <div class="kpi-value ok" id="kpiLatency">0ms</div>
+        </div>
+        <div class="kpi-item">
+          <div class="kpi-label"><span class="kpi-icon">💰</span> COÛT (USD)</div>
+          <div class="kpi-value" id="kpiCost">$0.0000</div>
         </div>
         <div class="kpi-item">
           <div class="kpi-label"><span class="kpi-icon">🔴</span> RISQUE CRITIQUE</div>
@@ -1031,9 +1148,9 @@ body::before {
         <span class="panel-id">LOG-EVN-05</span>
       </div>
       <div class="terminal-body" id="terminalBody">
-        <div class="terminal-line"><span class="terminal-time">00:00:00</span><span class="terminal-tag ok">[INIT]</span><span class="terminal-msg">AgentGuard Secure Terminal v2.6.1</span></div>
-        <div class="terminal-line"><span class="terminal-time">00:00:00</span><span class="terminal-tag info">[SYS]</span><span class="terminal-msg">Connexion au collector établie</span></div>
-        <div class="terminal-line"><span class="terminal-time">00:00:00</span><span class="terminal-tag info">[SYS]</span><span class="terminal-msg">Surveillance active — 6 vecteurs d'attaque</span></div>
+        <div class="terminal-line"><span class="terminal-time">00:00:00</span><span class="terminal-tag ok">[INIT]</span><span class="terminal-msg">AgentGuard Secure Terminal v4.0</span></div>
+        <div class="terminal-line"><span class="terminal-time">00:00:00</span><span class="terminal-tag info">[SYS]</span><span class="terminal-msg">Détection multi-couches activée</span></div>
+        <div class="terminal-line"><span class="terminal-time">00:00:00</span><span class="terminal-tag info">[SYS]</span><span class="terminal-msg">Surveillance active — Regex + ML + LLM Judge</span></div>
       </div>
     </div>
 
@@ -1060,19 +1177,19 @@ body::before {
       </div>
       <div style="padding:10px 14px;">
         <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border-dim);">
-          <span style="font-size:10px; color:var(--text-dim);">🔍 Scanner d'Injection</span>
+          <span style="font-size:10px; color:var(--text-dim);">🔍 Scanner Regex</span>
           <span style="font-size:10px; color:var(--green); font-weight:600;">ONLINE</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border-dim);">
+          <span style="font-size:10px; color:var(--text-dim);">🧠 Détecteur ML</span>
+          <span style="font-size:10px; color:var(--green); font-weight:600;" id="mlStatus">ONLINE</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border-dim);">
+          <span style="font-size:10px; color:var(--text-dim);">🎯 LLM Judge</span>
+          <span style="font-size:10px; color:var(--orange); font-weight:600;" id="llmStatus">STANDBY</span>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border-dim);">
           <span style="font-size:10px; color:var(--text-dim);">🔒 PII Detector</span>
-          <span style="font-size:10px; color:var(--green); font-weight:600;">ONLINE</span>
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border-dim);">
-          <span style="font-size:10px; color:var(--text-dim);">🛡️ Policy Engine</span>
-          <span style="font-size:10px; color:var(--green); font-weight:600;">ONLINE</span>
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border-dim);">
-          <span style="font-size:10px; color:var(--text-dim);">💰 Budget Monitor</span>
           <span style="font-size:10px; color:var(--green); font-weight:600;">ONLINE</span>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0;">
@@ -1086,7 +1203,7 @@ body::before {
 
 <script>
 // ── CONFIG ──
-const COLLECTOR = 'https://agentguard-aqal.onrender.com';
+const COLLECTOR = window.location.origin;
 const REFRESH_MS = 3000;
 
 // ── CHART.JS THEME ──
@@ -1265,7 +1382,7 @@ const doughnutChart = new Chart(doughnutCtx, {
 function addLog(tag, msg, type = 'info') {
   const body = document.getElementById('terminalBody');
   const time = new Date().toLocaleTimeString('fr-FR', { hour12: false });
-  const tagClass = type === 'alert' ? 'alert' : type === 'warn' ? 'warn' : type === 'ok' ? 'ok' : 'info';
+  const tagClass = type === 'alert' ? 'alert' : type === 'warn' ? 'warn' : type === 'ok' ? 'ok' : type === 'ml' ? 'ml' : 'info';
   const msgClass = type === 'alert' ? 'alert' : '';
   const line = document.createElement('div');
   line.className = 'terminal-line';
@@ -1293,6 +1410,25 @@ async function fetchData() {
     document.getElementById('kpiTraces').textContent = d.total_traces;
     document.getElementById('kpiCritical').textContent = d.risk_distribution.critical;
     document.getElementById('kpiHigh').textContent = d.risk_distribution.high;
+    document.getElementById('kpiLatency').textContent = d.avg_latency_ms + 'ms';
+    
+    // ML Score
+    const mlPct = d.avg_ml_score ? (d.avg_ml_score * 100).toFixed(0) : 0;
+    document.getElementById('kpiML').textContent = mlPct + '%';
+    document.getElementById('kpiML').className = 'kpi-value ' + (mlPct > 70 ? 'alert' : mlPct > 40 ? 'warn' : 'ok');
+
+    // Update status
+    if (d.detection_layers && Object.keys(d.detection_layers).length > 0) {
+      const layers = Object.keys(d.detection_layers);
+      if (layers.includes('ml')) {
+        document.getElementById('mlStatus').textContent = 'ONLINE';
+        document.getElementById('mlStatus').style.color = '#00ff88';
+      }
+      if (layers.includes('llm_judge')) {
+        document.getElementById('llmStatus').textContent = 'ONLINE';
+        document.getElementById('llmStatus').style.color = '#00ff88';
+      }
+    }
 
     // Threat level
     const threatEl = document.getElementById('threatValue');
@@ -1380,7 +1516,7 @@ async function fetchData() {
       const newBlocked = d.blocked_operations - lastData.blocked_operations;
       if (newBlocked > 0) {
         addLog('ALERT', `${newBlocked} span(s) bloquée(s) — menace détectée`, 'alert');
-      } else {
+      } else if (newSpans > 0) {
         addLog('INFO', `${newSpans} nouvelle(s) span(s) reçue(s)`, 'ok');
       }
     }
@@ -1445,6 +1581,11 @@ def trace_detail(trace_id):
             .span-card.blocked { border-left-color: #ef4444; background: #1e293b; }
             .span-type { color: #38bdf8; font-weight: 700; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }
             .meta { color: #64748b; font-size: 0.82rem; margin-top: 4px; }
+            .detection-badge { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; margin-left: 8px; }
+            .badge-regex { background: #3b82f620; color: #3b82f6; border: 1px solid #3b82f640; }
+            .badge-ml { background: #8b5cf620; color: #8b5cf6; border: 1px solid #8b5cf640; }
+            .badge-llm { background: #f59e0b20; color: #f59e0b; border: 1px solid #f59e0b40; }
+            .badge-mixed { background: #a855f720; color: #a855f7; border: 1px solid #a855f740; }
             .check { padding: 10px 14px; margin: 6px 0; border-radius: 8px; font-size: 0.88rem; }
             .check-pass { background: #22c55e15; border: 1px solid #22c55e40; }
             .check-fail { background: #ef444415; border: 1px solid #ef444440; }
@@ -1459,9 +1600,33 @@ def trace_detail(trace_id):
     for row in rows:
         checks = json.loads(row["security_checks"])
         blocked = bool(row["blocked"])
+        
+        # Badge de détection
+        layer = row.get("detection_layer", "unknown")
+        badge_classes = {
+            "regex": "badge-regex",
+            "ml": "badge-ml",
+            "llm_judge": "badge-llm",
+            "mixed": "badge-mixed"
+        }
+        badge_class = badge_classes.get(layer, "badge-regex")
+        
+        # Scores
+        ml_score = row.get("ml_score")
+        llm_score = row.get("llm_score")
+        scores_html = ""
+        if ml_score is not None:
+            scores_html += f'<span style="color:#8b5cf6;font-size:0.7rem;">ML: {(ml_score*100):.1f}%</span> '
+        if llm_score is not None:
+            scores_html += f'<span style="color:#f59e0b;font-size:0.7rem;">LLM: {(llm_score*100):.1f}%</span>'
+        
         html += f"""
         <div class="span-card {'blocked' if blocked else ''}">
-            <div class="span-type">{row["span_type"]} — {row["latency_ms"]:.0f}ms — ${row["cost_usd"]:.6f}</div>
+            <div class="span-type">
+                {row["span_type"]} — {row["latency_ms"]:.0f}ms — ${row["cost_usd"]:.6f}
+                <span class="detection-badge {badge_class}">{layer.upper()}</span>
+                {scores_html}
+            </div>
             <div class="meta">{row["created_at"]}</div>
             <h3>📥 Input</h3>
             <pre>{json.dumps(json.loads(row["input_data"]), indent=2, ensure_ascii=False)}</pre>
@@ -1478,8 +1643,6 @@ def trace_detail(trace_id):
 @app.route("/api/key")
 @limiter.limit("5 per minute")
 def show_key():
-    # Pas de valeur par défaut : si AGENTGUARD_ADMIN_SECRET n'est pas configuré,
-    # l'endpoint est désactivé plutôt que de tomber sur un secret devinable.
     if not ADMIN_SECRET:
         return jsonify({"error": "AGENTGUARD_ADMIN_SECRET not configured — endpoint disabled"}), 404
     admin_secret = request.args.get("admin", "")
@@ -1495,6 +1658,7 @@ if _API_KEY_WAS_GENERATED and DB_TYPE == "postgres":
 if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("PORT", 8080))
-    print(f"🛡️ AgentGuard Collector v3 running on http://0.0.0.0:{port}")
+    print(f"🛡️ AgentGuard Collector v4 running on http://0.0.0.0:{port}")
     print(f"   DB: {DB_TYPE}")
+    print(f"   Detection: Regex + ML (if enabled) + LLM Judge (if enabled)")
     app.run(host="0.0.0.0", port=port, debug=False)
