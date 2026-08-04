@@ -9,8 +9,9 @@ import re
 import json
 import time
 import secrets
+import hashlib
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, render_template_string, make_response
+from flask import Flask, request, jsonify, render_template_string, make_response, g
 from flask_cors import CORS, cross_origin
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -109,7 +110,8 @@ def init_db():
                 detection_layer TEXT,
                 ml_score DOUBLE PRECISION,
                 llm_score DOUBLE PRECISION,
-                llm_reason TEXT
+                llm_reason TEXT,
+                org_id TEXT DEFAULT 'default'
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_trace_pg ON spans(trace_id)")
@@ -117,6 +119,24 @@ def init_db():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_pg ON spans(blocked)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_detection_layer_pg ON spans(detection_layer)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_score_pg ON spans(llm_score)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_org_pg ON spans(org_id)")
+        # Migration douce pour une DB existante créée avant le multi-tenant
+        try:
+            cur.execute("ALTER TABLE spans ADD COLUMN IF NOT EXISTS org_id TEXT DEFAULT 'default'")
+        except Exception:
+            pass
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id SERIAL PRIMARY KEY,
+                key_hash TEXT UNIQUE NOT NULL,
+                org_id TEXT NOT NULL,
+                org_name TEXT,
+                plan TEXT DEFAULT 'free',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                active BOOLEAN DEFAULT TRUE
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_hash_pg ON api_keys(key_hash)")
         conn.commit()
         conn.close()
         print("[AG] ✅ PostgreSQL initialisé v4.1")
@@ -141,7 +161,8 @@ def init_db():
                 detection_layer TEXT,
                 ml_score REAL,
                 llm_score REAL,
-                llm_reason TEXT
+                llm_reason TEXT,
+                org_id TEXT DEFAULT 'default'
             )
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_trace ON spans(trace_id)")
@@ -149,6 +170,25 @@ def init_db():
         c.execute("CREATE INDEX IF NOT EXISTS idx_blocked ON spans(blocked)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_detection_layer ON spans(detection_layer)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_llm_score ON spans(llm_score)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_org ON spans(org_id)")
+        # Migration douce pour une DB SQLite existante (ADD COLUMN plante si
+        # la colonne existe déjà — on l'ignore proprement dans ce cas).
+        try:
+            c.execute("ALTER TABLE spans ADD COLUMN org_id TEXT DEFAULT 'default'")
+        except sqlite3.OperationalError:
+            pass
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key_hash TEXT UNIQUE NOT NULL,
+                org_id TEXT NOT NULL,
+                org_name TEXT,
+                plan TEXT DEFAULT 'free',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                active INTEGER DEFAULT 1
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)")
         conn.commit()
         conn.close()
         print("[AG] ✅ SQLite initialisé v4.1")
@@ -165,21 +205,69 @@ PROTECTED_ENDPOINTS = {
     "dashboard", "trace_detail", "get_detection_stats",
 }
 
+def safe_compare(a: str, b: str) -> bool:
+    """secrets.compare_digest plante (TypeError) si l'une des deux strings
+    contient du non-ASCII — n'importe quelle clé farfelue envoyée par un
+    client ferait planter l'auth en 500 au lieu d'un 401 propre. On encode
+    en UTF-8 d'abord : compare_digest sur bytes ne pose aucun problème."""
+    if a is None or b is None:
+        return False
+    try:
+        return secrets.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+    except Exception:
+        return False
+
+def hash_key(key: str) -> str:
+    return hashlib.sha256(key.encode()).hexdigest()
+
+def _lookup_org_by_key(key: str):
+    """Cherche la clé dans la table api_keys (clients hébergés payants).
+    Retourne l'org_id si trouvée et active, sinon None."""
+    if not key:
+        return None
+    key_hash = hash_key(key)
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_pg_conn() if is_pg else sqlite3.connect(DB_SQLITE_PATH)
+    cur = conn.cursor()
+    if is_pg:
+        cur.execute("SELECT org_id FROM api_keys WHERE key_hash = %s AND active = TRUE", (key_hash,))
+    else:
+        cur.execute("SELECT org_id FROM api_keys WHERE key_hash = ? AND active = 1", (key_hash,))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+def resolve_org_id(key: str):
+    """Retourne l'org_id associé à une clé valide, ou None si invalide.
+    La clé maître (AGENTGUARD_API_KEY, self-host) reste toujours valide et
+    mappée à l'org 'default' — rétrocompatible avec le mode single-tenant.
+    Les clés clients (hébergement payant) sont vérifiées par hash en base."""
+    if not key:
+        return None
+    if API_KEY and safe_compare(key, API_KEY):
+        return "default"
+    return _lookup_org_by_key(key)
+
 def require_auth():
     if not API_KEY:
+        g.org_id = "default"
         return True
     key = request.headers.get("X-API-Key", "")
-    if key == API_KEY:
+    org_id = resolve_org_id(key) if key else None
+    if not org_id:
+        key = request.args.get("api_key") or request.args.get("key") or ""
+        org_id = resolve_org_id(key) if key else None
+    if not org_id:
+        org_id = resolve_org_id(request.cookies.get(AUTH_COOKIE, ""))
+    if org_id:
+        g.org_id = org_id
         return True
-    key = request.args.get("api_key") or request.args.get("key") or ""
-    if key == API_KEY:
-        return True
-    return secrets.compare_digest(request.cookies.get(AUTH_COOKIE, ""), API_KEY)
+    return False
 
 def set_auth_cookie_if_valid(resp):
     key = request.args.get("api_key") or request.args.get("key")
-    if key == API_KEY:
-        resp.set_cookie(AUTH_COOKIE, API_KEY, httponly=True, samesite="Lax",
+    if key and resolve_org_id(key):
+        resp.set_cookie(AUTH_COOKIE, key, httponly=True, samesite="Lax",
                          secure=True, max_age=60 * 60 * 24 * 30)
     return resp
 
@@ -200,10 +288,24 @@ def check_auth():
 
 # ── API ──
 @app.route("/span", methods=["POST"])
-@limiter.limit("150 per minute")
+@limiter.limit("30 per minute")
 @cross_origin(origins="*", allow_headers=["Content-Type", "X-API-Key"])  # ✅ CORRECTION: allow_headers au lieu de headers
 def receive_span():
     data = request.json
+    if not isinstance(data, dict):
+        return jsonify({"error": "Body must be a JSON object"}), 400
+
+    required_fields = ["trace_id", "span_id", "span_type", "timestamp", "latency_ms"]
+    missing = [f for f in required_fields if f not in data]
+    if missing:
+        return jsonify({"error": f"Missing required field(s): {missing}"}), 400
+
+    data.setdefault("input_data", {})
+    data.setdefault("output_data", {})
+    data.setdefault("security_checks", [])
+    data.setdefault("blocked", False)
+    data.setdefault("cost_usd", 0.0)
+
     data["input_data"] = redact_pii(data.get("input_data", {}))
     data["output_data"] = redact_pii(data.get("output_data", {}))
     
@@ -238,8 +340,8 @@ def receive_span():
             INSERT INTO spans (
                 trace_id, span_id, span_type, timestamp, latency_ms,
                 input_data, output_data, security_checks, blocked,
-                block_reason, cost_usd, detection_layer, ml_score, llm_score, llm_reason
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                block_reason, cost_usd, detection_layer, ml_score, llm_score, llm_reason, org_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             data["trace_id"], data["span_id"], data["span_type"],
             data["timestamp"], data["latency_ms"],
@@ -247,7 +349,7 @@ def receive_span():
             json.dumps(data["output_data"]),
             json.dumps(data["security_checks"]),
             data["blocked"], data.get("block_reason"), data["cost_usd"],
-            detection_layer, ml_score, llm_score, llm_reason
+            detection_layer, ml_score, llm_score, llm_reason, g.org_id
         ))
     else:
         conn = sqlite3.connect(DB_SQLITE_PATH)
@@ -256,8 +358,8 @@ def receive_span():
             INSERT INTO spans (
                 trace_id, span_id, span_type, timestamp, latency_ms,
                 input_data, output_data, security_checks, blocked,
-                block_reason, cost_usd, detection_layer, ml_score, llm_score, llm_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                block_reason, cost_usd, detection_layer, ml_score, llm_score, llm_reason, org_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data["trace_id"], data["span_id"], data["span_type"],
             data["timestamp"], data["latency_ms"],
@@ -266,7 +368,7 @@ def receive_span():
             json.dumps(data["security_checks"]),
             1 if data["blocked"] else 0,
             data.get("block_reason"), data["cost_usd"],
-            detection_layer, ml_score, llm_score, llm_reason
+            detection_layer, ml_score, llm_score, llm_reason, g.org_id
         ))
 
     conn.commit()
@@ -280,20 +382,23 @@ def list_traces():
 
     if is_pg:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        org_filter = "%s"
     else:
         cur = conn.cursor()
+        org_filter = "?"
 
-    cur.execute("""
+    cur.execute(f"""
         SELECT trace_id, COUNT(*) as span_count,
                SUM(CASE WHEN blocked THEN 1 ELSE 0 END) as blocked_count,
                SUM(cost_usd) as total_cost,
                MAX(created_at) as last_seen,
                GROUP_CONCAT(DISTINCT detection_layer) as detection_layers
         FROM spans
+        WHERE org_id = {org_filter}
         GROUP BY trace_id
         ORDER BY last_seen DESC
         LIMIT 100
-    """)
+    """, (g.org_id,))
 
     rows = [dict_from_row(r, is_pg) for r in cur.fetchall()]
     conn.close()
@@ -306,10 +411,10 @@ def get_trace(trace_id):
 
     if is_pg:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("SELECT * FROM spans WHERE trace_id = %s ORDER BY timestamp", (trace_id,))
+        cur.execute("SELECT * FROM spans WHERE trace_id = %s AND org_id = %s ORDER BY timestamp", (trace_id, g.org_id))
     else:
         cur = conn.cursor()
-        cur.execute("SELECT * FROM spans WHERE trace_id = ? ORDER BY timestamp", (trace_id,))
+        cur.execute("SELECT * FROM spans WHERE trace_id = ? AND org_id = ? ORDER BY timestamp", (trace_id, g.org_id))
 
     rows = [dict_from_row(r, is_pg) for r in cur.fetchall()]
     for r in rows:
@@ -327,23 +432,25 @@ def get_metrics():
 
     if is_pg:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        p = "%s"
     else:
         cur = conn.cursor()
+        p = "?"
 
-    cur.execute("SELECT COUNT(*) FROM spans")
+    cur.execute(f"SELECT COUNT(*) FROM spans WHERE org_id = {p}", (g.org_id,))
     total_spans = cur.fetchone()[0]
 
-    cur.execute("SELECT COUNT(DISTINCT trace_id) FROM spans")
+    cur.execute(f"SELECT COUNT(DISTINCT trace_id) FROM spans WHERE org_id = {p}", (g.org_id,))
     total_traces = cur.fetchone()[0]
 
-    cur.execute("SELECT SUM(CASE WHEN blocked THEN 1 ELSE 0 END) FROM spans")
+    cur.execute(f"SELECT SUM(CASE WHEN blocked THEN 1 ELSE 0 END) FROM spans WHERE org_id = {p}", (g.org_id,))
     blocked = cur.fetchone()[0] or 0
 
-    cur.execute("SELECT SUM(cost_usd) FROM spans")
+    cur.execute(f"SELECT SUM(cost_usd) FROM spans WHERE org_id = {p}", (g.org_id,))
     total_cost = cur.fetchone()[0] or 0
 
     # Calcul de la latence moyenne
-    cur.execute("SELECT AVG(latency_ms) FROM spans WHERE latency_ms > 0")
+    cur.execute(f"SELECT AVG(latency_ms) FROM spans WHERE latency_ms > 0 AND org_id = {p}", (g.org_id,))
     avg_latency = cur.fetchone()[0] or 0
 
     # Statistiques de détection par couche
@@ -351,34 +458,28 @@ def get_metrics():
         cur.execute("""
             SELECT detection_layer, COUNT(*) as count
             FROM spans
-            WHERE detection_layer IS NOT NULL
+            WHERE detection_layer IS NOT NULL AND org_id = %s
             GROUP BY detection_layer
-        """)
+        """, (g.org_id,))
     else:
         cur.execute("""
             SELECT detection_layer, COUNT(*) as count
             FROM spans
-            WHERE detection_layer IS NOT NULL
+            WHERE detection_layer IS NOT NULL AND org_id = ?
             GROUP BY detection_layer
-        """)
+        """, (g.org_id,))
     detection_stats = {row[0]: row[1] for row in cur.fetchall()}
 
     # Score ML moyen
-    if is_pg:
-        cur.execute("SELECT AVG(ml_score) FROM spans WHERE ml_score IS NOT NULL")
-    else:
-        cur.execute("SELECT AVG(ml_score) FROM spans WHERE ml_score IS NOT NULL")
+    cur.execute(f"SELECT AVG(ml_score) FROM spans WHERE ml_score IS NOT NULL AND org_id = {p}", (g.org_id,))
     avg_ml_score = cur.fetchone()[0] or 0
 
     # Score LLM moyen
-    if is_pg:
-        cur.execute("SELECT AVG(llm_score) FROM spans WHERE llm_score IS NOT NULL")
-    else:
-        cur.execute("SELECT AVG(llm_score) FROM spans WHERE llm_score IS NOT NULL")
+    cur.execute(f"SELECT AVG(llm_score) FROM spans WHERE llm_score IS NOT NULL AND org_id = {p}", (g.org_id,))
     avg_llm_score = cur.fetchone()[0] or 0
 
     # Nombre de spans LLM Judge
-    cur.execute("SELECT COUNT(*) FROM spans WHERE detection_layer = 'llm_judge'")
+    cur.execute(f"SELECT COUNT(*) FROM spans WHERE detection_layer = 'llm_judge' AND org_id = {p}", (g.org_id,))
     llm_count = cur.fetchone()[0] or 0
 
     # Risques
@@ -386,14 +487,14 @@ def get_metrics():
         cur.execute("""
             SELECT jsonb_array_elements(security_checks) as check
             FROM spans
-            WHERE created_at > NOW() - INTERVAL '1 day'
-        """)
+            WHERE created_at > NOW() - INTERVAL '1 day' AND org_id = %s
+        """, (g.org_id,))
     else:
         cur.execute("""
             SELECT json_extract(security_checks, '$') as checks
             FROM spans
-            WHERE created_at > datetime('now', '-1 day')
-        """)
+            WHERE created_at > datetime('now', '-1 day') AND org_id = ?
+        """, (g.org_id,))
 
     risk_counts = {"low": 0, "medium": 0, "high": 0, "critical": 0}
     for row in cur.fetchall():
@@ -406,14 +507,14 @@ def get_metrics():
                 risk_counts[level] = risk_counts.get(level, 0) + 1
 
     # Top threats
-    cur.execute("""
+    cur.execute(f"""
         SELECT block_reason, COUNT(*) as count
         FROM spans
-        WHERE blocked = TRUE
+        WHERE blocked = TRUE AND org_id = {p}
         GROUP BY block_reason
         ORDER BY count DESC
         LIMIT 5
-    """)
+    """, (g.org_id,))
     top_threats = [{"reason": r[0], "count": r[1]} for r in cur.fetchall()]
 
     conn.close()
@@ -440,28 +541,30 @@ def get_detection_stats():
 
     if is_pg:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        p = "%s"
     else:
         cur = conn.cursor()
+        p = "?"
 
     # Distribution par couche de détection
-    cur.execute("""
+    cur.execute(f"""
         SELECT detection_layer, COUNT(*) as count
         FROM spans
-        WHERE detection_layer IS NOT NULL
+        WHERE detection_layer IS NOT NULL AND org_id = {p}
         GROUP BY detection_layer
         ORDER BY count DESC
-    """)
+    """, (g.org_id,))
     layer_distribution = [{"layer": r[0], "count": r[1]} for r in cur.fetchall()]
 
     # Précision par couche (ratio blocages / total)
-    cur.execute("""
+    cur.execute(f"""
         SELECT detection_layer,
                COUNT(*) as total,
                SUM(CASE WHEN blocked THEN 1 ELSE 0 END) as blocked
         FROM spans
-        WHERE detection_layer IS NOT NULL
+        WHERE detection_layer IS NOT NULL AND org_id = {p}
         GROUP BY detection_layer
-    """)
+    """, (g.org_id,))
     layer_accuracy = []
     for r in cur.fetchall():
         layer_accuracy.append({
@@ -472,7 +575,7 @@ def get_detection_stats():
         })
 
     # Distribution des scores ML
-    cur.execute("""
+    cur.execute(f"""
         SELECT
             CASE
                 WHEN ml_score >= 0.9 THEN '0.9-1.0'
@@ -484,14 +587,14 @@ def get_detection_stats():
             END as score_range,
             COUNT(*) as count
         FROM spans
-        WHERE ml_score IS NOT NULL
+        WHERE ml_score IS NOT NULL AND org_id = {p}
         GROUP BY score_range
         ORDER BY score_range DESC
-    """)
+    """, (g.org_id,))
     ml_score_distribution = [{"range": r[0], "count": r[1]} for r in cur.fetchall()]
 
     # Distribution des scores LLM
-    cur.execute("""
+    cur.execute(f"""
         SELECT
             CASE
                 WHEN llm_score >= 0.9 THEN 'high_risk'
@@ -500,9 +603,9 @@ def get_detection_stats():
             END as risk_category,
             COUNT(*) as count
         FROM spans
-        WHERE llm_score IS NOT NULL
+        WHERE llm_score IS NOT NULL AND org_id = {p}
         GROUP BY risk_category
-    """)
+    """, (g.org_id,))
     llm_score_distribution = [{"category": r[0], "count": r[1]} for r in cur.fetchall()]
 
     conn.close()
@@ -1092,10 +1195,10 @@ def trace_detail(trace_id):
     conn = get_db()
     if is_pg:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("SELECT * FROM spans WHERE trace_id = %s ORDER BY timestamp", (trace_id,))
+        cur.execute("SELECT * FROM spans WHERE trace_id = %s AND org_id = %s ORDER BY timestamp", (trace_id, g.org_id))
     else:
         cur = conn.cursor()
-        cur.execute("SELECT * FROM spans WHERE trace_id = ? ORDER BY timestamp", (trace_id,))
+        cur.execute("SELECT * FROM spans WHERE trace_id = ? AND org_id = ? ORDER BY timestamp", (trace_id, g.org_id))
     rows = [dict_from_row(r, is_pg) for r in cur.fetchall()]
     for r in rows:
         r["input_data"] = json.loads(r["input_data"])
@@ -1186,15 +1289,94 @@ def trace_detail(trace_id):
     resp = make_response(html)
     return set_auth_cookie_if_valid(resp)
 
+@app.errorhandler(Exception)
+def handle_unexpected_error(e):
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return e
+    app.logger.exception("Unhandled error")
+    return jsonify({"error": "Internal server error"}), 500
+
 @app.route("/api/key")
 @limiter.limit("5 per minute")
 def show_key():
     if not ADMIN_SECRET:
         return jsonify({"error": "AGENTGUARD_ADMIN_SECRET not configured — endpoint disabled"}), 404
     admin_secret = request.args.get("admin", "")
-    if secrets.compare_digest(admin_secret, ADMIN_SECRET):
+    if safe_compare(admin_secret, ADMIN_SECRET):
         return jsonify({"api_key": API_KEY})
     return jsonify({"error": "Admin secret required"}), 403
+
+@app.route("/admin/customers", methods=["POST"])
+@limiter.limit("10 per minute")
+def create_customer():
+    """Provisionne un nouveau client hébergé (Pro/Startup/Enterprise) :
+    génère une clé API, la stocke hashée, et la retourne UNE SEULE FOIS
+    (comme pour n'importe quel provider — on ne peut plus la relire ensuite).
+    Protégé par AGENTGUARD_ADMIN_SECRET, comme /api/key."""
+    if not ADMIN_SECRET:
+        return jsonify({"error": "AGENTGUARD_ADMIN_SECRET not configured — endpoint disabled"}), 404
+    admin_secret = request.headers.get("X-Admin-Secret", "") or request.args.get("admin", "")
+    if not safe_compare(admin_secret, ADMIN_SECRET):
+        return jsonify({"error": "Admin secret required"}), 403
+
+    payload = request.json or {}
+    org_name = payload.get("org_name", "").strip()
+    plan = payload.get("plan", "free")
+    if not org_name:
+        return jsonify({"error": "org_name is required"}), 400
+    if plan not in ("free", "pro", "startup", "enterprise"):
+        return jsonify({"error": "plan must be one of: free, pro, startup, enterprise"}), 400
+
+    org_id = f"org_{secrets.token_urlsafe(8)}"
+    new_key = "ag_" + secrets.token_urlsafe(32)
+    key_hash = hash_key(new_key)
+
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_pg_conn() if is_pg else sqlite3.connect(DB_SQLITE_PATH)
+    cur = conn.cursor()
+    if is_pg:
+        cur.execute(
+            "INSERT INTO api_keys (key_hash, org_id, org_name, plan) VALUES (%s, %s, %s, %s)",
+            (key_hash, org_id, org_name, plan),
+        )
+    else:
+        cur.execute(
+            "INSERT INTO api_keys (key_hash, org_id, org_name, plan) VALUES (?, ?, ?, ?)",
+            (key_hash, org_id, org_name, plan),
+        )
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        "org_id": org_id,
+        "org_name": org_name,
+        "plan": plan,
+        "api_key": new_key,
+        "warning": "Cette clé ne sera plus jamais affichée — transmets-la au client maintenant.",
+    }), 201
+
+@app.route("/admin/customers/<org_id>/revoke", methods=["POST"])
+@limiter.limit("10 per minute")
+def revoke_customer(org_id):
+    """Désactive toutes les clés d'un client (résiliation, impayé, abus)."""
+    if not ADMIN_SECRET:
+        return jsonify({"error": "AGENTGUARD_ADMIN_SECRET not configured — endpoint disabled"}), 404
+    admin_secret = request.headers.get("X-Admin-Secret", "") or request.args.get("admin", "")
+    if not safe_compare(admin_secret, ADMIN_SECRET):
+        return jsonify({"error": "Admin secret required"}), 403
+
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_pg_conn() if is_pg else sqlite3.connect(DB_SQLITE_PATH)
+    cur = conn.cursor()
+    if is_pg:
+        cur.execute("UPDATE api_keys SET active = FALSE WHERE org_id = %s", (org_id,))
+    else:
+        cur.execute("UPDATE api_keys SET active = 0 WHERE org_id = ?", (org_id,))
+    affected = cur.rowcount
+    conn.commit()
+    conn.close()
+    return jsonify({"org_id": org_id, "keys_revoked": affected})
 
 if _API_KEY_WAS_GENERATED and DB_TYPE == "postgres":
     print("[AG] 🚨 PostgreSQL actif (config prod) mais AGENTGUARD_API_KEY n'est "
@@ -1208,3 +1390,4 @@ if __name__ == "__main__":
     print(f"   DB: {DB_TYPE}")
     print(f"   Detection: Regex + ML (if enabled) + LLM Judge (if enabled)")
     app.run(host="0.0.0.0", port=port, debug=False)
+
