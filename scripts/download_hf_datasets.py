@@ -4,18 +4,36 @@ import os
 os.makedirs("datasets/hf", exist_ok=True)
 
 datasets_to_try = [
-    "deepset/prompt-injections",
-    "JailbreakBench/JBB-Behaviors",
+    {
+        "name": "deepset/prompt-injections",
+        "config": None
+    },
+    {
+        "name": "JailbreakBench/JBB-Behaviors",
+        "config": "behaviors"
+    },
 ]
 
-for name in datasets_to_try:
+for item in datasets_to_try:
+    name = item["name"]
+    config = item["config"]
+
     print(f"\n===== {name} =====")
 
     try:
-        ds = load_dataset(name)
+        if config:
+            ds = load_dataset(name, config)
+        else:
+            ds = load_dataset(name)
+
         print(ds)
 
-        out = os.path.join("datasets", "hf", name.replace("/", "_"))
+        out = os.path.join(
+            "datasets",
+            "hf",
+            name.replace("/", "_")
+        )
+
         ds.save_to_disk(out)
 
         print("Saved ->", out)
