@@ -70,11 +70,9 @@ class MLDetector:
         self.threshold = self._float_env(
             "AGENTGUARD_ML_THRESHOLD", 0.85, 0.0, 1.0
         )
-        
-        # ═══════════════════════════════════════════════════════════
-        # ✅ SUPPORT HUGGING FACE + FALLBACK LOCAL
-        # ═══════════════════════════════════════════════════════════
-        self.model_path = os.getenv("AGENTGUARD_MODEL_PATH", "./agentguard-model")
+        self.model_path = os.getenv(
+            "AGENTGUARD_MODEL_PATH", "./agentguard-model"
+        )
         self.model_name = os.getenv(
             "AGENTGUARD_MODEL_NAME",
             "distilbert-base-uncased-finetuned-sst-2-english"
@@ -91,12 +89,9 @@ class MLDetector:
             import torch
 
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
-            
-            # ═══════════════════════════════════════════════════════
-            # ✅ ESSAYER LOCAL D'ABORD, PUIS HF
-            # ═══════════════════════════════════════════════════════
+
+            # Essayer de charger depuis le dossier local d'abord
             try:
-                # Tenter de charger depuis le dossier local
                 if os.path.exists(self.model_path):
                     print(f"[AG] 📂 Chargement du modèle local: {self.model_path}")
                     self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
@@ -108,7 +103,7 @@ class MLDetector:
                 print(f"[AG] ⬇️ Téléchargement du modèle depuis HF: {self.model_name}")
                 self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
                 self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
-                
+
                 # Sauvegarder localement pour les prochains démarrages
                 try:
                     os.makedirs(self.model_path, exist_ok=True)
@@ -117,12 +112,12 @@ class MLDetector:
                     print(f"[AG] 💾 Modèle sauvegardé localement dans: {self.model_path}")
                 except Exception as save_err:
                     warnings.warn(f"[AG] ⚠️ Impossible de sauvegarder le modèle: {save_err}")
-            
+
             self.model.to(self.device)
             self.model.eval()
 
             print(f"[AG] ✅ ML activé ({self.device}, threshold={self.threshold:.2f})")
-            
+
         except ImportError:
             warnings.warn("[AG] transformers/torch absent — ML désactivé")
             self.enabled = False
@@ -215,12 +210,9 @@ class PolicyEngine:
 
         self.ml_detector = MLDetector()
 
-        # ═══════════════════════════════════════════════════════════
-        # ✅ LLM JUDGE - Lecture robuste des variables d'environnement
-        # ═══════════════════════════════════════════════════════════
         env_value = os.getenv("AGENTGUARD_USE_LLM_JUDGE", "false").lower()
         self.use_llm_judge = env_value in ("true", "1", "on", "yes")
-        
+
         if self.use_llm_judge:
             print(f"[AG] 🔍 LLM Judge activé")
 
@@ -281,7 +273,6 @@ class PolicyEngine:
             r"\bnouvelles?\s+instructions?\s*:",
             r"\br[ée]v[èe]le\s+(?:ton|le)\s+(?:prompt|invite)\s+syst[èe]me\b",
             r"\bignore\s+(?:ce\s+)?qui\s+pr[ée]c[èe]de\b",
-            # NOUVEAUX PATTERNS
             r"\bDAN\s+mode\b",
             r"\bdeveloper\s+mode\b",
             r"\bunrestricted\s+(?:AI|assistant|mode)\b",
@@ -338,9 +329,6 @@ class PolicyEngine:
 
         strong_matches = self.strong_regex.findall(text)
 
-        # ═══════════════════════════════════════════════════════════
-        # ✅ LLM Judge sur les cas Regex FORT (validation)
-        # ═══════════════════════════════════════════════════════════
         if strong_matches and self.use_llm_judge:
             judge_result = self._call_llm_judge(text)
             if judge_result and not judge_result.passed:
@@ -361,7 +349,6 @@ class PolicyEngine:
                 SecurityAction.BLOCK,
             )
 
-        # ML
         if self.ml_detector.enabled:
             ml_result = self.ml_detector.predict(text)
             score = ml_result["score"]
@@ -412,9 +399,6 @@ class PolicyEngine:
                 ),
             )
 
-        # ═══════════════════════════════════════════════════════════
-        # ✅ LLM Judge pour les attaques sémantiques (jailbreak déguisés)
-        # ═══════════════════════════════════════════════════════════
         if self.use_llm_judge:
             judge_result = self._call_llm_judge(text)
             if judge_result:
