@@ -70,8 +70,14 @@ class MLDetector:
         self.threshold = self._float_env(
             "AGENTGUARD_ML_THRESHOLD", 0.85, 0.0, 1.0
         )
-        self.model_path = os.getenv(
-            "AGENTGUARD_MODEL_PATH", "./agentguard-model"
+        
+        # ═══════════════════════════════════════════════════════════
+        # ✅ SUPPORT HUGGING FACE + FALLBACK LOCAL
+        # ═══════════════════════════════════════════════════════════
+        self.model_path = os.getenv("AGENTGUARD_MODEL_PATH", "./agentguard-model")
+        self.model_name = os.getenv(
+            "AGENTGUARD_MODEL_NAME",
+            "distilbert-base-uncased-finetuned-sst-2-english"
         )
 
         if not self.enabled:
@@ -85,26 +91,43 @@ class MLDetector:
             import torch
 
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
-            self.model = AutoModelForSequenceClassification.from_pretrained(
-                self.model_path
-            )
+            
+            # ═══════════════════════════════════════════════════════
+            # ✅ ESSAYER LOCAL D'ABORD, PUIS HF
+            # ═══════════════════════════════════════════════════════
+            try:
+                # Tenter de charger depuis le dossier local
+                if os.path.exists(self.model_path):
+                    print(f"[AG] 📂 Chargement du modèle local: {self.model_path}")
+                    self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+                    self.model = AutoModelForSequenceClassification.from_pretrained(self.model_path)
+                else:
+                    raise FileNotFoundError(f"Modèle local non trouvé: {self.model_path}")
+            except Exception as e:
+                # Fallback: télécharger depuis Hugging Face
+                print(f"[AG] ⬇️ Téléchargement du modèle depuis HF: {self.model_name}")
+                self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+                self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+                
+                # Sauvegarder localement pour les prochains démarrages
+                try:
+                    os.makedirs(self.model_path, exist_ok=True)
+                    self.model.save_pretrained(self.model_path)
+                    self.tokenizer.save_pretrained(self.model_path)
+                    print(f"[AG] 💾 Modèle sauvegardé localement dans: {self.model_path}")
+                except Exception as save_err:
+                    warnings.warn(f"[AG] ⚠️ Impossible de sauvegarder le modèle: {save_err}")
+            
             self.model.to(self.device)
             self.model.eval()
 
-            print(
-                f"[AG] ML activé "
-                f"({self.device}, threshold={self.threshold:.2f})"
-            )
+            print(f"[AG] ✅ ML activé ({self.device}, threshold={self.threshold:.2f})")
+            
         except ImportError:
-            warnings.warn(
-                "[AG] transformers/torch absent — ML désactivé"
-            )
+            warnings.warn("[AG] transformers/torch absent — ML désactivé")
             self.enabled = False
         except Exception as exc:
-            warnings.warn(
-                f"[AG] Impossible de charger le modèle ML: {exc}"
-            )
+            warnings.warn(f"[AG] Impossible de charger le modèle ML: {exc}")
             self.enabled = False
 
     @staticmethod
@@ -192,25 +215,26 @@ class PolicyEngine:
 
         self.ml_detector = MLDetector()
 
-        self.use_llm_judge = (
-            os.getenv(
-                "AGENTGUARD_USE_LLM_JUDGE",
-                "false",
-            ).lower()
-            == "true"
-        )
+        # ═══════════════════════════════════════════════════════════
+        # ✅ LLM JUDGE - Lecture robuste des variables d'environnement
+        # ═══════════════════════════════════════════════════════════
+        env_value = os.getenv("AGENTGUARD_USE_LLM_JUDGE", "false").lower()
+        self.use_llm_judge = env_value in ("true", "1", "on", "yes")
+        
+        if self.use_llm_judge:
+            print(f"[AG] 🔍 LLM Judge activé")
 
         self.block_on_ambiguous = (
             os.getenv(
                 "AGENTGUARD_BLOCK_ON_AMBIGUOUS",
                 "false",
             ).lower()
-            == "true"
+            in ("true", "1", "on", "yes")
         )
 
         self.judge_timeout = self._timeout_env(
             "AGENTGUARD_JUDGE_TIMEOUT",
-            8.0,
+            15.0,
         )
 
         try:
@@ -257,6 +281,28 @@ class PolicyEngine:
             r"\bnouvelles?\s+instructions?\s*:",
             r"\br[ée]v[èe]le\s+(?:ton|le)\s+(?:prompt|invite)\s+syst[èe]me\b",
             r"\bignore\s+(?:ce\s+)?qui\s+pr[ée]c[èe]de\b",
+            # NOUVEAUX PATTERNS
+            r"\bDAN\s+mode\b",
+            r"\bdeveloper\s+mode\b",
+            r"\bunrestricted\s+(?:AI|assistant|mode)\b",
+            r"\bno\s+(?:restrictions|limits|filters)\b",
+            r"\bbypass\s+(?:safety|security|content)\s+(?:filters|restrictions|guidelines)\b",
+            r"\b(?:pretend|act)\s+as\s+if\s+you\s+(?:are|were)\s+unrestricted\b",
+            r"\bexport\s+(?:all|the)?\s+(?:data|customer|database|records)\b",
+            r"\bsend\s+me\s+(?:your|the)\s+(?:training|system|confidential)\s+data\b",
+            r"\bextract\s+(?:all|the)\s+(?:sensitive|confidential|secret)\s+(?:data|information)\b",
+            r"\bleak\s+(?:the|all)?\s+(?:source\s+code|api\s+keys|credentials|secrets)\b",
+            r"\btransfer\s+(?:funds|money|payment)\s+to\b",
+            r"\bdelete\s+(?:all|the)?\s+(?:records|data|files|logs)\b",
+            r"\bdrop\s+(?:table|database)\b",
+            r"\bexecute\s+(?:shell|command|code)\b",
+            r"\brm\s+-rf\b",
+            r"\bformat\s+[a-z]:\b",
+            r"\bgrant\s+(?:full|admin|root)\s+access\b",
+            r"\bcreate\s+(?:admin|backdoor)\s+user\b",
+            r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
+            r"\b\d{3}-\d{2}-\d{4}\b",
+            r"\b(?:\d[ -]*?){13,19}\b",
         ]
 
         weak = [
@@ -292,6 +338,14 @@ class PolicyEngine:
 
         strong_matches = self.strong_regex.findall(text)
 
+        # ═══════════════════════════════════════════════════════════
+        # ✅ LLM Judge sur les cas Regex FORT (validation)
+        # ═══════════════════════════════════════════════════════════
+        if strong_matches and self.use_llm_judge:
+            judge_result = self._call_llm_judge(text)
+            if judge_result and not judge_result.passed:
+                return judge_result
+
         if strong_matches:
             return SecurityCheck(
                 "prompt_injection",
@@ -307,20 +361,17 @@ class PolicyEngine:
                 SecurityAction.BLOCK,
             )
 
+        # ML
         if self.ml_detector.enabled:
             ml_result = self.ml_detector.predict(text)
             score = ml_result["score"]
 
-            if (
-                ml_result["risk"] == "HIGH"
-                and score >= 0.95
-            ):
+            if ml_result["risk"] == "HIGH" and score >= 0.95:
                 return SecurityCheck(
                     "prompt_injection",
                     False,
                     RiskLevel.HIGH,
-                    f"ML detected threat "
-                    f"(score: {score:.2%})",
+                    f"ML detected threat (score: {score:.2%})",
                     {
                         "ml_score": score,
                         "confidence": ml_result["confidence"],
@@ -329,12 +380,8 @@ class PolicyEngine:
                     SecurityAction.BLOCK,
                 )
 
-            if (
-                ml_result["risk"] == "HIGH"
-                and self.use_llm_judge
-            ):
+            if ml_result["risk"] == "HIGH" and self.use_llm_judge:
                 judge_result = self._call_llm_judge(text)
-
                 if judge_result:
                     return judge_result
 
@@ -342,13 +389,11 @@ class PolicyEngine:
 
         if weak_matches and self.use_llm_judge:
             judge_result = self._call_llm_judge(text)
-
             if judge_result:
                 return judge_result
 
         if weak_matches:
             blocked = self.block_on_ambiguous
-
             return SecurityCheck(
                 "prompt_injection",
                 not blocked,
@@ -366,6 +411,14 @@ class PolicyEngine:
                     else SecurityAction.REVIEW
                 ),
             )
+
+        # ═══════════════════════════════════════════════════════════
+        # ✅ LLM Judge pour les attaques sémantiques (jailbreak déguisés)
+        # ═══════════════════════════════════════════════════════════
+        if self.use_llm_judge:
+            judge_result = self._call_llm_judge(text)
+            if judge_result:
+                return judge_result
 
         return SecurityCheck(
             "prompt_injection",
@@ -400,10 +453,6 @@ class PolicyEngine:
     ) -> Optional[SecurityCheck]:
         """
         Analyse sémantique d'un cas ambigu.
-
-        En cas d'indisponibilité du LLM, retourne None :
-        le moteur ne doit pas considérer une panne du fournisseur
-        comme une preuve de sécurité.
         """
 
         api_key = (
