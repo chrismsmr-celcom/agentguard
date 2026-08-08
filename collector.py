@@ -915,2365 +915,583 @@ def api_trend_daily():
 # ── DASHBOARD (Professional UI) ──
 DASHBOARD_HTML = r'''
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#080b12">
 <title>AgentGuard — AI Runtime Security</title>
 <style>
-/* ============================================
-   THEME CLAIR & VIF — AgentGuard Dashboard
-   ============================================ */
-
-:root {
-  /* Fonds clairs */
-  --bg-deep: #f8fafc;
-  --bg-base: #ffffff;
-  --bg-surface: #f1f5f9;
-  --bg-elevated: #e2e8f0;
-
-  /* Bordures */
-  --border-subtle: #e2e8f0;
-  --border-default: #cbd5e1;
-  --border-active: #94a3b8;
-
-  /* Texte */
-  --text-primary: #0f172a;
-  --text-secondary: #334155;
-  --text-tertiary: #64748b;
-  --text-muted: #94a3b8;
-
-  /* Couleurs VIVES */
-  --accent: #0284c7;
-  --accent-soft: #0ea5e9;
-  --success: #16a34a;
-  --warning: #f59e0b;
-  --danger: #dc2626;
-  --info: #7c3aed;
-  --pink: #db2777;
-  --teal: #0d9488;
-
-  --space-xs: 4px;
-  --space-sm: 8px;
-  --space-md: 16px;
-  --space-lg: 24px;
-  --space-xl: 32px;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
-  --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
-  --shadow-lg: 0 8px 32px rgba(0,0,0,0.1);
-}
-
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-html, body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: var(--bg-deep);
-  color: var(--text-primary);
-  font-size: 14px;
-  line-height: 1.5;
-  min-height: 100vh;
-  -webkit-font-smoothing: antialiased;
-}
-
-.app { display: flex; min-height: 100vh; }
-
-/* Sidebar claire */
-.sidebar {
-  width: 260px;
-  background: var(--bg-base);
-  border-right: 1px solid var(--border-subtle);
-  position: fixed;
-  inset: 0 auto 0 0;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  padding: var(--space-lg) 0;
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 var(--space-lg) var(--space-xl);
-  border-bottom: 1px solid var(--border-subtle);
-  margin: 0 var(--space-md) var(--space-md);
-  padding-bottom: var(--space-lg);
-}
-
-.brand-mark {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-md);
-  background: linear-gradient(135deg, var(--accent), var(--info));
-  display: grid;
-  place-items: center;
-  color: white;
-  font-weight: 800;
-  font-size: 18px;
-  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.3);
-}
-
-.brand-text strong {
-  font-size: 17px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  display: block;
-  color: var(--text-primary);
-}
-
-.brand-text span {
-  font-size: 11px;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  margin-top: 2px;
-  display: block;
-  font-weight: 600;
-}
-
-.nav {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0 var(--space-sm);
-}
-
-.nav-label {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--text-muted);
-  padding: var(--space-lg) var(--space-md) var(--space-sm);
-}
-
-.nav button {
-  width: 100%;
-  border: none;
-  background: transparent;
-  color: var(--text-tertiary);
-  text-align: left;
-  padding: 11px var(--space-md);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  transition: all 0.15s ease;
-  margin-bottom: 3px;
-}
-
-.nav button:hover {
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-}
-
-.nav button.active {
-  background: rgba(2, 132, 199, 0.1);
-  color: var(--accent);
-  font-weight: 700;
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-
-.nav button svg {
-  width: 18px;
-  height: 18px;
-  stroke: currentColor;
-  stroke-width: 2;
-  fill: none;
-  flex-shrink: 0;
-}
-
-.sidebar-footer {
-  margin-top: auto;
-  padding: var(--space-md) var(--space-lg) 0;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.status-indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-tertiary);
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--success);
-  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.2);
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-.version {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-top: var(--space-sm);
-  font-weight: 500;
-}
-
-/* Main */
-.main {
-  margin-left: 260px;
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.topbar {
-  height: 68px;
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--border-subtle);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 var(--space-xl);
-  position: sticky;
-  top: 0;
-  z-index: 40;
-}
-
-.breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 14px;
-}
-
-.breadcrumb small { color: var(--text-muted); font-size: 13px; font-weight: 500; }
-.breadcrumb strong { font-weight: 700; color: var(--text-primary); }
-
-.top-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-/* Content */
-.content {
-  padding: var(--space-xl);
-  max-width: 1600px;
-  margin: 0 auto;
-  width: 100%;
-}
-
-/* Page Header */
-.page-header {
-  margin-bottom: var(--space-xl);
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: var(--space-md);
-}
-
-.page-header-left { flex: 1; }
-
-.eyebrow {
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--accent);
-  margin-bottom: var(--space-xs);
-}
-
-.page-title {
-  font-size: 30px;
-  font-weight: 900;
-  letter-spacing: -0.03em;
-  color: var(--text-primary);
-  margin-bottom: var(--space-xs);
-}
-
-.page-subtitle {
-  font-size: 14px;
-  color: var(--text-tertiary);
-  max-width: 600px;
-  line-height: 1.6;
-  font-weight: 500;
-}
-
-/* Buttons */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 9px 16px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-default);
-  background: var(--bg-base);
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  box-shadow: var(--shadow-sm);
-}
-
-.btn:hover {
-  background: var(--bg-surface);
-  border-color: var(--border-active);
-  color: var(--text-primary);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
-}
-
-.btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: white;
-  font-weight: 700;
-}
-
-.btn-primary:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent-soft);
-  box-shadow: 0 4px 16px rgba(2, 132, 199, 0.3);
-  transform: translateY(-1px);
-}
-
-.btn-ghost {
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-}
-
-/* Badges */
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.badge-success {
-  background: rgba(22, 163, 74, 0.12);
-  color: var(--success);
-  border: 1px solid rgba(22, 163, 74, 0.25);
-}
-
-.badge-danger {
-  background: rgba(220, 38, 38, 0.1);
-  color: var(--danger);
-  border: 1px solid rgba(220, 38, 38, 0.2);
-}
-
-.badge-neutral {
-  background: rgba(148, 163, 184, 0.15);
-  color: var(--text-tertiary);
-  border: 1px solid rgba(148, 163, 184, 0.25);
-}
-
-.badge-warning {
-  background: rgba(245, 158, 11, 0.12);
-  color: #d97706;
-  border: 1px solid rgba(245, 158, 11, 0.25);
-}
-
-/* Cards */
-.card {
-  background: var(--bg-base);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  transition: all 0.2s ease;
-}
-
-.card:hover {
-  box-shadow: var(--shadow-md);
-  border-color: var(--border-default);
-  transform: translateY(-1px);
-}
-
-.card-header {
-  padding: var(--space-md) var(--space-lg);
-  border-bottom: 1px solid var(--border-subtle);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.card-title {
-  font-size: 15px;
-  font-weight: 800;
-  color: var(--text-primary);
-}
-
-.card-subtitle {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-top: 3px;
-  font-weight: 500;
-}
-
-.card-body {
-  padding: var(--space-lg);
-}
-
-/* Grids */
-.grid-kpi {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: var(--space-md);
-  margin-bottom: var(--space-xl);
-}
-
-.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-md); }
-.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-md); }
-.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-md); }
-
-.layout-split {
-  display: grid;
-  grid-template-columns: 1.6fr 0.8fr;
-  gap: var(--space-md);
-}
-
-/* KPI Cards */
-.kpi-card {
-  padding: var(--space-lg);
-  position: relative;
-  overflow: hidden;
-  background: linear-gradient(135deg, var(--bg-base), var(--bg-surface));
-}
-
-.kpi-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: var(--space-sm);
-}
-
-.kpi-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.kpi-value {
-  font-size: 34px;
-  font-weight: 900;
-  letter-spacing: -0.04em;
-  color: var(--text-primary);
-  margin: var(--space-sm) 0;
-  line-height: 1;
-}
-
-.kpi-trend {
-  font-size: 12px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.trend-up { color: var(--success); }
-.trend-down { color: var(--danger); }
-.trend-neutral { color: var(--text-muted); }
-
-.kpi-sparkline {
-  position: absolute;
-  top: var(--space-md);
-  right: var(--space-md);
-  opacity: 0.5;
-}
-
-/* Tables */
-.table-container {
-  overflow-x: auto;
-  border-radius: var(--radius-md);
-}
-
-.data-table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 13px;
-}
-
-.data-table th {
-  text-align: left;
-  padding: 14px var(--space-md);
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--text-muted);
-  background: var(--bg-surface);
-  border-bottom: 1px solid var(--border-subtle);
-  white-space: nowrap;
-}
-
-.data-table th:first-child { border-radius: var(--radius-md) 0 0 0; }
-.data-table th:last-child { border-radius: 0 var(--radius-md) 0 0; }
-
-.data-table td {
-  padding: 14px var(--space-md);
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  vertical-align: middle;
-  font-weight: 500;
-}
-
-.data-table tr:hover td {
-  background: rgba(241, 245, 249, 0.8);
-}
-
-.data-table tr:last-child td:first-child { border-radius: 0 0 0 var(--radius-md); }
-.data-table tr:last-child td:last-child { border-radius: 0 0 var(--radius-md) 0; }
-
-.mono {
-  font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-/* List Items */
-.list-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px var(--space-md);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-base);
-  margin-bottom: var(--space-sm);
-  transition: all 0.15s ease;
-  cursor: pointer;
-  box-shadow: var(--shadow-sm);
-}
-
-.list-item:hover {
-  border-color: var(--border-active);
-  background: var(--bg-surface);
-  transform: translateX(3px);
-  box-shadow: var(--shadow-md);
-}
-
-.list-item-main { min-width: 0; flex: 1; }
-
-.list-item-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.list-item-meta {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-top: 3px;
-  font-weight: 500;
-}
-
-.list-item-value {
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--text-primary);
-  white-space: nowrap;
-}
-
-/* Progress Bars */
-.progress-bar {
-  height: 8px;
-  background: var(--bg-elevated);
-  border-radius: 999px;
-  overflow: hidden;
-  margin-top: var(--space-sm);
-}
-
-.progress-fill {
-  height: 100%;
-  border-radius: 999px;
-  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.progress-fill.success { background: linear-gradient(90deg, #22c55e, #4ade80); }
-.progress-fill.warning { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
-.progress-fill.danger { background: linear-gradient(90deg, #dc2626, #f87171); }
-.progress-fill.info { background: linear-gradient(90deg, #0284c7, #38bdf8); }
-
-/* Charts */
-.chart-container {
-  position: relative;
-  height: 260px;
-  width: 100%;
-}
-
-.chart-container svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.chart-legend {
-  display: flex;
-  gap: var(--space-lg);
-  align-items: center;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-tertiary);
-}
-
-.legend-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  display: inline-block;
-  margin-right: 6px;
-}
-
-/* Heatmap */
-.heatmap-grid {
-  display: grid;
-  grid-template-columns: repeat(24, 1fr);
-  gap: 3px;
-}
-
-.heatmap-cell {
-  aspect-ratio: 1;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: transform 0.15s ease, opacity 0.2s ease;
-  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.05);
-}
-
-.heatmap-cell:hover {
-  transform: scale(1.25);
-  z-index: 2;
-  opacity: 1 !important;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-}
-
-/* Layer Badges */
-.layer-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.layer-regex {
-  background: rgba(59, 130, 246, 0.12);
-  color: #2563eb;
-  border: 1px solid rgba(59, 130, 246, 0.25);
-}
-
-.layer-ml {
-  background: rgba(139, 92, 246, 0.12);
-  color: #7c3aed;
-  border: 1px solid rgba(139, 92, 246, 0.25);
-}
-
-.layer-llm {
-  background: rgba(245, 158, 11, 0.12);
-  color: #d97706;
-  border: 1px solid rgba(245, 158, 11, 0.25);
-}
-
-.layer-mixed {
-  background: rgba(236, 72, 153, 0.12);
-  color: #db2777;
-  border: 1px solid rgba(236, 72, 153, 0.25);
-}
-
-/* Modal */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(8px);
-  z-index: 100;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-xl);
-}
-
-.modal-overlay.open { display: flex; }
-
-.modal-box {
-  width: min(900px, 100%);
-  max-height: 85vh;
-  overflow: auto;
-  background: var(--bg-base);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-}
-
-.modal-header {
-  padding: var(--space-lg) var(--space-xl);
-  border-bottom: 1px solid var(--border-subtle);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  position: sticky;
-  top: 0;
-  background: rgba(255, 255, 255, 0.98);
-  backdrop-filter: blur(10px);
-  z-index: 2;
-}
-
-.modal-body { padding: var(--space-xl); }
-
-.modal-close {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-default);
-  background: var(--bg-surface);
-  color: var(--text-tertiary);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  font-size: 20px;
-  font-weight: 700;
-  transition: all 0.15s ease;
-}
-
-.modal-close:hover {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: white;
-  transform: rotate(90deg);
-}
-
-/* Timeline */
-.timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-.timeline-event {
-  display: grid;
-  grid-template-columns: 100px 20px 1fr;
-  gap: var(--space-md);
-  min-height: 80px;
-  position: relative;
-}
-
-.timeline-time {
-  font-size: 11px;
-  color: var(--text-muted);
-  text-align: right;
-  padding-top: 4px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-
-.timeline-line {
-  position: relative;
-  display: flex;
-  justify-content: center;
-}
-
-.timeline-line::before {
-  content: "";
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--accent);
-  position: absolute;
-  top: 3px;
-  box-shadow: 0 0 0 4px rgba(2, 132, 199, 0.15);
-  z-index: 2;
-}
-
-.timeline-line::after {
-  content: "";
-  position: absolute;
-  width: 2px;
-  background: var(--border-default);
-  top: 20px;
-  bottom: -10px;
-}
-
-.timeline-event:last-child .timeline-line::after { display: none; }
-
-.timeline-card {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-surface);
-  padding: var(--space-md);
-  margin-bottom: var(--space-md);
-  box-shadow: var(--shadow-sm);
-}
-
-.timeline-card.blocked {
-  border-color: rgba(220, 38, 38, 0.3);
-  background: rgba(220, 38, 38, 0.04);
-}
-
-.timeline-title {
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  flex-wrap: wrap;
-}
-
-.timeline-meta {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-top: 6px;
-  line-height: 1.6;
-  font-weight: 500;
-}
-
-.json-block {
-  background: var(--bg-deep);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: var(--space-md);
-  margin-top: var(--space-sm);
-  font-family: 'SF Mono', ui-monospace, monospace;
-  font-size: 11px;
-  line-height: 1.6;
-  color: var(--text-tertiary);
-  max-height: 200px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-weight: 500;
-}
-
-/* Search */
-.search-bar {
-  display: flex;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-lg);
-  flex-wrap: wrap;
-}
-
-.search-input,
-.search-select {
-  background: var(--bg-base);
-  border: 1px solid var(--border-default);
-  color: var(--text-secondary);
-  padding: 11px 16px;
-  border-radius: var(--radius-md);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  outline: none;
-  transition: all 0.15s ease;
-  box-shadow: var(--shadow-sm);
-}
-
-.search-input:focus,
-.search-select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.1), var(--shadow-sm);
-}
-
-.search-input { flex: 1; min-width: 240px; }
-.search-select { min-width: 140px; }
-
-/* Empty States */
-.empty-state {
-  text-align: center;
-  padding: var(--space-xl);
-  color: var(--text-muted);
-}
-
-.empty-state-icon {
-  font-size: 40px;
-  margin-bottom: var(--space-md);
-  opacity: 0.4;
-}
-
-.empty-state-title {
-  font-size: 16px;
-  font-weight: 800;
-  color: var(--text-secondary);
-  margin-bottom: var(--space-xs);
-}
-
-.empty-state-desc {
-  font-size: 13px;
-  max-width: 500px;
-  margin: 0 auto;
-  line-height: 1.7;
-  font-weight: 500;
-}
-
-/* Toast */
-.toast {
-  position: fixed;
-  right: var(--space-xl);
-  bottom: var(--space-xl);
-  background: var(--bg-base);
-  border: 1px solid var(--border-default);
-  padding: 16px 20px;
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-secondary);
-  z-index: 200;
-  opacity: 0;
-  transform: translateY(10px);
-  transition: all 0.3s ease;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.toast.show {
-  opacity: 1;
-  transform: none;
-}
-
-/* Views */
-.view {
-  display: none;
-  animation: fadeIn 0.3s ease;
-}
-
-.view.active { display: block; }
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: none; }
-}
-
-/* Mobile */
-.mobile-toggle {
-  display: none;
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 22px;
-  cursor: pointer;
-  padding: 4px;
-  font-weight: 700;
-}
-
-.mobile-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.3);
-  z-index: 45;
-}
-
-@media (max-width: 1100px) {
-  .grid-4 { grid-template-columns: repeat(2, 1fr); }
-  .layout-split { grid-template-columns: 1fr; }
-}
-
-@media (max-width: 768px) {
-  .sidebar {
-    transform: translateX(-100%);
-    transition: transform 0.3s ease;
-    width: 280px;
-    box-shadow: var(--shadow-lg);
-  }
-  .sidebar.open { transform: translateX(0); }
-  .main { margin-left: 0; }
-  .mobile-toggle { display: block; }
-  .grid-2, .grid-3, .grid-4, .layout-split { grid-template-columns: 1fr; }
-  .page-header { flex-direction: column; align-items: flex-start; }
-  .content { padding: var(--space-md); }
-  .topbar { padding: 0 var(--space-md); }
-  .mobile-overlay.show { display: block; }
-}
+:root{--bg:#070a10;--panel:#0d121b;--panel2:#111824;--border:#1e2937;--border2:#263244;--text:#eef4fb;--muted:#8996a8;--dim:#5f6b7b;--accent:#38bdf8;--accent2:#22d3ee;--green:#35d07f;--yellow:#f5b84b;--orange:#fb923c;--red:#ff5d73;--purple:#a78bfa;--shadow:0 14px 45px rgba(0,0,0,.28);--radius:14px;}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+body{display:flex;font-size:14px}.app{display:flex;width:100%;min-height:100vh}
+.sidebar{width:238px;border-right:1px solid var(--border);background:#090d14;padding:20px 14px;position:fixed;inset:0 auto 0 0;z-index:20;display:flex;flex-direction:column}
+.brand{display:flex;align-items:center;gap:11px;padding:4px 9px 24px}.brand-mark{width:31px;height:31px;border:1px solid #31546a;border-radius:9px;display:grid;place-items:center;background:linear-gradient(145deg,#122333,#0b111a);color:var(--accent);box-shadow:0 0 20px #38bdf812}.brand-mark svg{width:19px}.brand strong{font-size:15px;letter-spacing:.02em}.brand span{display:block;color:var(--dim);font-size:10px;margin-top:2px;letter-spacing:.08em;text-transform:uppercase}
+.nav-label{font-size:10px;color:#526074;text-transform:uppercase;letter-spacing:.13em;padding:14px 10px 7px}
+.nav button{width:100%;border:0;background:transparent;color:#8f9caf;text-align:left;padding:10px 11px;border-radius:9px;cursor:pointer;display:flex;align-items:center;gap:10px;font:inherit}.nav button:hover{background:#111824;color:#dbe7f4}.nav button.active{background:#102131;color:#e9f8ff;box-shadow:inset 2px 0 0 var(--accent)}.nav svg{width:16px;height:16px;stroke:currentColor}.sidebar-bottom{margin-top:auto;border-top:1px solid var(--border);padding:14px 8px 2px}.status{display:flex;align-items:center;gap:8px;color:#8e9bac;font-size:11px}.dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 12px #35d07f88}.version{color:#4e5b6d;font-size:10px;margin-top:8px}
+.main{margin-left:238px;width:calc(100% - 238px);min-width:0}.topbar{height:68px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 28px;background:#090d14e8;backdrop-filter:blur(14px);position:sticky;top:0;z-index:15}.crumb{display:flex;align-items:center;gap:9px}.crumb small{color:var(--dim)}.top-actions{display:flex;align-items:center;gap:10px}.pill{border:1px solid var(--border2);background:#0d131d;border-radius:999px;padding:7px 10px;color:#9ba8b8;font-size:11px;display:flex;align-items:center;gap:7px}.btn{border:1px solid var(--border2);background:#101722;color:#d8e2ee;padding:8px 12px;border-radius:9px;cursor:pointer;font:inherit;font-size:12px}.btn:hover{border-color:#385067;background:#131d29}.btn.primary{background:#0f2634;border-color:#23516b;color:#bcecff}.content{padding:26px 28px 40px;max-width:1700px;margin:auto}.page-head{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:22px}.eyebrow{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:700}.page-title{font-size:25px;letter-spacing:-.03em;margin:5px 0 5px}.page-sub{color:var(--muted);margin:0;font-size:13px}.head-actions{display:flex;gap:8px}
+.grid-kpi{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin-bottom:14px}.card{background:linear-gradient(180deg,#0e141d,#0b1018);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}.kpi{padding:16px 17px;min-height:112px;position:relative;overflow:hidden}.kpi:after{content:"";position:absolute;width:100px;height:100px;border-radius:50%;right:-50px;top:-60px;background:var(--accent);opacity:.035}.kpi-top{display:flex;justify-content:space-between;align-items:center;color:#788698;font-size:11px}.kpi-icon{width:25px;height:25px;border:1px solid var(--border2);border-radius:7px;display:grid;place-items:center;color:#8190a2}.kpi-value{font-size:26px;font-weight:700;letter-spacing:-.04em;margin:13px 0 3px}.kpi-meta{font-size:10px;color:#667486}.positive{color:var(--green)}.danger{color:var(--red)}
+.layout{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(310px,.8fr);gap:14px}.panel{padding:18px}.panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:15px}.panel-title{font-size:13px;font-weight:700;letter-spacing:.01em}.panel-desc{font-size:10px;color:var(--dim);margin-top:3px}
+.chart-wrap{height:250px;position:relative}.chart-wrap svg{width:100%;height:100%;display:block}.legend{display:flex;gap:14px;align-items:center;font-size:10px;color:#7c8a9d}.legend i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px}.legend .a{background:var(--accent)}.legend .r{background:var(--red)}
+.risk-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.risk{border:1px solid var(--border);background:#0b1119;padding:12px;border-radius:10px}.risk-label{display:flex;justify-content:space-between;color:#9ba7b7;font-size:11px}.risk-count{font-size:21px;font-weight:700;margin-top:8px}.risk-bar{height:4px;background:#18212d;border-radius:9px;margin-top:9px;overflow:hidden}.risk-bar span{display:block;height:100%;border-radius:9px}.low span{background:var(--green)}.medium span{background:var(--yellow)}.high span{background:var(--orange)}.critical span{background:var(--red)}
+.two{display:grid;grid-template-columns:1.15fr .85fr;gap:14px;margin-top:14px}.three{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px}.four{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px}
+.threat-list,.trace-list{display:flex;flex-direction:column;gap:8px}.threat{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);padding:10px 11px;border-radius:9px;background:#0b1119}.threat-name{color:#cbd6e3;font-size:12px;max-width:78%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.threat-count{color:#91a0b1;font-size:11px}.empty{color:#5f6b7b;text-align:center;padding:28px 10px;font-size:12px}.trace-row{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;border:1px solid var(--border);padding:10px 11px;border-radius:9px;background:#0b1119;cursor:pointer}.trace-row:hover{border-color:#2a4255;background:#0d141e}.trace-main{min-width:0}.trace-id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px;color:#aebaca;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.trace-sub{font-size:10px;color:#647184;margin-top:4px}.badge{display:inline-flex;align-items:center;border-radius:999px;padding:4px 7px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}.badge.safe{color:#82e5ac;background:#35d07f12;border:1px solid #35d07f28}.badge.blocked{color:#ff8797;background:#ff5d7312;border:1px solid #ff5d7330}.badge.neutral{color:#9caabe;background:#8996a812;border:1px solid #8996a81f}
+.table{width:100%;border-collapse:collapse}.table th{text-align:left;color:#5f6c7d;font-size:9px;text-transform:uppercase;letter-spacing:.1em;font-weight:600;padding:0 10px 10px}.table td{border-top:1px solid var(--border);padding:11px 10px;color:#b9c5d3;font-size:11px}.table tr:hover td{background:#0e151f}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.score{display:flex;align-items:center;gap:7px}.scorebar{width:55px;height:4px;border-radius:5px;background:#18212d;overflow:hidden}.scorebar span{height:100%;display:block;background:var(--accent)}
+.detection{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px}.det{border:1px solid var(--border);border-radius:10px;padding:12px;background:#0b1119}.det-label{color:#8390a1;font-size:10px}.det-value{font-size:19px;font-weight:700;margin-top:7px}.det-rate{color:#637083;font-size:10px;margin-top:3px}.bar{height:5px;border-radius:6px;background:#18212d;overflow:hidden;margin-top:10px}.bar span{display:block;height:100%;background:var(--accent)}
+.view{display:none}.view.active{display:block}.mobile-menu{display:none}
+.search-wrap{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}.search-wrap input,.search-wrap select{background:#0b1119;border:1px solid var(--border);color:#c5d1e3;padding:8px 10px;border-radius:8px;font:inherit;font-size:12px;outline:none}.search-wrap input:focus,.search-wrap select:focus{border-color:#385067}.search-wrap input{flex:1;min-width:200px}.search-wrap select{width:140px}
+.export-btn{background:#0f2634;border:1px solid #23516b;color:#bcecff;padding:8px 12px;border-radius:8px;cursor:pointer;font:inherit;font-size:12px}.export-btn:hover{background:#132e3f}
+.layer-badge{display:inline-flex;align-items:center;border-radius:999px;padding:3px 8px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-left:6px}.layer-regex{color:#60a5fa;background:#3b82f612;border:1px solid #3b82f630}.layer-ml{color:#a78bfa;background:#8b5cf612;border:1px solid #8b5cf630}.layer-llm_judge{color:#fbbf24;background:#f59e0b12;border:1px solid #f59e0b30}.layer-mixed{color:#c084fc;background:#a855f712;border:1px solid #a855f730}.layer-unknown{color:#94a3b8;background:#64748b12;border:1px solid #64748b30}
+.score-pill{font-size:10px;padding:2px 6px;border-radius:4px;font-weight:600}.score-pill.high{color:#ef4444;background:#ef444415;border:1px solid #ef444430}.score-pill.medium{color:#f59e0b;background:#f59e0b15;border:1px solid #f59e0b30}.score-pill.low{color:#22c55e;background:#22c55e15;border:1px solid #22c55e30}
+.spark{position:absolute;top:12px;right:12px;width:70px;height:24px;opacity:0.6}
+.heat{display:grid;grid-template-columns:repeat(12,1fr);gap:3px}.heat-cell{height:22px;border-radius:3px;cursor:pointer;transition:transform .1s}.heat-cell:hover{transform:scale(1.15);z-index:2}
+.gantt{position:relative;overflow-x:auto}.gantt-row{display:flex;align-items:center;height:30px;border-bottom:1px solid var(--border);position:relative}.gantt-label{width:200px;flex-shrink:0;font-size:10px;color:#8e9bac;padding-right:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gantt-track{flex:1;position:relative;height:100%}.gantt-bar{position:absolute;height:16px;top:7px;border-radius:3px;opacity:0.85;transition:opacity .15s}.gantt-bar:hover{opacity:1}.gantt-bar.safe{background:#38bdf8}.gantt-bar.blocked{background:#ff5d73}.gantt-bar.warn{background:#f59e0b}
+.toast{position:fixed;right:22px;bottom:22px;background:#101923;border:1px solid #294055;padding:11px 14px;border-radius:10px;box-shadow:var(--shadow);font-size:12px;z-index:100;opacity:0;transform:translateY(8px);transition:.2s}.toast.show{opacity:1;transform:none}
+.modal{position:fixed;inset:0;background:#02050ab8;backdrop-filter:blur(8px);z-index:60;display:none;align-items:center;justify-content:center;padding:24px}.modal.open{display:flex}.modal-box{width:min(980px,100%);max-height:90vh;overflow:auto;background:#0b1119;border:1px solid var(--border2);border-radius:16px;box-shadow:0 30px 90px #000b}.modal-head{padding:18px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#0b1119ee;backdrop-filter:blur(10px);z-index:2}.modal-body{padding:20px}.close{border:0;background:#131c27;color:#a7b4c3;border-radius:8px;width:30px;height:30px;cursor:pointer}
+.timeline{display:flex;flex-direction:column;gap:0}.event{display:grid;grid-template-columns:90px 18px 1fr;gap:10px;min-height:76px}.event-time{font-size:10px;color:#657285;padding-top:3px;text-align:right}.event-line{position:relative}.event-line:before{content:"";width:8px;height:8px;border-radius:50%;background:var(--accent);position:absolute;top:4px;left:0;box-shadow:0 0 0 4px #38bdf810}.event-line:after{content:"";position:absolute;width:1px;background:#263342;top:15px;bottom:0;left:4px}.event:last-child .event-line:after{display:none}.event-card{border:1px solid var(--border);border-radius:10px;background:#0d141e;padding:12px;margin-bottom:10px}.event-card.block{border-color:#5a2833}.event-title{font-size:12px;font-weight:700}.event-meta{font-size:10px;color:#6c7889;margin-top:5px}.json{white-space:pre-wrap;word-break:break-word;background:#070b11;border:1px solid var(--border);border-radius:8px;padding:10px;color:#9fb0c2;font:10px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:10px;max-height:220px;overflow:auto}
+@media(max-width:1100px){.grid-kpi{grid-template-columns:repeat(3,1fr)}.layout,.two,.three,.four{grid-template-columns:1fr}.sidebar{width:210px}.main{margin-left:210px;width:calc(100% - 210px)}}
+@media(max-width:760px){.sidebar{display:none}.main{margin-left:0;width:100%}.mobile-menu{display:block}.topbar{padding:0 15px}.content{padding:18px 14px}.grid-kpi{grid-template-columns:1fr 1fr}.detection{grid-template-columns:1fr}.page-head{align-items:flex-start;gap:14px;flex-direction:column}.table-wrap{overflow:auto}.table{min-width:700px}}
 </style>
 <base target="_blank">
 </head>
 <body>
-
 <div class="app">
-  <aside class="sidebar" id="sidebar">
-    <div class="brand">
-      <div class="brand-mark">AG</div>
-      <div class="brand-text">
-        <strong>AgentGuard</strong>
-        <span>AI Runtime Security</span>
-      </div>
-    </div>
+<aside class="sidebar">
+  <div class="brand"><div class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l7 3v5c0 4.8-2.8 8.2-7 10-4.2-1.8-7-5.2-7-10V6l7-3z"/><path d="M9 12l2 2 4-5"/></svg></div><div><strong>AgentGuard</strong><span>AI Runtime Security</span></div></div>
+  <nav class="nav">
+    <div class="nav-label">Monitor</div>
+    <button class="active" data-view="overview"><svg fill="none" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Overview</button>
+    <button data-view="traces"><svg fill="none" viewBox="0 0 24 24"><path d="M4 5h16M4 12h10M4 19h16"/></svg>Traces</button>
+    <button data-view="models"><svg fill="none" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><path d="M5 20c.8-4 3.1-6 7-6s6.2 2 7 6"/></svg>Models</button>
+    <div class="nav-label">Security</div>
+    <button data-view="guardrails"><svg fill="none" viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 4.8-3.1 8.4-8 10-4.9-1.6-8-5.2-8-10V7l8-4z"/><path d="M12 8v5M12 16h.01"/></svg>Guardrails</button>
+    <button data-view="threats"><svg fill="none" viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 4.8-3.1 8.4-8 10-4.9-1.6-8-5.2-8-10V7l8-4z"/><path d="M12 8v5M12 16h.01"/></svg>Threats</button>
+    <button data-view="detection"><svg fill="none" viewBox="0 0 24 24"><path d="M4 17l5-5 4 3 7-8"/><path d="M20 7v5h-5"/></svg>Detection</button>
+    <button data-view="policies"><svg fill="none" viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Policies</button>
+    <div class="nav-label">Operations</div>
+    <button data-view="usage"><svg fill="none" viewBox="0 0 24 24"><path d="M12 3v18M16 7.5c0-1.7-1.8-3-4-3S8 5.3 8 7s1.4 2.5 4 3 4 1.3 4 3-1.8 3-4 3-4-1.3-4-3"/></svg>Usage & Cost</button>
+    <button data-view="audit"><svg fill="none" viewBox="0 0 24 24"><path d="M6 3h12v18H6z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg>Audit Log</button>
+  </nav>
+  <div class="sidebar-bottom"><div class="status"><span class="dot"></span><span>Collector operational</span></div><div class="version">AgentGuard v5.0 · local runtime</div></div>
+</aside>
+<main class="main">
+<header class="topbar"><div class="crumb"><button class="btn mobile-menu" onclick="document.querySelector('.sidebar').style.display='flex'">☰</button><small>Workspace</small><span style="color:#435163">/</span><strong id="crumbTitle">Overview</strong></div><div class="top-actions"><div class="pill"><span class="dot"></span><span id="lastSync">Live</span></div><button class="btn" onclick="refreshAll()">↻ Refresh</button></div></header>
+<div class="content">
 
-    <nav class="nav">
-      <div class="nav-label">Surveillance</div>
-      <button class="active" data-view="overview" onclick="showView('overview')">
-        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>
-        Vue d'ensemble
-      </button>
-      <button data-view="traces" onclick="showView('traces')">
-        <svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h10M4 19h16"/></svg>
-        Traces
-      </button>
-      <button data-view="models" onclick="showView('models')">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><path d="M5 20c.8-4 3.1-6 7-6s6.2 2 7 6"/></svg>
-        Modèles
-      </button>
+<section id="view-overview" class="view active">
+  <div class="page-head"><div><div class="eyebrow">Runtime security</div><h1 class="page-title">Security overview</h1><p class="page-sub">Monitor AI agents, runtime decisions, threats and detection performance.</p></div><div class="head-actions"><button class="btn primary" onclick="refreshAll()">Live refresh</button></div></div>
+  <div class="grid-kpi" id="kpiRow"></div>
+  <div class="four" id="guardrailKpis"></div>
+  <div class="layout">
+    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Runtime activity</div><div class="panel-desc">Observed spans and blocked decisions — last 14 days</div></div><div class="legend"><span><i class="a"></i>Spans</span><span><i class="r"></i>Blocked</span></div></div><div class="chart-wrap" id="activityChartWrap"></div></div>
+    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Risk distribution</div><div class="panel-desc">Security checks observed in the last 24h</div></div></div><div class="risk-grid" id="riskGrid"></div></div>
+  </div>
+  <div class="two">
+    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Model breakdown</div><div class="panel-desc">Latency & requests per model</div></div><button class="btn" onclick="showView('models')">View all</button></div><div id="modelBreakdown"></div></div>
+    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Success vs Blocked</div><div class="panel-desc">Request outcome distribution</div></div></div><div id="pieChart" style="height:200px;display:flex;align-items:center;justify-content:center"></div></div>
+  </div>
+  <div class="two" style="margin-top:14px">
+    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Attack heatmap</div><div class="panel-desc">Blocked events by hour — last 5 days</div></div></div><div id="heatmap" style="margin-top:8px"></div><div style="display:flex;justify-content:space-between;margin-top:8px;font-size:10px;color:#4e5b6d"><span>00h</span><span>06h</span><span>12h</span><span>18h</span><span>23h</span></div></div>
+    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Top expensive spans</div><div class="panel-desc">Highest cost operations</div></div></div><div id="expensiveSpans"></div></div>
+  </div>
+  <div class="two" style="margin-top:14px">
+    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Live events</div><div class="panel-desc">Real-time security decisions</div></div></div><div class="trace-list" id="liveEvents"></div></div>
+    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Recent traces</div><div class="panel-desc">Latest runtime activity</div></div><button class="btn" onclick="showView('traces')">All traces</button></div><div class="trace-list" id="recentTraces"></div></div>
+  </div>
+</section>
 
-      <div class="nav-label">Sécurité</div>
-      <button data-view="guardrails" onclick="showView('guardrails')">
-        <svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 4.8-3.1 8.4-8 10-4.9-1.6-8-5.2-8-10V7l8-4z"/><path d="M12 8v5M12 16h.01"/></svg>
-        Guardrails
-      </button>
-      <button data-view="threats" onclick="showView('threats')">
-        <svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 4.8-3.1 8.4-8 10-4.9-1.6-8-5.2-8-10V7l8-4z"/><path d="M12 8v5M12 16h.01"/></svg>
-        Menaces
-      </button>
-      <button data-view="detection" onclick="showView('detection')">
-        <svg viewBox="0 0 24 24"><path d="M4 17l5-5 4 3 7-8"/><path d="M20 7v5h-5"/></svg>
-        Détection
-      </button>
-      <button data-view="policies" onclick="showView('policies')">
-        <svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>
-        Politiques
-      </button>
+<section id="view-traces" class="view">
+  <div class="page-head"><div><div class="eyebrow">Observability</div><h1 class="page-title">Distributed Traces</h1><p class="page-sub">Follow an agent execution from request to tool call and security decision.</p></div></div>
+  <div class="search-wrap">
+    <input type="text" id="traceSearch" placeholder="Search trace_id, model, detection layer, block reason…" oninput="filterTraces()">
+    <select id="traceFilterBlocked" onchange="filterTraces()"><option value="">All statuses</option><option value="blocked">Blocked only</option><option value="safe">Safe only</option></select>
+    <select id="traceFilterLayer" onchange="filterTraces()"><option value="">All layers</option><option value="regex">Regex</option><option value="ml">ML</option><option value="llm_judge">LLM Judge</option><option value="mixed">Mixed</option></select>
+    <button class="export-btn" onclick="exportTracesCSV()">⬇ Export CSV</button>
+  </div>
+  <div class="card panel"><div class="table-wrap"><table class="table"><thead><tr><th>Trace</th><th>Spans</th><th>Blocked</th><th>Layer</th><th>Model</th><th>Cost</th><th>P50 Lat</th><th>P99 Lat</th><th>Last seen</th></tr></thead><tbody id="traceTable"></tbody></table></div></div>
+</section>
 
-      <div class="nav-label">Opérations</div>
-      <button data-view="usage" onclick="showView('usage')">
-        <svg viewBox="0 0 24 24"><path d="M12 3v18M16 7.5c0-1.7-1.8-3-4-3S8 5.3 8 7s1.4 2.5 4 3 4 1.3 4 3-1.8 3-4 3-4-1.3-4-3"/></svg>
-        Usage & Coût
-      </button>
-      <button data-view="audit" onclick="showView('audit')">
-        <svg viewBox="0 0 24 24"><path d="M6 3h12v18H6z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg>
-        Journal d'audit
-      </button>
-    </nav>
+<section id="view-models" class="view">
+  <div class="page-head"><div><div class="eyebrow">Observability</div><h1 class="page-title">Model Performance</h1><p class="page-sub">Per-model latency, cost, token usage and block rate.</p></div></div>
+  <div class="three" id="modelCards"></div>
+  <div class="card panel" style="margin-top:14px"><div class="panel-head"><div><div class="panel-title">Model comparison</div><div class="panel-desc">Cost (bars) vs avg latency (line) per model</div></div></div><div class="chart-wrap" id="modelComparison"></div></div>
+</section>
 
-    <div class="sidebar-footer">
-      <div class="status-indicator">
-        <span class="status-dot"></span>
-        <span>Collecteur opérationnel</span>
-      </div>
-      <div class="version">AgentGuard v5.0 · Runtime local</div>
-    </div>
-  </aside>
+<section id="view-guardrails" class="view">
+  <div class="page-head"><div><div class="eyebrow">Security</div><h1 class="page-title">Guardrails</h1><p class="page-sub">Runtime policy enforcement and content filtering metrics.</p></div></div>
+  <div class="four" id="guardrailDetail"></div>
+  <div class="two" style="margin-top:14px">
+    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Guardrail activation by type</div><div class="panel-desc">Total analyzed vs flagged, per detection category</div></div></div><div class="chart-wrap" id="guardrailStacked"></div></div>
+    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Activation trend</div><div class="panel-desc">Blocked requests per day — last 14 days</div></div></div><div class="chart-wrap" id="guardrailTrend"></div></div>
+  </div>
+</section>
 
-  <div class="mobile-overlay" id="mobileOverlay" onclick="toggleSidebar()"></div>
+<section id="view-threats" class="view">
+  <div class="page-head"><div><div class="eyebrow">Security</div><h1 class="page-title">Threats</h1><p class="page-sub">Runtime violations and enforcement signals collected by AgentGuard.</p></div></div>
+  <div class="four" id="threatKpis"></div>
+  <div class="card panel" style="margin-top:14px"><div class="panel-head"><div><div class="panel-title">Threat catalogue</div><div class="panel-desc">Current top blocked reasons</div></div></div><div class="threat-list" id="threatFull"></div></div>
+</section>
 
-  <main class="main">
-    <header class="topbar">
-      <div class="breadcrumb">
-        <button class="mobile-toggle" onclick="toggleSidebar()">☰</button>
-        <small>Workspace</small>
-        <span style="color: var(--text-muted)">/</span>
-        <strong id="crumbTitle">Vue d'ensemble</strong>
-      </div>
-      <div class="top-actions">
-        <span class="badge badge-success" id="lastSync">
-          <span class="status-dot" style="width:6px;height:6px;box-shadow:none;animation:none"></span>
-          En direct
-        </span>
-        <button class="btn" onclick="refreshAll()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-          Actualiser
-        </button>
-      </div>
-    </header>
+<section id="view-detection" class="view">
+  <div class="page-head"><div><div class="eyebrow">Intelligence</div><h1 class="page-title">Detection center</h1><p class="page-sub">Compare the signals produced by the detection layers already enabled in the collector.</p></div></div>
+  <div class="card panel"><div class="panel-head"><div><div class="panel-title">Detection layers</div><div class="panel-desc">Observed volume and block rate</div></div></div><div class="detection" id="detectionCards"></div></div>
+  <div class="two" style="margin-top:14px"><div class="card panel"><div class="panel-head"><div><div class="panel-title">ML score distribution</div></div></div><div id="mlDistribution"></div></div><div class="card panel"><div class="panel-head"><div><div class="panel-title">LLM Judge distribution</div></div></div><div id="llmDistribution"></div></div></div>
+</section>
 
-    <div class="content">
+<section id="view-policies" class="view"><div class="page-head"><div><div class="eyebrow">Governance</div><h1 class="page-title">Policies</h1><p class="page-sub">Policy management UI is prepared here; the current collector does not yet expose policy CRUD endpoints.</p></div></div><div class="card panel"><div class="empty"><div style="font-size:25px;margin-bottom:8px">◇</div><strong style="color:#cbd6e3">Policy engine workspace</strong><p style="max-width:560px;margin:8px auto;color:#667486">The dashboard is ready for runtime policies, approvals and enforcement rules. Those capabilities require backend policy endpoints that are not currently present in collector.py.</p><span class="badge neutral">Backend extension required</span></div></div></section>
 
-      <!-- VUE D'ENSEMBLE -->
-      <section id="view-overview" class="view active">
-        <div class="page-header">
-          <div class="page-header-left">
-            <div class="eyebrow">Sécurité runtime</div>
-            <h1 class="page-title">Vue d'ensemble</h1>
-            <p class="page-subtitle">Surveillez les agents IA, les décisions runtime, les menaces et les performances de détection en temps réel.</p>
-          </div>
-          <div class="top-actions">
-            <button class="btn btn-primary" onclick="refreshAll()">Actualisation live</button>
-          </div>
-        </div>
+<section id="view-usage" class="view">
+  <div class="page-head"><div><div class="eyebrow">Operations</div><h1 class="page-title">Usage & cost</h1><p class="page-sub">Cost and latency telemetry derived from the observed spans.</p></div></div>
+  <div class="four" id="usageKpis"></div>
+  <div class="two" style="margin-top:14px">
+    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Cost forecast</div><div class="panel-desc">Projected spend based on current trajectory</div></div></div><div class="chart-wrap" id="costForecast"></div></div>
+    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Latency distribution</div><div class="panel-desc">Real p50 / p95 / p99 / max observed latency</div></div></div><div class="chart-wrap" id="tokenUsage"></div></div>
+  </div>
+</section>
 
-        <div class="grid-kpi" id="kpiRow"></div>
-        <div class="grid-4" id="guardrailKpis" style="margin-bottom: var(--space-xl)"></div>
+<section id="view-audit" class="view">
+  <div class="page-head"><div><div class="eyebrow">Governance</div><h1 class="page-title">Audit log</h1><p class="page-sub">A lightweight audit view derived from runtime traces. Administrative audit events require a dedicated backend log.</p></div></div>
+  <div class="card panel"><div class="table-wrap"><table class="table"><thead><tr><th>Time</th><th>Trace</th><th>Event</th><th>Model</th><th>Decision</th><th>Layer</th></tr></thead><tbody id="auditTable"></tbody></table></div></div>
+</section>
 
-        <div class="layout-split">
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <div class="card-title">Activité runtime</div>
-                <div class="card-subtitle">Spans observés et décisions bloquées — 14 derniers jours</div>
-              </div>
-              <div class="chart-legend">
-                <span><span class="legend-dot" style="background: var(--accent)"></span>Spans</span>
-                <span><span class="legend-dot" style="background: var(--danger)"></span>Bloqués</span>
-              </div>
-            </div>
-            <div class="card-body">
-              <div class="chart-container" id="activityChartWrap"></div>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <div class="card-title">Distribution des risques</div>
-                <div class="card-subtitle">Vérifications de sécurité — 24 dernières heures</div>
-              </div>
-            </div>
-            <div class="card-body">
-              <div id="riskGrid"></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="grid-2" style="margin-top: var(--space-md)">
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <div class="card-title">Répartition par modèle</div>
-                <div class="card-subtitle">Latence et requêtes par modèle</div>
-              </div>
-              <button class="btn btn-ghost" onclick="showView('models')">Voir tout →</button>
-            </div>
-            <div class="card-body" id="modelBreakdown"></div>
-          </div>
-
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <div class="card-title">Succès vs Bloqués</div>
-                <div class="card-subtitle">Distribution des résultats de requêtes</div>
-              </div>
-            </div>
-            <div class="card-body" style="display:flex;align-items:center;justify-content:center;height:240px">
-              <div id="pieChart"></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="grid-2" style="margin-top: var(--space-md)">
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <div class="card-title">Carte thermique des attaques</div>
-                <div class="card-subtitle">Événements bloqués par heure — 5 derniers jours</div>
-              </div>
-            </div>
-            <div class="card-body">
-              <div id="heatmap"></div>
-              <div style="display:flex;justify-content:space-between;margin-top:12px;font-size:11px;color:var(--text-muted);font-weight:600">
-                <span>00h</span><span>06h</span><span>12h</span><span>18h</span><span>23h</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <div class="card-title">Spans les plus coûteuses</div>
-                <div class="card-subtitle">Opérations au coût le plus élevé</div>
-              </div>
-            </div>
-            <div class="card-body" id="expensiveSpans"></div>
-          </div>
-        </div>
-
-        <div class="grid-2" style="margin-top: var(--space-md)">
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <div class="card-title">Événements en direct</div>
-                <div class="card-subtitle">Décisions de sécurité temps réel</div>
-              </div>
-            </div>
-            <div class="card-body" id="liveEvents"></div>
-          </div>
-
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <div class="card-title">Traces récentes</div>
-                <div class="card-subtitle">Dernière activité runtime</div>
-              </div>
-              <button class="btn btn-ghost" onclick="showView('traces')">Toutes →</button>
-            </div>
-            <div class="card-body" id="recentTraces"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- TRACES -->
-      <section id="view-traces" class="view">
-        <div class="page-header">
-          <div class="page-header-left">
-            <div class="eyebrow">Observabilité</div>
-            <h1 class="page-title">Traces distribuées</h1>
-            <p class="page-subtitle">Suivez l'exécution d'un agent de la requête à l'appel d'outil et à la décision de sécurité.</p>
-          </div>
-        </div>
-
-        <div class="search-bar">
-          <input type="text" class="search-input" id="traceSearch" placeholder="Rechercher trace_id, modèle, couche de détection, raison de blocage…" oninput="filterTraces()">
-          <select class="search-select" id="traceFilterBlocked" onchange="filterTraces()">
-            <option value="">Tous les statuts</option>
-            <option value="blocked">Bloqués uniquement</option>
-            <option value="safe">Sûrs uniquement</option>
-          </select>
-          <select class="search-select" id="traceFilterLayer" onchange="filterTraces()">
-            <option value="">Toutes les couches</option>
-            <option value="regex">Regex</option>
-            <option value="ml">ML</option>
-            <option value="llm_judge">LLM Judge</option>
-            <option value="mixed">Mixed</option>
-          </select>
-          <button class="btn btn-primary" onclick="exportTracesCSV()">⬇ Exporter CSV</button>
-        </div>
-
-        <div class="card">
-          <div class="table-container">
-            <table class="data-table">
-              <thead>
-                <tr><th>Trace</th><th>Spans</th><th>Bloqués</th><th>Couche</th><th>Modèle</th><th>Coût</th><th>P50 Lat</th><th>P99 Lat</th><th>Dernier vu</th></tr>
-              </thead>
-              <tbody id="traceTable"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <!-- MODÈLES -->
-      <section id="view-models" class="view">
-        <div class="page-header">
-          <div class="page-header-left">
-            <div class="eyebrow">Observabilité</div>
-            <h1 class="page-title">Performance des modèles</h1>
-            <p class="page-subtitle">Latence, coût, usage de tokens et taux de blocage par modèle.</p>
-          </div>
-        </div>
-
-        <div class="grid-3" id="modelCards"></div>
-
-        <div class="card" style="margin-top: var(--space-md)">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Comparaison des modèles</div>
-              <div class="card-subtitle">Coût (barres) vs latence moyenne (ligne) par modèle</div>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="chart-container" id="modelComparison"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- GUARDRAILS -->
-      <section id="view-guardrails" class="view">
-        <div class="page-header">
-          <div class="page-header-left">
-            <div class="eyebrow">Sécurité</div>
-            <h1 class="page-title">Guardrails</h1>
-            <p class="page-subtitle">Métriques d'application des politiques runtime et de filtrage de contenu.</p>
-          </div>
-        </div>
-
-        <div class="grid-4" id="guardrailDetail"></div>
-
-        <div class="grid-2" style="margin-top: var(--space-md)">
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <div class="card-title">Activation par type</div>
-                <div class="card-subtitle">Total analysé vs signalé, par catégorie de détection</div>
-              </div>
-            </div>
-            <div class="card-body">
-              <div class="chart-container" id="guardrailStacked"></div>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <div class="card-title">Tendance d'activation</div>
-                <div class="card-subtitle">Requêtes bloquées par jour — 14 derniers jours</div>
-              </div>
-            </div>
-            <div class="card-body">
-              <div class="chart-container" id="guardrailTrend"></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- MENACES -->
-      <section id="view-threats" class="view">
-        <div class="page-header">
-          <div class="page-header-left">
-            <div class="eyebrow">Sécurité</div>
-            <h1 class="page-title">Menaces</h1>
-            <p class="page-subtitle">Violations runtime et signaux d'application collectés par AgentGuard.</p>
-          </div>
-        </div>
-
-        <div class="grid-4" id="threatKpis"></div>
-
-        <div class="card" style="margin-top: var(--space-md)">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Catalogue des menaces</div>
-              <div class="card-subtitle">Principales raisons de blocage actuelles</div>
-            </div>
-          </div>
-          <div class="card-body" id="threatFull"></div>
-        </div>
-      </section>
-
-      <!-- DÉTECTION -->
-      <section id="view-detection" class="view">
-        <div class="page-header">
-          <div class="page-header-left">
-            <div class="eyebrow">Intelligence</div>
-            <h1 class="page-title">Centre de détection</h1>
-            <p class="page-subtitle">Comparez les signaux produits par les couches de détection activées dans le collecteur.</p>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Couches de détection</div>
-              <div class="card-subtitle">Volume observé et taux de blocage</div>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="grid-3" id="detectionCards"></div>
-          </div>
-        </div>
-
-        <div class="grid-2" style="margin-top: var(--space-md)">
-          <div class="card">
-            <div class="card-header"><div class="card-title">Distribution des scores ML</div></div>
-            <div class="card-body" id="mlDistribution"></div>
-          </div>
-          <div class="card">
-            <div class="card-header"><div class="card-title">Distribution LLM Judge</div></div>
-            <div class="card-body" id="llmDistribution"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- POLITIQUES -->
-      <section id="view-policies" class="view">
-        <div class="page-header">
-          <div class="page-header-left">
-            <div class="eyebrow">Gouvernance</div>
-            <h1 class="page-title">Politiques</h1>
-            <p class="page-subtitle">Interface de gestion des politiques prête ; le collecteur actuel n'expose pas encore les endpoints CRUD.</p>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="empty-state">
-            <div class="empty-state-icon">◇</div>
-            <div class="empty-state-title">Espace de travail du moteur de politiques</div>
-            <p class="empty-state-desc">Le tableau de bord est prêt pour les politiques runtime, les approbations et les règles d'application. Ces capacités nécessitent des endpoints backend qui ne sont pas présents dans collector.py.</p>
-            <span class="badge badge-neutral" style="margin-top: var(--space-md)">Extension backend requise</span>
-          </div>
-        </div>
-      </section>
-
-      <!-- USAGE & COÛT -->
-      <section id="view-usage" class="view">
-        <div class="page-header">
-          <div class="page-header-left">
-            <div class="eyebrow">Opérations</div>
-            <h1 class="page-title">Usage & Coût</h1>
-            <p class="page-subtitle">Télémétrie de coût et de latence dérivée des spans observées.</p>
-          </div>
-        </div>
-
-        <div class="grid-4" id="usageKpis"></div>
-
-        <div class="grid-2" style="margin-top: var(--space-md)">
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <div class="card-title">Prévision de coût</div>
-                <div class="card-subtitle">Dépense projetée basée sur la trajectoire actuelle</div>
-              </div>
-            </div>
-            <div class="card-body">
-              <div class="chart-container" id="costForecast"></div>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <div class="card-title">Distribution de latence</div>
-                <div class="card-subtitle">Latence réelle p50 / p95 / p99 / max observée</div>
-              </div>
-            </div>
-            <div class="card-body">
-              <div class="chart-container" id="tokenUsage"></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- AUDIT -->
-      <section id="view-audit" class="view">
-        <div class="page-header">
-          <div class="page-header-left">
-            <div class="eyebrow">Gouvernance</div>
-            <h1 class="page-title">Journal d'audit</h1>
-            <p class="page-subtitle">Vue d'audit légère dérivée des traces runtime. Les événements d'audit administratifs nécessitent un backend dédié.</p>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="table-container">
-            <table class="data-table">
-              <thead>
-                <tr><th>Heure</th><th>Trace</th><th>Événement</th><th>Modèle</th><th>Décision</th><th>Couche</th></tr>
-              </thead>
-              <tbody id="auditTable"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-    </div>
-  </main>
-</div>
-
+</div></main></div>
 <div id="toast" class="toast"></div>
-
-<div id="traceModal" class="modal-overlay" onclick="if(event.target===this)closeModal()">
+<div id="traceModal" class="modal" onclick="if(event.target===this)closeModal()">
   <div class="modal-box">
-    <div class="modal-header">
-      <div>
-        <div class="eyebrow">Investigation de trace</div>
-        <div id="modalTitle" style="font-weight:900;margin-top:4px;font-size:18px">Trace</div>
-      </div>
-      <button class="modal-close" onclick="closeModal()">×</button>
-    </div>
+    <div class="modal-head"><div><div class="eyebrow">Trace investigation</div><div id="modalTitle" style="font-weight:700;margin-top:4px">Trace</div></div><button class="close" onclick="closeModal()">×</button></div>
     <div class="modal-body" id="modalBody"></div>
   </div>
 </div>
-
 <script>
-// ============================================
-// STATE & UTILITAIRES
-// ============================================
-const state = {
-  metrics: null, traces: [], detection: null, llm: null, allTraces: [],
-  models: [], checksBreakdown: [], heatmap: [], expensiveSpans: [],
-  costTrend: [], latencyDist: {}, recentEvents: [], dailyTrend: []
-};
+const state={metrics:null,traces:[],detection:null,llm:null,allTraces:[]};
+const $=id=>document.getElementById(id);
+const esc=v=>String(v||'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+const fmt=n=>new Intl.NumberFormat('en-US').format(Number(n||0));
+const money=n=>'$'+Number(n||0).toFixed(4);
+function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(window._toast);window._toast=setTimeout(()=>t.classList.remove('show'),2200)}
+async function api(url){const r=await fetch(url,{credentials:'include',headers:{'Accept':'application/json'}});if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}
 
-const $ = id => document.getElementById(id);
-const esc = v => String(v || '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-const fmt = n => new Intl.NumberFormat('fr-FR').format(Number(n || 0));
-const money = n => Number(n || 0).toFixed(4) + ' €';
+function showView(name){
+  document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
+  const v=$('view-'+name); if(v)v.classList.add('active');
+  document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===name));
+  $('crumbTitle').textContent=name==='overview'?'Overview':name.charAt(0).toUpperCase()+name.slice(1).replace('-',' ');
+  if(name==='traces')renderTraceTable(state.allTraces);
+  if(name==='models')renderModels();
+  if(name==='guardrails')renderGuardrails();
+  if(name==='threats')renderThreats();
+  if(name==='detection')renderDetection(state.detection);
+  if(name==='usage')renderUsage();
+  if(name==='audit')renderAudit();
+}
+document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>showView(b.dataset.view)));
 
-function toast(msg) {
-  const t = $('toast');
-  t.innerHTML = `<span style="color:var(--success)">●</span> ${esc(msg)}`;
-  t.classList.add('show');
-  clearTimeout(window._toast);
-  window._toast = setTimeout(() => t.classList.remove('show'), 2500);
+function securityScore(m){
+  const blocked=Number(m.blocked_operations||0), spans=Number(m.total_spans||0), blockRate=spans?blocked/spans:0;
+  const ml=Number(m.avg_ml_score||0), llm=Number(m.avg_llm_score||0);
+  let score=100-(blockRate*35)-(Math.max(ml,llm)*12);
+  return Math.max(0,Math.min(100,Math.round(score)));
 }
 
-async function api(url) {
-  const r = await fetch(url, { credentials: 'include', headers: { 'Accept': 'application/json' } });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
+// ── SVG HELPERS ──
+function sparkSVG(data,color,w,h){
+  const max=Math.max(1,...data);
+  const step=w/(data.length-1);
+  let path='';
+  data.forEach((v,i)=>{const x=i*step,y=h-(v/max)*h;path+=i?` L${x},${y}`:`M${x},${y}`;});
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="spark"><path d="${path}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="${path} L${w},${h} L0,${h} Z" fill="${color}" opacity="0.08"/></svg>`;
 }
-
-// ============================================
-// NAVIGATION
-// ============================================
-function showView(name) {
-  document.querySelectorAll('.view').forEach(x => x.classList.remove('active'));
-  const v = $('view-' + name);
-  if (v) v.classList.add('active');
-  document.querySelectorAll('.nav button').forEach(b => b.classList.toggle('active', b.dataset.view === name));
-
-  const titles = {
-    overview: "Vue d'ensemble", traces: "Traces", models: "Modèles",
-    guardrails: "Guardrails", threats: "Menaces", detection: "Détection",
-    policies: "Politiques", usage: "Usage & Coût", audit: "Journal d'audit"
-  };
-  $('crumbTitle').textContent = titles[name] || name;
-
-  if (name === 'traces') renderTraceTable(state.allTraces);
-  if (name === 'models') renderModels();
-  if (name === 'guardrails') renderGuardrails();
-  if (name === 'threats') renderThreats();
-  if (name === 'detection') renderDetection(state.detection);
-  if (name === 'usage') renderUsage();
-  if (name === 'audit') renderAudit();
+function describeArc(x,y,r,startAngle,endAngle){
+  const start=polarToCartesian(x,y,r,endAngle);
+  const end=polarToCartesian(x,y,r,startAngle);
+  const largeArcFlag=endAngle-startAngle<=180?"0":"1";
+  return["M",start.x,start.y,"A",r,r,0,largeArcFlag,0,end.x,end.y].join(" ");
 }
+function polarToCartesian(cx,cy,r,angleDeg){const angleRad=(angleDeg-90)*Math.PI/180;return{x:cx+r*Math.cos(angleRad),y:cy+r*Math.sin(angleRad)};}
 
-function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('open');
-  document.getElementById('mobileOverlay').classList.toggle('show');
-}
+function renderOverview(){
+  const m=state.metrics; if(!m)return;
+  const daily=state.dailyTrend||[];
+  const dailyTotals=daily.map(d=>d.total);
+  const dailyBlocked=daily.map(d=>d.blocked);
+  const costSeries=(state.costTrend||[]).map(d=>d.cost);
+  const lat=state.latencyDist||{};
 
-// ============================================
-// SCORE DE SÉCURITÉ
-// ============================================
-function securityScore(m) {
-  const blocked = Number(m.blocked_operations || 0);
-  const spans = Number(m.total_spans || 0);
-  const blockRate = spans ? blocked / spans : 0;
-  const ml = Number(m.avg_ml_score || 0);
-  const llm = Number(m.avg_llm_score || 0);
-  let score = 100 - (blockRate * 35) - (Math.max(ml, llm) * 12);
-  return Math.max(0, Math.min(100, Math.round(score)));
-}
-
-// ============================================
-// SVG HELPERS
-// ============================================
-function sparkSVG(data, color, w, h) {
-  const max = Math.max(1, ...data);
-  const step = w / (data.length - 1);
-  let path = '';
-  data.forEach((v, i) => {
-    const x = i * step, y = h - (v / max) * h;
-    path += i ? ` L${x},${y}` : `M${x},${y}`;
-  });
-  return `<svg width="${w}" height="${h}" class="kpi-sparkline" viewBox="0 0 ${w} ${h}"><path d="${path}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="${path} L${w},${h} L0,${h} Z" fill="${color}" opacity="0.08"/></svg>`;
-}
-
-function describeArc(x, y, r, startAngle, endAngle) {
-  const start = polarToCartesian(x, y, r, endAngle);
-  const end = polarToCartesian(x, y, r, startAngle);
-  const largeArcFlag = endAngle - startAngle <= 180 ? "0" : "1";
-  return ["M", start.x, start.y, "A", r, r, 0, largeArcFlag, 0, end.x, end.y].join(" ");
-}
-
-function polarToCartesian(cx, cy, r, angleDeg) {
-  const angleRad = (angleDeg - 90) * Math.PI / 180;
-  return { x: cx + r * Math.cos(angleRad), y: cy + r * Math.sin(angleRad) };
-}
-
-// ============================================
-// RENDER — VUE D'ENSEMBLE
-// ============================================
-function renderOverview() {
-  const m = state.metrics;
-  if (!m) return;
-
-  const daily = state.dailyTrend || [];
-  const dailyTotals = daily.map(d => d.total);
-  const dailyBlocked = daily.map(d => d.blocked);
-  const costSeries = (state.costTrend || []).map(d => d.cost);
-  const lat = state.latencyDist || {};
-
-  function trendOf(series) {
-    if (series.length < 2) return { has: false };
-    const first = series[0] || 0, last = series[series.length - 1] || 0;
-    const pct = first === 0 ? (last > 0 ? 100 : 0) : ((last - first) / first * 100);
-    return { has: true, up: pct >= 0, text: (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%' };
+  function trendOf(series){
+    if(series.length<2)return {has:false};
+    const first=series[0]||0, last=series[series.length-1]||0;
+    const pct=first===0?(last>0?100:0):((last-first)/first*100);
+    return {has:true, up:pct>=0, text:(pct>=0?'+':'')+pct.toFixed(1)+'%'};
+  }
+  const reqTrend=trendOf(dailyTotals), costTrend=trendOf(costSeries);
+  function trendHtml(t){
+    return t.has?`<span style="color:${t.up?'#35d07f':'#ff5d73'}">${t.up?'↑':'↓'} ${esc(t.text)}</span> sur 14j`
+                :`<span style="color:#5c6674">historique &lt; 2 jours</span>`;
   }
 
-  const reqTrend = trendOf(dailyTotals), costTrend = trendOf(costSeries);
-
-  function trendHtml(t) {
-    return t.has 
-      ? `<span class="kpi-trend ${t.up ? 'trend-up' : 'trend-down'}">${t.up ? '↑' : '↓'} ${esc(t.text)} <span style="color:var(--text-muted);font-weight:500">sur 14j</span></span>`
-      : `<span class="kpi-trend trend-neutral">Historique &lt; 2 jours</span>`;
-  }
-
-  const kpis = [
-    { label: "Score de sécurité", value: securityScore(m) + '/100', spark: dailyTotals, color: '#16a34a', trend: { has: false } },
-    { label: "Requêtes totales", value: fmt(m.total_spans), spark: dailyTotals, color: '#0284c7', trend: reqTrend },
-    { label: "Latence moyenne", value: Number(m.avg_latency_ms || 0).toFixed(1) + 'ms', spark: dailyTotals, color: '#16a34a', trend: { has: false } },
-    { label: "Latence P99", value: (lat.p99 ? lat.p99.toFixed(0) : '—') + 'ms', spark: dailyTotals, color: '#dc2626', trend: { has: false } },
-    { label: "Analyses LLM Judge", value: fmt(m.llm_judge_count || 0), spark: dailyTotals, color: '#7c3aed', trend: { has: false } },
-    { label: "Dépenses IA", value: money(m.total_cost_usd), spark: costSeries, color: '#d97706', trend: costTrend },
+  const kpis=[
+    {label:"Security Score",value:securityScore(m)+'/100',spark:dailyTotals,color:'#35d07f',trend:{has:false}},
+    {label:"Total Requests",value:fmt(m.total_spans),spark:dailyTotals,color:'#38bdf8',trend:reqTrend},
+    {label:"Avg Latency",value:Number(m.avg_latency_ms||0).toFixed(1)+'ms',spark:dailyTotals,color:'#35d07f',trend:{has:false}},
+    {label:"P99 Latency",value:(lat.p99?lat.p99.toFixed(0):'—')+'ms',spark:dailyTotals,color:'#ff5d73',trend:{has:false}},
+    {label:"LLM Judge Analyzed",value:fmt(m.llm_judge_count||0),spark:dailyTotals,color:'#a78bfa',trend:{has:false}},
+    {label:"AI Spend",value:money(m.total_cost_usd),spark:costSeries,color:'#f59e0b',trend:costTrend},
   ];
+  $('kpiRow').innerHTML=kpis.map(k=>`<div class="card kpi"><div class="spark">${sparkSVG(k.spark.length?k.spark:[0,0],k.color,70,24)}</div><div class="kpi-top">${esc(k.label)}</div><div class="kpi-value">${esc(k.value)}</div><div class="kpi-meta">${trendHtml(k.trend)}</div></div>`).join('');
 
-  $('kpiRow').innerHTML = kpis.map(k => `
-    <div class="card kpi-card">
-      ${sparkSVG(k.spark.length ? k.spark : [0, 0], k.color, 80, 28)}
-      <div class="kpi-header">
-        <span class="kpi-label">${esc(k.label)}</span>
-      </div>
-      <div class="kpi-value">${esc(k.value)}</div>
-      ${trendHtml(k.trend)}
-    </div>
-  `).join('');
-
-  const checkLabels = {
-    prompt_injection: 'Injection de prompt',
-    pii_detection: 'Détection PII',
-    dangerous_params: "Politique d'outil",
-    tool_policy: "Politique d'outil",
-    budget_policy: 'Budget'
-  };
-  const checks = state.checksBreakdown || [];
-
+  const checkLabels={prompt_injection:'Prompt Injection', pii_detection:'PII Detection', dangerous_params:'Tool Policy', tool_policy:'Tool Policy', budget_policy:'Budget'};
+  const checks=state.checksBreakdown||[];
   $('guardrailKpis').innerHTML = checks.length
-    ? checks.slice(0, 4).map(c => `
-      <div class="card kpi-card">
-        <div class="kpi-header">
-          <span class="kpi-label">${esc(checkLabels[c.check_name] || c.check_name)}</span>
-        </div>
-        <div class="kpi-value ${c.flagged > 0 ? 'trend-down' : 'trend-up'}" style="font-size:28px">${c.flag_rate}%</div>
-        <div class="kpi-trend trend-neutral">${fmt(c.flagged)} signalé(s) sur ${fmt(c.total)} analysés</div>
-      </div>
-    `).join('')
-    : '<div class="empty-state" style="grid-column:1/-1"><p class="empty-state-desc">Pas encore de vérifications de sécurité enregistrées.</p></div>';
+    ? checks.slice(0,4).map(c=>`<div class="card kpi"><div class="kpi-top">${esc(checkLabels[c.check_name]||c.check_name)}</div><div class="kpi-value ${c.flagged>0?'danger':''}">${c.flag_rate}%</div><div class="kpi-meta">${fmt(c.flagged)} signalé(s) sur ${fmt(c.total)} analysés</div></div>`).join('')
+    : '<div class="empty" style="grid-column:1/-1">Pas encore de vérifications de sécurité enregistrées.</div>';
 
-  // Graphique d'activité
-  const wrap = $('activityChartWrap');
-  const W = wrap.clientWidth || 600, H = 260;
+  const wrap=$('activityChartWrap');
+  const W=wrap.clientWidth||600,H=250;
+  if(daily.length<2){
+    wrap.innerHTML='<div class="empty" style="padding-top:90px">Pas assez d\\\'historique pour un graphique (minimum 2 jours d\\\'activité).</div>';
+  }else{
+    const maxS=Math.max(1,...dailyTotals);
+    const pad={l:40,r:15,t:15,b:28};
+    const cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
+    let svg=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:100%">`;
+    for(let i=0;i<4;i++){const y=pad.t+ch*i/3;svg+=`<line x1="${pad.l}" y1="${y}" x2="${W-pad.r}" y2="${y}" stroke="#1b2634" stroke-width="0.5"/>`;}
+    let area=`M${pad.l},${pad.t+ch}`;
+    dailyTotals.forEach((v,i)=>{const x=pad.l+(i/(dailyTotals.length-1))*cw,y=pad.t+ch-(v/maxS)*ch;area+=` L${x},${y}`;});
+    area+=` L${W-pad.r},${pad.t+ch} Z`;
+    svg+=`<path d="${area}" fill="#38bdf8" opacity="0.1"/>`;
+    let l1='';dailyTotals.forEach((v,i)=>{const x=pad.l+(i/(dailyTotals.length-1))*cw,y=pad.t+ch-(v/maxS)*ch;l1+=i?` L${x},${y}`:`M${x},${y}`;});
+    svg+=`<path d="${l1}" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/>`;
+    let l2='';dailyBlocked.forEach((v,i)=>{const x=pad.l+(i/(dailyBlocked.length-1))*cw,y=pad.t+ch-(v/maxS)*ch;l2+=i?` L${x},${y}`:`M${x},${y}`;});
+    svg+=`<path d="${l2}" fill="none" stroke="#ff5d73" stroke-width="2" stroke-linecap="round" stroke-dasharray="4,3"/>`;
+    daily.forEach((d,i)=>{const x=pad.l+(i/(daily.length-1))*cw;svg+=`<text x="${x}" y="${H-8}" fill="#536174" font-size="9" text-anchor="middle">${esc((d.day||'').slice(5))}</text>`;});
+    [0,Math.round(maxS/2),maxS].forEach((v,i)=>{const y=pad.t+ch-(i/2)*ch;svg+=`<text x="${pad.l-6}" y="${y+3}" fill="#536174" font-size="9" text-anchor="end">${v}</text>`;});
+    svg+='</svg>'; wrap.innerHTML=svg;
+  }
 
-  if (daily.length < 2) {
-    wrap.innerHTML = '<div class="empty-state"><p class="empty-state-desc">Pas assez d'historique pour un graphique (minimum 2 jours d'activité).</p></div>';
-  } else {
-    const maxS = Math.max(1, ...dailyTotals);
-    const pad = { l: 45, r: 20, t: 20, b: 35 };
-    const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+  const r=m.risk_distribution||{};
+  const maxR=Math.max(1,...['low','medium','high','critical'].map(k=>Number(r[k]||0)));
+  $('riskGrid').innerHTML=['low','medium','high','critical'].map(k=>`<div class="risk ${k}"><div class="risk-label"><span>${k}</span><b>${fmt(r[k]||0)}</b></div><div class="risk-count">${maxR?Math.round((Number(r[k]||0)/maxR)*100):0}%</div><div class="risk-bar"><span style="width:${maxR?Number(r[k]||0)/maxR*100:0}%"></span></div></div>`).join('');
 
-    let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:100%">`;
+  const models=state.models||[];
+  if(models.length){
+    const maxReq=Math.max(...models.map(x=>x.requests));
+    const palette=['#38bdf8','#a78bfa','#22d3ee','#f59e0b','#fb923c','#4ade80'];
+    $('modelBreakdown').innerHTML=models.map((mo,i)=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="width:120px;font-size:11px;color:#8e9bac;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(mo.name)}</span><div style="flex:1"><div class="risk-bar"><span style="width:${(mo.requests/maxReq*100).toFixed(1)}%;background:${palette[i%palette.length]};display:block;height:100%;border-radius:9px"></span></div></div><span style="width:50px;text-align:right;font-size:10px;font-weight:700;color:#cbd6e3">${fmt(mo.requests)}</span><span style="width:55px;text-align:right;font-size:10px;color:#647184">${mo.avg_latency_ms}ms</span></div>`).join('');
+  }else{
+    $('modelBreakdown').innerHTML='<div class="empty">Aucun modèle identifié pour l\\\'instant — passe model="..." à ton appel LLM pour l\\\'afficher ici.</div>';
+  }
 
-    for (let i = 0; i < 4; i++) {
-      const y = pad.t + ch * i / 3;
-      svg += `<line x1="${pad.l}" y1="${y}" x2="${W - pad.r}" y2="${y}" stroke="#e2e8f0" stroke-width="0.5"/>`;
+  const total=Math.max(1,m.total_spans||0),blk=m.blocked_operations||0,safe=total-blk;
+  const safePct=(safe/total*100).toFixed(1);
+  const R=55,C=65;
+  $('pieChart').innerHTML=`<svg width="160" height="140" viewBox="0 0 130 130"><circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="#18212d" stroke-width="18"/><path d="${describeArc(C,C,R,0,safePct/100*360)}" fill="none" stroke="#38bdf8" stroke-width="18" stroke-linecap="round"/><path d="${describeArc(C,C,R,safePct/100*360,360)}" fill="none" stroke="#ff5d73" stroke-width="18" stroke-linecap="round"/><text x="${C}" y="${C-4}" text-anchor="middle" fill="#eef4fb" font-size="18" font-weight="800">${safePct}%</text><text x="${C}" y="${C+14}" text-anchor="middle" fill="#647184" font-size="9">Safe</text></svg><div style="margin-left:16px;display:flex;flex-direction:column;gap:8px"><div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:#38bdf8"></span><span style="font-size:11px;color:#8e9bac">Safe — ${fmt(safe)}</span></div><div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:#ff5d73"></span><span style="font-size:11px;color:#8e9bac">Blocked — ${fmt(blk)}</span></div></div>`;
+
+  const hm=state.heatmap||[];
+  const heat=$('heatmap');
+  if(hm.length){
+    const byHour={};
+    hm.forEach(c=>{byHour[c.hour]=(byHour[c.hour]||0)+c.blocked;});
+    const maxB=Math.max(1,...Object.values(byHour));
+    let cells='';
+    for(let h=0;h<24;h++){
+      const v=byHour[h]||0, intensity=v/maxB;
+      const bg=intensity>0.66?'#ff5d73':intensity>0.33?'#f59e0b':intensity>0?'#38bdf8':'#111824';
+      cells+=`<div class="heat-cell" style="background:${bg};opacity:${v?0.4+intensity*0.6:0.5}" title="${h}h — ${v} blocage(s) réel(s)"></div>`;
     }
-
-    let area = `M${pad.l},${pad.t + ch}`;
-    dailyTotals.forEach((v, i) => {
-      const x = pad.l + (i / (dailyTotals.length - 1)) * cw;
-      const y = pad.t + ch - (v / maxS) * ch;
-      area += ` L${x},${y}`;
-    });
-    area += ` L${W - pad.r},${pad.t + ch} Z`;
-    svg += `<path d="${area}" fill="#0284c7" opacity="0.08"/>`;
-
-    let l1 = '';
-    dailyTotals.forEach((v, i) => {
-      const x = pad.l + (i / (dailyTotals.length - 1)) * cw;
-      const y = pad.t + ch - (v / maxS) * ch;
-      l1 += i ? ` L${x},${y}` : `M${x},${y}`;
-    });
-    svg += `<path d="${l1}" fill="none" stroke="#0284c7" stroke-width="2.5" stroke-linecap="round"/>`;
-
-    let l2 = '';
-    dailyBlocked.forEach((v, i) => {
-      const x = pad.l + (i / (dailyBlocked.length - 1)) * cw;
-      const y = pad.t + ch - (v / maxS) * ch;
-      l2 += i ? ` L${x},${y}` : `M${x},${y}`;
-    });
-    svg += `<path d="${l2}" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-dasharray="5,4"/>`;
-
-    daily.forEach((d, i) => {
-      const x = pad.l + (i / (daily.length - 1)) * cw;
-      svg += `<text x="${x}" y="${H - 10}" fill="#94a3b8" font-size="10" text-anchor="middle" font-weight="600">${esc((d.day || '').slice(5))}</text>`;
-    });
-
-    [0, Math.round(maxS / 2), maxS].forEach((v, i) => {
-      const y = pad.t + ch - (i / 2) * ch;
-      svg += `<text x="${pad.l - 8}" y="${y + 4}" fill="#94a3b8" font-size="10" text-anchor="end" font-weight="600">${fmt(v)}</text>`;
-    });
-
-    svg += '</svg>';
-    wrap.innerHTML = svg;
+    heat.innerHTML=`<div class="heat" style="grid-template-columns:repeat(24,1fr)">${cells}</div>`;
+  }else{
+    heat.innerHTML='<div class="empty">Pas encore assez de données horaires.</div>';
   }
 
-  // Distribution des risques
-  const r = m.risk_distribution || {};
-  const maxR = Math.max(1, ...['low', 'medium', 'high', 'critical'].map(k => Number(r[k] || 0)));
-  const riskLabels = { low: 'Faible', medium: 'Moyen', high: 'Élevé', critical: 'Critique' };
-  const riskColors = { low: 'var(--success)', medium: 'var(--warning)', high: '#f97316', critical: 'var(--danger)' };
+  const expensive=state.expensiveSpans||[];
+  $('expensiveSpans').innerHTML=expensive.length?expensive.map(e=>`<div class="threat"><div style="min-width:0"><div style="font-size:12px;color:#cbd6e3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.trace_id)} · ${esc(e.model||'modèle inconnu')}</div><div style="font-size:10px;color:#647184;margin-top:2px">${esc(e.span_type)}</div></div><span style="font-size:12px;font-weight:700;color:#ff5d73">${money(e.cost_usd)}</span></div>`).join(''):'<div class="empty">Aucune span coûteuse enregistrée.</div>';
 
-  $('riskGrid').innerHTML = ['low', 'medium', 'high', 'critical'].map(k => {
-    const val = Number(r[k] || 0);
-    const pct = maxR ? Math.round((val / maxR) * 100) : 0;
-    return `
-      <div style="margin-bottom:16px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <span style="font-size:12px;font-weight:700;color:var(--text-tertiary)">${riskLabels[k]}</span>
-          <span style="font-size:12px;font-weight:800;color:var(--text-primary)">${fmt(val)}</span>
-        </div>
-        <div class="progress-bar">
-          <div class="progress-fill" style="width:${pct}%;background:${riskColors[k]}"></div>
-        </div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-weight:500">${pct}% du maximum</div>
-      </div>
-    `;
-  }).join('');
-
-  // Répartition par modèle
-  const models = state.models || [];
-  if (models.length) {
-    const maxReq = Math.max(...models.map(x => x.requests));
-    const palette = ['#0284c7', '#7c3aed', '#0d9488', '#d97706', '#f97316', '#16a34a'];
-    $('modelBreakdown').innerHTML = models.map((mo, i) => `
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-        <span style="width:130px;font-size:12px;color:var(--text-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600">${esc(mo.name)}</span>
-        <div style="flex:1">
-          <div class="progress-bar" style="height:8px">
-            <div class="progress-fill" style="width:${(mo.requests / maxReq * 100).toFixed(1)}%;background:${palette[i % palette.length]}"></div>
-          </div>
-        </div>
-        <span style="width:55px;text-align:right;font-size:11px;font-weight:800;color:var(--text-secondary)">${fmt(mo.requests)}</span>
-        <span style="width:60px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">${mo.avg_latency_ms}ms</span>
-      </div>
-    `).join('');
-  } else {
-    $('modelBreakdown').innerHTML = '<div class="empty-state"><p class="empty-state-desc">Aucun modèle identifié pour l'instant — passe model="..." à ton appel LLM pour l'afficher ici.</p></div>';
-  }
-
-  // Pie chart
-  const total = Math.max(1, m.total_spans || 0), blk = m.blocked_operations || 0, safe = total - blk;
-  const safePct = (safe / total * 100).toFixed(1);
-  const R = 55, C = 65;
-
-  $('pieChart').innerHTML = `
-    <svg width="160" height="140" viewBox="0 0 130 130">
-      <circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="#e2e8f0" stroke-width="18"/>
-      <path d="${describeArc(C, C, R, 0, safePct / 100 * 360)}" fill="none" stroke="#0284c7" stroke-width="18" stroke-linecap="round"/>
-      <path d="${describeArc(C, C, R, safePct / 100 * 360, 360)}" fill="none" stroke="#dc2626" stroke-width="18" stroke-linecap="round"/>
-      <text x="${C}" y="${C - 4}" text-anchor="middle" fill="var(--text-primary)" font-size="22" font-weight="900">${safePct}%</text>
-      <text x="${C}" y="${C + 18}" text-anchor="middle" fill="var(--text-muted)" font-size="10" font-weight="700">Sûr</text>
-    </svg>
-    <div style="margin-left:20px;display:flex;flex-direction:column;gap:10px">
-      <div style="display:flex;align-items:center;gap:8px">
-        <span style="width:10px;height:10px;border-radius:50%;background:#0284c7"></span>
-        <span style="font-size:12px;color:var(--text-tertiary);font-weight:600">Sûr — ${fmt(safe)}</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <span style="width:10px;height:10px;border-radius:50%;background:#dc2626"></span>
-        <span style="font-size:12px;color:var(--text-tertiary);font-weight:600">Bloqué — ${fmt(blk)}</span>
-      </div>
-    </div>
-  `;
-
-  // Heatmap
-  const hm = state.heatmap || [];
-  const heat = $('heatmap');
-  if (hm.length) {
-    const byHour = {};
-    hm.forEach(c => { byHour[c.hour] = (byHour[c.hour] || 0) + c.blocked; });
-    const maxB = Math.max(1, ...Object.values(byHour));
-    let cells = '';
-    for (let h = 0; h < 24; h++) {
-      const v = byHour[h] || 0, intensity = v / maxB;
-      const bg = intensity > 0.66 ? '#dc2626' : intensity > 0.33 ? '#f59e0b' : intensity > 0 ? '#0284c7' : '#e2e8f0';
-      cells += `<div class="heatmap-cell" style="background:${bg};opacity:${v ? 0.6 + intensity * 0.4 : 0.5}" title="${h}h — ${v} blocage(s)"></div>`;
-    }
-    heat.innerHTML = `<div class="heatmap-grid">${cells}</div>`;
-  } else {
-    heat.innerHTML = '<div class="empty-state"><p class="empty-state-desc">Pas encore assez de données horaires.</p></div>';
-  }
-
-  // Expensive spans
-  const expensive = state.expensiveSpans || [];
-  $('expensiveSpans').innerHTML = expensive.length ? expensive.map(e => `
-    <div class="list-item">
-      <div class="list-item-main">
-        <div class="list-item-title">${esc(e.trace_id)} · ${esc(e.model || 'modèle inconnu')}</div>
-        <div class="list-item-meta">${esc(e.span_type)}</div>
-      </div>
-      <span style="font-size:14px;font-weight:800;color:var(--danger)">${money(e.cost_usd)}</span>
-    </div>
-  `).join('') : '<div class="empty-state"><p class="empty-state-desc">Aucune span coûteuse enregistrée.</p></div>';
-
-  // Live events
-  const events = state.recentEvents || [];
-  const layerColors = { regex: '#2563eb', ml: '#7c3aed', llm_judge: '#d97706', mixed: '#db2777' };
-  $('liveEvents').innerHTML = events.length ? events.map(ev => {
-    const riskDot = ev.risk === 'critical' ? '🔴' : ev.risk === 'high' ? '🟠' : ev.risk === 'medium' ? '🟡' : '🟢';
-    const action = ev.blocked ? ('Bloqué — ' + (ev.reason || 'raison non précisée')) : (ev.span_type + ' autorisé');
-    const color = layerColors[ev.layer] || '#64748b';
-    return `
-      <div class="list-item" style="display:grid;grid-template-columns:auto 1fr auto;gap:12px">
-        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;font-size:10px;font-weight:800;text-transform:uppercase;background:${color}15;color:${color};border:1px solid ${color}30">${esc(ev.layer)}</span>
-        <span style="font-size:12px;color:var(--text-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600">${esc(action)}</span>
-        <span style="font-size:11px;color:var(--text-muted);white-space:nowrap;font-weight:600">${riskDot} ${esc(ev.created_at || '')}</span>
-      </div>
-    `;
-  }).join('') : '<div class="empty-state"><p class="empty-state-desc">Aucun événement pour l'instant.</p></div>';
+  const events=state.recentEvents||[];
+  const layerColors={regex:'#3b82f6',ml:'#8b5cf6',llm_judge:'#f59e0b',mixed:'#a855f7'};
+  $('liveEvents').innerHTML=events.length?events.map(ev=>{
+    const riskDot=ev.risk==='critical'?'🔴':ev.risk==='high'?'🟠':ev.risk==='medium'?'🟡':'🟢';
+    const action=ev.blocked?('Bloqué — '+(ev.reason||'raison non précisée')):(ev.span_type+' autorisé');
+    const color=layerColors[ev.layer]||'#8996a8';
+    return `<div class="trace-row" style="grid-template-columns:auto 1fr auto;gap:10px"><span style="display:inline-block;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:700;text-transform:uppercase;background:${color}18;color:${color};border:1px solid ${color}35">${esc(ev.layer)}</span><span style="font-size:11px;color:#8e9bac;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(action)}</span><span style="font-size:10px;color:#4e5b6d">${riskDot} ${esc(ev.created_at||'')}</span></div>`;
+  }).join(''):'<div class="empty">Aucun événement pour l\\\'instant.</div>';
 
   renderRecentTraces();
 }
 
-function renderRecentTraces() {
-  const traces = state.allTraces.slice(0, 8);
-  $('recentTraces').innerHTML = traces.length ? traces.map(t => `
-    <div class="list-item" onclick="openTrace('${esc(t.trace_id)}')">
-      <div class="list-item-main">
-        <div class="list-item-title mono">${esc(t.trace_id)}</div>
-        <div class="list-item-meta">${fmt(t.span_count)} spans · ${esc(t.model || '—')}</div>
-      </div>
-      <span class="badge ${Number(t.blocked_count) > 0 ? 'badge-danger' : 'badge-success'}">${Number(t.blocked_count) > 0 ? 'BLOQUÉ' : 'SÛR'}</span>
-    </div>
-  `).join('') : '<div class="empty-state"><p class="empty-state-desc">Aucune trace récente.</p></div>';
+function renderRecentTraces(){
 }
 
-// ============================================
-// RENDER — TRACES
-// ============================================
-function renderTraceTable(data) {
-  const tbody = $('traceTable');
-  tbody.innerHTML = data.length ? data.map(t => `
-    <tr onclick="openTrace('${esc(t.trace_id)}')" style="cursor:pointer">
-      <td class="mono">${esc(t.trace_id)}</td>
-      <td>${fmt(t.span_count)}</td>
-      <td><span class="badge ${Number(t.blocked_count) > 0 ? 'badge-danger' : 'badge-success'}">${fmt(t.blocked_count)}</span></td>
-      <td>${layerBadge(t.detection_layers)}</td>
-      <td style="color:var(--text-tertiary);font-size:11px;font-weight:600">${esc(t.model || '—')}</td>
-      <td>${money(t.total_cost)}</td>
-      <td>${t.p50 || '—'}ms</td>
-      <td>${t.p99 || '—'}ms</td>
-      <td style="color:var(--text-muted);font-weight:600">${esc(t.last_seen || '—')}</td>
-    </tr>
-  `).join('') : '<tr><td colspan="9" class="empty-state" style="padding:40px"><p class="empty-state-desc">Aucune trace disponible.</p></td></tr>';
+function renderTraceTable(data){
+  const tbody=$('traceTable');
+  tbody.innerHTML=data.length?data.map(t=>`<tr onclick="openTrace('${esc(t.trace_id)}')" style="cursor:pointer"><td class="mono">${esc(t.trace_id)}</td><td>${fmt(t.span_count)}</td><td><span class="badge ${Number(t.blocked_count)>0?'blocked':'safe'}">${fmt(t.blocked_count)}</span></td><td>${layerBadge(t.detection_layers)}</td><td style="color:#8e9bac;font-size:10px">${esc(t.model||'—')}</td><td>${money(t.total_cost)}</td><td>${t.p50||'—'}ms</td><td>${t.p99||'—'}ms</td><td style="color:#647184">${esc(t.last_seen||'—')}</td></tr>`).join(''):'<tr><td colspan="9" class="empty">No traces available.</td></tr>';
 }
 
-function layerBadge(layer) {
-  if (!layer) return '<span class="badge badge-neutral">—</span>';
-  const l = (layer || '').toLowerCase();
-  const cls = l.includes('llm_judge') ? 'layer-llm' : l.includes('mixed') ? 'layer-mixed' : l.includes('ml') ? 'layer-ml' : l.includes('regex') ? 'layer-regex' : 'layer-mixed';
-  const txt = l.includes('llm_judge') ? 'LLM JUDGE' : l.includes('mixed') ? 'MIXED' : l.includes('ml') ? 'ML' : l.includes('regex') ? 'REGEX' : 'UNKNOWN';
+function layerBadge(layer){
+  if(!layer)return '<span class="badge neutral">—</span>';
+  const l=(layer||'').toLowerCase();
+  const cls=l.includes('llm_judge')?'layer-llm_judge':l.includes('mixed')?'layer-mixed':l.includes('ml')?'layer-ml':l.includes('regex')?'layer-regex':'layer-unknown';
+  const txt=l.includes('llm_judge')?'LLM JUDGE':l.includes('mixed')?'MIXED':l.includes('ml')?'ML':l.includes('regex')?'REGEX':'UNKNOWN';
   return `<span class="layer-badge ${cls}">${txt}</span>`;
 }
 
-function filterTraces() {
-  const q = $('traceSearch').value.toLowerCase();
-  const blockedFilter = $('traceFilterBlocked').value;
-  const layerFilter = $('traceFilterLayer').value;
-  let filtered = state.allTraces;
-  if (q) filtered = filtered.filter(t => 
-    t.trace_id.toLowerCase().includes(q) || 
-    (t.detection_layers || '').toLowerCase().includes(q) || 
-    (t.model || '').toLowerCase().includes(q)
-  );
-  if (blockedFilter === 'blocked') filtered = filtered.filter(t => Number(t.blocked_count) > 0);
-  if (blockedFilter === 'safe') filtered = filtered.filter(t => Number(t.blocked_count) === 0);
-  if (layerFilter) filtered = filtered.filter(t => (t.detection_layers || '').toLowerCase().includes(layerFilter));
+function filterTraces(){
+  const q=$('traceSearch').value.toLowerCase();
+  const blockedFilter=$('traceFilterBlocked').value;
+  const layerFilter=$('traceFilterLayer').value;
+  let filtered=state.allTraces;
+  if(q)filtered=filtered.filter(t=>t.trace_id.toLowerCase().includes(q)||(t.detection_layers||'').toLowerCase().includes(q)||(t.model||'').toLowerCase().includes(q));
+  if(blockedFilter==='blocked')filtered=filtered.filter(t=>Number(t.blocked_count)>0);
+  if(blockedFilter==='safe')filtered=filtered.filter(t=>Number(t.blocked_count)===0);
+  if(layerFilter)filtered=filtered.filter(t=>(t.detection_layers||'').toLowerCase().includes(layerFilter));
   renderTraceTable(filtered);
 }
 
-function exportTracesCSV() {
-  const rows = state.allTraces.map(t => 
-    `${t.trace_id},${t.span_count},${t.blocked_count},"${t.detection_layers || ''}","${t.model || ''}",${t.total_cost},${t.p50 || ''},${t.p99 || ''},${t.last_seen || ''}`
-  ).join('\n');
-  const csv = 'trace_id,span_count,blocked_count,detection_layers,model,total_cost,p50_ms,p99_ms,last_seen\n' + rows;
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'agentguard_traces.csv';
-  a.click();
-  toast('CSV exporté');
+function exportTracesCSV(){
+  const rows=state.allTraces.map(t=>`${t.trace_id},${t.span_count},${t.blocked_count},"${t.detection_layers||''}","${t.model||''}",${t.total_cost},${t.p50||''},${t.p99||''},${t.last_seen||''}`).join('\n');
+  const csv='trace_id,span_count,blocked_count,detection_layers,model,total_cost,p50_ms,p99_ms,last_seen\n'+rows;
+  const blob=new Blob([csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='agentguard_traces.csv';a.click();
+  toast('CSV exported');
 }
 
-// ============================================
-// RENDER — MODÈLES
-// ============================================
-function renderModels() {
-  const models = state.models || [];
-  if (!models.length) {
-    $('modelCards').innerHTML = '<div class="empty-state" style="grid-column:1/-1"><p class="empty-state-desc">Aucun modèle observé pour l'instant. Passe model="..." dans les kwargs de ton appel LLM pour peupler cette page.</p></div>';
-    $('modelComparison').innerHTML = '';
+function renderModels(){
+  const models=state.models||[];
+  if(!models.length){
+    $('modelCards').innerHTML='<div class="empty" style="grid-column:1/-1">Aucun modèle observé pour l\\\'instant. Passe model="..." dans les kwargs de ton appel LLM (guard_llm_call le capture automatiquement) pour peupler cette page.</div>';
+    $('modelComparison').innerHTML='';
     return;
   }
+  $('modelCards').innerHTML=models.map(m=>`<div class="card kpi"><div class="kpi-top">${esc(m.name)}</div><div class="kpi-value">${fmt(m.requests)}</div><div class="kpi-meta">${money(m.total_cost_usd)} · ${fmt(m.blocked_count)} bloqué(s)</div><div style="margin-top:10px;font-size:10px;color:#647184">Latence moy.: <strong style="color:#8e9bac">${m.avg_latency_ms}ms</strong></div></div>`).join('');
 
-  $('modelCards').innerHTML = models.map(m => `
-    <div class="card kpi-card">
-      <div class="kpi-header">
-        <span class="kpi-label">${esc(m.name)}</span>
-      </div>
-      <div class="kpi-value">${fmt(m.requests)}</div>
-      <div class="kpi-trend trend-neutral">${money(m.total_cost_usd)} · ${fmt(m.blocked_count)} bloqué(s)</div>
-      <div style="margin-top:12px;font-size:11px;color:var(--text-muted);font-weight:600">Latence moy.: <strong style="color:var(--text-tertiary)">${m.avg_latency_ms}ms</strong></div>
-    </div>
-  `).join('');
-
-  const comp = $('modelComparison');
-  const W = comp.clientWidth || 600, H = 260;
-  const pad = { l: 50, r: 20, t: 20, b: 35 };
-  const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
-  const maxCost = Math.max(...models.map(m => m.total_cost_usd), 0.000001);
-  const maxLat = Math.max(...models.map(m => m.avg_latency_ms), 1);
-
-  let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:100%">`;
-
-  for (let i = 0; i < 3; i++) {
-    const y = pad.t + ch * i / 2;
-    svg += `<line x1="${pad.l}" y1="${y}" x2="${W - pad.r}" y2="${y}" stroke="#e2e8f0" stroke-width="0.5"/>`;
-  }
-
-  const bw = cw / models.length * 0.3;
-  models.forEach((m, i) => {
-    const x = pad.l + (i + 0.25) * (cw / models.length);
-    const h = (m.total_cost_usd / maxCost) * ch;
-    svg += `<rect x="${x}" y="${pad.t + ch - h}" width="${bw}" height="${h}" fill="#0284c7" rx="5" opacity="0.85"/>`;
-  });
-
-  let lpath = '';
-  models.forEach((m, i) => {
-    const x = pad.l + (i + 0.5) * (cw / models.length);
-    const y = pad.t + ch - (m.avg_latency_ms / maxLat) * ch;
-    lpath += i ? ` L${x},${y}` : `M${x},${y}`;
-    svg += `<circle cx="${x}" cy="${y}" r="4" fill="#dc2626"/>`;
-  });
-  svg += `<path d="${lpath}" fill="none" stroke="#dc2626" stroke-width="2.5" stroke-linecap="round"/>`;
-
-  models.forEach((m, i) => {
-    const x = pad.l + (i + 0.5) * (cw / models.length);
-    svg += `<text x="${x}" y="${H - 10}" fill="#94a3b8" font-size="10" text-anchor="middle" font-weight="700">${esc(m.name.split('-')[0])}</text>`;
-  });
-
-  svg += `<text x="12" y="20" fill="var(--text-muted)" font-size="10" font-weight="800">Coût (€)</text>`;
-  svg += `<text x="12" y="35" fill="var(--text-muted)" font-size="10" font-weight="800">Latence (ms)</text>`;
-  svg += '</svg>';
-  comp.innerHTML = svg;
+  const comp=$('modelComparison');
+  const W=comp.clientWidth||600,H=250;
+  const pad={l:45,r:15,t:15,b:30};
+  const cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
+  const maxCost=Math.max(...models.map(m=>m.total_cost_usd),0.000001);
+  const maxLat=Math.max(...models.map(m=>m.avg_latency_ms),1);
+  let svg=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:100%">`;
+  for(let i=0;i<3;i++){const y=pad.t+ch*i/2;svg+=`<line x1="${pad.l}" y1="${y}" x2="${W-pad.r}" y2="${y}" stroke="#1b2634" stroke-width="0.5"/>`;}
+  const bw=cw/models.length*0.35;
+  models.forEach((m,i)=>{const x=pad.l+(i+0.3)*(cw/models.length);const h=(m.total_cost_usd/maxCost)*ch;svg+=`<rect x="${x}" y="${pad.t+ch-h}" width="${bw}" height="${h}" fill="#38bdf8" rx="3" opacity="0.8"/>`;});
+  let lpath='';
+  models.forEach((m,i)=>{const x=pad.l+(i+0.5)*(cw/models.length);const y=pad.t+ch-(m.avg_latency_ms/maxLat)*ch;lpath+=i?` L${x},${y}`:`M${x},${y}`;svg+=`<circle cx="${x}" cy="${y}" r="3" fill="#ff5d73"/>`;});
+  svg+=`<path d="${lpath}" fill="none" stroke="#ff5d73" stroke-width="2" stroke-linecap="round"/>`;
+  models.forEach((m,i)=>{const x=pad.l+(i+0.5)*(cw/models.length);svg+=`<text x="${x}" y="${H-8}" fill="#536174" font-size="9" text-anchor="middle">${esc(m.name.split('-')[0])}</text>`;});
+  svg+='<text x="10" y="20" fill="#647184" font-size="9">Cost ($)</text>';
+  svg+='<text x="10" y="35" fill="#647184" font-size="9">Latence moy. (ms)</text>';
+  svg+='</svg>';
+  comp.innerHTML=svg;
 }
 
-// ============================================
-// RENDER — GUARDRAILS
-// ============================================
-function renderGuardrails() {
-  const checkLabels = {
-    prompt_injection: 'Injection de prompt',
-    pii_detection: 'Détection PII',
-    dangerous_params: "Politique d'outil",
-    tool_policy: "Politique d'outil",
-    budget_policy: 'Budget'
-  };
-  const checks = state.checksBreakdown || [];
+function renderGuardrails(){
+  const checkLabels={prompt_injection:'Prompt Injection', pii_detection:'PII Detection', dangerous_params:'Tool Policy', tool_policy:'Tool Policy', budget_policy:'Budget'};
+  const checks=state.checksBreakdown||[];
 
   $('guardrailDetail').innerHTML = checks.length
-    ? checks.map(c => `
-      <div class="card kpi-card">
-        <div class="kpi-header">
-          <span class="kpi-label">${esc(checkLabels[c.check_name] || c.check_name)}</span>
-        </div>
-        <div class="kpi-value ${c.flagged > 0 ? 'trend-down' : 'trend-up'}" style="font-size:28px">${c.flag_rate}%</div>
-        <div class="kpi-trend trend-neutral">${fmt(c.flagged)} signalé(s) · ${fmt(c.total)} analysés</div>
-      </div>
-    `).join('')
-    : '<div class="empty-state" style="grid-column:1/-1"><p class="empty-state-desc">Aucune vérification enregistrée pour l'instant.</p></div>';
+    ? checks.map(c=>`<div class="card kpi"><div class="kpi-top">${esc(checkLabels[c.check_name]||c.check_name)}</div><div class="kpi-value ${c.flagged>0?'danger':''}">${c.flag_rate}%</div><div class="kpi-meta">${fmt(c.flagged)} signalé(s) · ${fmt(c.total)} analysés au total</div></div>`).join('')
+    : '<div class="empty" style="grid-column:1/-1">Aucune vérification enregistrée pour l\\\'instant.</div>';
 
-  const wrap = $('guardrailStacked');
-  if (!checks.length) {
-    wrap.innerHTML = '<div class="empty-state"><p class="empty-state-desc">Pas encore de données.</p></div>';
-  } else {
-    const W = wrap.clientWidth || 500, H = 260;
-    const pad = { l: 140, r: 20, t: 20, b: 15 };
-    const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
-    const rowH = ch / checks.length;
-    const maxTotal = Math.max(1, ...checks.map(c => c.total));
-
-    let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:100%">`;
-    checks.forEach((c, i) => {
-      const y = pad.t + i * rowH + rowH * 0.2;
-      const barH = rowH * 0.55;
-      const wTotal = (c.total / maxTotal) * cw;
-      const wFlag = (c.flagged / maxTotal) * cw;
-      svg += `<text x="${pad.l - 10}" y="${y + barH / 2 + 4}" fill="var(--text-tertiary)" font-size="11" text-anchor="end" font-weight="700">${esc(checkLabels[c.check_name] || c.check_name)}</text>`;
-      svg += `<rect x="${pad.l}" y="${y}" width="${wTotal}" height="${barH}" fill="#0284c7" opacity="0.15" rx="5"/>`;
-      svg += `<rect x="${pad.l}" y="${y}" width="${wFlag}" height="${barH}" fill="#dc2626" rx="5"/>`;
+  const wrap=$('guardrailStacked');
+  if(!checks.length){
+    wrap.innerHTML='<div class="empty">Pas encore de données.</div>';
+  }else{
+    const W=wrap.clientWidth||500,H=250;
+    const pad={l:110,r:15,t:15,b:15};
+    const cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
+    const rowH=ch/checks.length;
+    const maxTotal=Math.max(1,...checks.map(c=>c.total));
+    let svg=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:100%">`;
+    checks.forEach((c,i)=>{
+      const y=pad.t+i*rowH+rowH*0.2, barH=rowH*0.6;
+      const wTotal=(c.total/maxTotal)*cw, wFlag=(c.flagged/maxTotal)*cw;
+      svg+=`<text x="${pad.l-8}" y="${y+barH/2+3}" fill="#8e9bac" font-size="10" text-anchor="end">${esc(checkLabels[c.check_name]||c.check_name)}</text>`;
+      svg+=`<rect x="${pad.l}" y="${y}" width="${wTotal}" height="${barH}" fill="#38bdf8" opacity="0.25" rx="3"/>`;
+      svg+=`<rect x="${pad.l}" y="${y}" width="${wFlag}" height="${barH}" fill="#ff5d73" rx="3"/>`;
     });
-    svg += '</svg>';
-    wrap.innerHTML = svg;
+    svg+='</svg>';
+    wrap.innerHTML=svg;
   }
 
-  const trend = $('guardrailTrend');
-  const daily = state.dailyTrend || [];
-  if (daily.length < 2) {
-    trend.innerHTML = '<div class="empty-state"><p class="empty-state-desc">Pas assez d'historique pour une tendance.</p></div>';
-  } else {
-    const W2 = trend.clientWidth || 500;
-    const trendData = daily.map(d => d.blocked);
-    const maxT = Math.max(1, ...trendData);
-
-    let svg2 = `<svg viewBox="0 0 ${W2} 260" style="width:100%;height:100%">`;
-    let area = `M0,260 `;
-    trendData.forEach((v, i) => {
-      const x = (i / (trendData.length - 1)) * W2;
-      const y = 260 - (v / maxT) * 230;
-      area += `L${x},${y} `;
-    });
-    area += 'L' + W2 + ',260 Z';
-    svg2 += `<path d="${area}" fill="#dc2626" opacity="0.06"/>`;
-
-    let line = '';
-    trendData.forEach((v, i) => {
-      const x = (i / (trendData.length - 1)) * W2;
-      const y = 260 - (v / maxT) * 230;
-      line += i ? ` L${x},${y}` : `M${x},${y}`;
-    });
-    svg2 += `<path d="${line}" fill="none" stroke="#dc2626" stroke-width="2.5" stroke-linecap="round"/>`;
-    svg2 += '</svg>';
-    trend.innerHTML = svg2;
+  const trend=$('guardrailTrend');
+  const daily=state.dailyTrend||[];
+  if(daily.length<2){
+    trend.innerHTML='<div class="empty">Pas assez d\\\'historique pour une tendance.</div>';
+  }else{
+    const W2=trend.clientWidth||500;
+    const trendData=daily.map(d=>d.blocked);
+    const maxT=Math.max(1,...trendData);
+    let svg2=`<svg viewBox="0 0 ${W2} 250" style="width:100%;height:100%">`;
+    let area=`M0,250 `;trendData.forEach((v,i)=>{const x=(i/(trendData.length-1))*W2,y=250-(v/maxT)*220;area+=`L${x},${y} `;});
+    area+='L'+W2+',250 Z';
+    svg2+=`<path d="${area}" fill="#ff5d73" opacity="0.08"/>`;
+    let line='';trendData.forEach((v,i)=>{const x=(i/(trendData.length-1))*W2,y=250-(v/maxT)*220;line+=i?` L${x},${y}`:`M${x},${y}`;});
+    svg2+=`<path d="${line}" fill="none" stroke="#ff5d73" stroke-width="2" stroke-linecap="round"/>`;
+    svg2+='</svg>';
+    trend.innerHTML=svg2;
   }
 }
 
-// ============================================
-// RENDER — MENACES
-// ============================================
-function renderThreats() {
-  const m = state.metrics || {};
-  const r = m.risk_distribution || {};
-
-  $('threatKpis').innerHTML = `
-    <div class="card kpi-card">
-      <div class="kpi-header"><span class="kpi-label">Bloqués</span></div>
-      <div class="kpi-value trend-down">${fmt(m.blocked_operations || 0)}</div>
-      <div class="kpi-trend trend-neutral">Toutes les opérations bloquées</div>
-    </div>
-    <div class="card kpi-card">
-      <div class="kpi-header"><span class="kpi-label">Haut + Critique</span></div>
-      <div class="kpi-value">${fmt(Number(r.high || 0) + Number(r.critical || 0))}</div>
-      <div class="kpi-trend trend-neutral">Signaux de risque</div>
-    </div>
-    <div class="card kpi-card">
-      <div class="kpi-header"><span class="kpi-label">Score ML</span></div>
-      <div class="kpi-value">${(Number(m.avg_ml_score || 0) * 100).toFixed(1)}%</div>
-      <div class="kpi-trend trend-neutral">Score moyen observé</div>
-    </div>
-    <div class="card kpi-card">
-      <div class="kpi-header"><span class="kpi-label">Score LLM</span></div>
-      <div class="kpi-value">${(Number(m.avg_llm_score || 0) * 100).toFixed(1)}%</div>
-      <div class="kpi-trend trend-neutral">Score Judge moyen</div>
-    </div>
-  `;
-
-  const arr = m.top_threats || [];
-  $('threatFull').innerHTML = arr.length ? arr.map(t => `
-    <div class="list-item">
-      <span class="list-item-title" title="${esc(t.reason || 'Inconnu')}">${esc(t.reason || 'Inconnu')}</span>
-      <span class="list-item-value">${fmt(t.count)}</span>
-    </div>
-  `).join('') : '<div class="empty-state"><p class="empty-state-desc">Aucune menace bloquée observée.</p></div>';
+function renderThreats(){
+  const m=state.metrics||{};
+  const r=m.risk_distribution||{};
+  $('threatKpis').innerHTML=`<div class="card kpi"><div class="kpi-top">Blocked</div><div class="kpi-value danger">${fmt(m.blocked_operations||0)}</div><div class="kpi-meta">All observed blocked operations</div></div>
+    <div class="card kpi"><div class="kpi-top">High + Critical</div><div class="kpi-value">${fmt(Number(r.high||0)+Number(r.critical||0))}</div><div class="kpi-meta">Risk signals</div></div>
+    <div class="card kpi"><div class="kpi-top">ML Score</div><div class="kpi-value">${(Number(m.avg_ml_score||0)*100).toFixed(1)}%</div><div class="kpi-meta">Average observed score</div></div>
+    <div class="card kpi"><div class="kpi-top">LLM Score</div><div class="kpi-value">${(Number(m.avg_llm_score||0)*100).toFixed(1)}%</div><div class="kpi-meta">Average Judge score</div></div>`;
+  const arr=m.top_threats||[];
+  $('threatFull').innerHTML=arr.length?arr.map(t=>`<div class="threat"><span class="threat-name" title="${esc(t.reason||'Unknown')}">${esc(t.reason||'Unknown')}</span><span class="threat-count">${fmt(t.count)}</span></div>`).join(''):'<div class="empty">No blocked threats observed.</div>';
 }
 
-// ============================================
-// RENDER — DÉTECTION
-// ============================================
-function renderDetection(d) {
-  state.detection = d;
-  const a = d.layer_accuracy || [];
-
-  $('detectionCards').innerHTML = a.length ? a.map(x => {
-    const l = (x.layer || '').toLowerCase();
-    const barColor = l === 'regex' ? '#2563eb' : l === 'ml' ? '#7c3aed' : l === 'llm_judge' ? '#d97706' : l === 'mixed' ? '#db2777' : '#0284c7';
-    return `
-      <div class="card" style="padding:var(--space-lg)">
-        <div style="font-size:11px;font-weight:800;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">${esc(x.layer || 'unknown')}</div>
-        <div style="font-size:28px;font-weight:900;color:var(--text-primary);margin-bottom:4px">${fmt(x.total)}</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;font-weight:600">${Number(x.block_rate || 0).toFixed(2)}% bloqués · ${fmt(x.blocked)} décisions</div>
-        <div class="progress-bar"><div class="progress-fill" style="width:${Math.min(100, Number(x.block_rate || 0))}%;background:${barColor}"></div></div>
-      </div>
-    `;
-  }).join('') : '<div class="empty-state" style="grid-column:1/-1"><p class="empty-state-desc">Aucune donnée de couche de détection pour l'instant.</p></div>';
-
-  const ml = d.ml_score_distribution || [];
-  $('mlDistribution').innerHTML = ml.length ? ml.map(x => `
-    <div class="list-item"><span class="list-item-title">${esc(x.range)}</span><span class="list-item-value">${fmt(x.count)}</span></div>
-  `).join('') : '<div class="empty-state"><p class="empty-state-desc">Aucun score ML enregistré.</p></div>';
-
-  const llm = d.llm_score_distribution || [];
-  $('llmDistribution').innerHTML = llm.length ? llm.map(x => `
-    <div class="list-item"><span class="list-item-title">${esc(x.category)}</span><span class="list-item-value">${fmt(x.count)}</span></div>
-  `).join('') : '<div class="empty-state"><p class="empty-state-desc">Aucun score LLM Judge enregistré.</p></div>';
+function renderDetection(d){
+  state.detection=d;
+  const a=d.layer_accuracy||[];
+  $('detectionCards').innerHTML=a.length?a.map(x=>{const l=(x.layer||'').toLowerCase();const barColor=l==='regex'?'#3b82f6':l==='ml'?'#8b5cf6':l==='llm_judge'?'#f59e0b':l==='mixed'?'#a855f7':'#38bdf8';return `<div class="det"><div class="det-label">${esc(x.layer||'unknown')}</div><div class="det-value">${fmt(x.total)}</div><div class="det-rate">${Number(x.block_rate||0).toFixed(2)}% blocked · ${fmt(x.blocked)} decisions</div><div class="bar"><span style="width:${Math.min(100,Number(x.block_rate||0))}%;background:${barColor}"></span></div></div>`;}).join(''):'<div class="empty">No detection-layer data yet.</div>';
+  const ml=d.ml_score_distribution||[];
+  $('mlDistribution').innerHTML=ml.length?ml.map(x=>`<div class="threat"><span>${esc(x.range)}</span><b>${fmt(x.count)}</b></div>`).join(''):'<div class="empty">No ML scores recorded.</div>';
+  const llm=d.llm_score_distribution||[];
+  $('llmDistribution').innerHTML=llm.length?llm.map(x=>`<div class="threat"><span>${esc(x.category)}</span><b>${fmt(x.count)}</b></div>`).join(''):'<div class="empty">No LLM Judge scores recorded.</div>';
 }
 
-// ============================================
-// RENDER — USAGE
-// ============================================
-function renderUsage() {
-  const m = state.metrics || {};
-  $('usageKpis').innerHTML = `
-    <div class="card kpi-card">
-      <div class="kpi-header"><span class="kpi-label">Coût total</span></div>
-      <div class="kpi-value">${money(m.total_cost_usd || 0)}</div>
-    </div>
-    <div class="card kpi-card">
-      <div class="kpi-header"><span class="kpi-label">Spans</span></div>
-      <div class="kpi-value">${fmt(m.total_spans || 0)}</div>
-    </div>
-    <div class="card kpi-card">
-      <div class="kpi-header"><span class="kpi-label">Latence moyenne</span></div>
-      <div class="kpi-value">${Number(m.avg_latency_ms || 0).toFixed(1)}ms</div>
-    </div>
-    <div class="card kpi-card">
-      <div class="kpi-header"><span class="kpi-label">Analyses LLM</span></div>
-      <div class="kpi-value">${fmt(m.llm_judge_count || 0)}</div>
-    </div>
-  `;
+function renderUsage(){
+  const m=state.metrics||{};
+  $('usageKpis').innerHTML=`<div class="card kpi"><div class="kpi-top">Total Cost</div><div class="kpi-value">${money(m.total_cost_usd||0)}</div></div>
+    <div class="card kpi"><div class="kpi-top">Spans</div><div class="kpi-value">${fmt(m.total_spans||0)}</div></div>
+    <div class="card kpi"><div class="kpi-top">Avg Latency</div><div class="kpi-value">${Number(m.avg_latency_ms||0).toFixed(1)}ms</div></div>
+    <div class="card kpi"><div class="kpi-top">LLM Analyzed</div><div class="kpi-value">${fmt(m.llm_judge_count||0)}</div></div>`;
 
-  const cf = $('costForecast');
-  const hist = (state.costTrend || []).map(d => d.cost);
-
-  if (hist.length < 2) {
-    cf.innerHTML = '<div class="empty-state" style="padding-top:80px"><p class="empty-state-desc">Pas assez d'historique de coût pour une projection (minimum 2 jours).</p></div>';
-  } else {
-    const W = cf.clientWidth || 500;
-    const dailyAvgDelta = (hist[hist.length - 1] - hist[0]) / (hist.length - 1);
-    const forecastDays = 7;
-    const forecast = Array.from({ length: forecastDays }, (_, i) => Math.max(0, hist[hist.length - 1] + dailyAvgDelta * (i + 1)));
-    const maxC = Math.max(...hist, ...forecast, 0.000001);
-    const histShare = 0.65;
-
-    let svg = `<svg viewBox="0 0 ${W} 260" style="width:100%;height:100%">`;
-    let area = `M0,260 `;
-    hist.forEach((v, i) => {
-      const x = (i / (hist.length - 1)) * (W * histShare);
-      const y = 260 - (v / maxC) * 230;
-      area += `L${x},${y} `;
-    });
-    const lastX = W * histShare;
-    forecast.forEach((v, i) => {
-      const x = lastX + (i / (forecast.length - 1)) * (W * (1 - histShare));
-      const y = 260 - (v / maxC) * 230;
-      area += `L${x},${y} `;
-    });
-    area += 'L' + W + ',260 Z';
-    svg += `<path d="${area}" fill="#0284c7" opacity="0.06"/>`;
-
-    let line = '';
-    hist.forEach((v, i) => {
-      const x = (i / (hist.length - 1)) * (W * histShare);
-      const y = 260 - (v / maxC) * 230;
-      line += i ? ` L${x},${y}` : `M${x},${y}`;
-    });
-    svg += `<path d="${line}" fill="none" stroke="#0284c7" stroke-width="2.5" stroke-linecap="round"/>`;
-
-    let fline = '';
-    forecast.forEach((v, i) => {
-      const x = lastX + (i / (forecast.length - 1)) * (W * (1 - histShare));
-      const y = 260 - (v / maxC) * 230;
-      fline += i ? ` L${x},${y}` : `M${lastX},${260 - (hist[hist.length - 1] / maxC) * 230}`;
-    });
-    svg += `<path d="${fline}" fill="none" stroke="#7c3aed" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="6,4"/>`;
-    svg += `<line x1="${lastX}" y1="0" x2="${lastX}" y2="260" stroke="#94a3b8" stroke-width="0.5" stroke-dasharray="4,4"/>`;
-    svg += `<text x="12" y="20" fill="var(--text-muted)" font-size="10" font-weight="800">Historique réel</text>`;
-    svg += `<text x="${lastX + 8}" y="20" fill="#7c3aed" font-size="10" font-weight="800">Projection linéaire →</text>`;
-    svg += '</svg>';
-    cf.innerHTML = svg;
+  const cf=$('costForecast');
+  const hist=(state.costTrend||[]).map(d=>d.cost);
+  if(hist.length<2){
+    cf.innerHTML='<div class="empty" style="padding-top:90px">Pas assez d\\\'historique de coût pour une projection (minimum 2 jours).</div>';
+  }else{
+    const W=cf.clientWidth||500;
+    const dailyAvgDelta=(hist[hist.length-1]-hist[0])/(hist.length-1);
+    const forecastDays=7;
+    const forecast=Array.from({length:forecastDays},(_,i)=>Math.max(0,hist[hist.length-1]+dailyAvgDelta*(i+1)));
+    const maxC=Math.max(...hist,...forecast,0.000001);
+    const histShare=0.65;
+    let svg=`<svg viewBox="0 0 ${W} 250" style="width:100%;height:100%">`;
+    let area=`M0,250 `;hist.forEach((v,i)=>{const x=(i/(hist.length-1))*(W*histShare),y=250-(v/maxC)*220;area+=`L${x},${y} `;});
+    const lastX=W*histShare;
+    forecast.forEach((v,i)=>{const x=lastX+(i/(forecast.length-1))*(W*(1-histShare)),y=250-(v/maxC)*220;area+=`L${x},${y} `;});
+    area+='L'+W+',250 Z';
+    svg+=`<path d="${area}" fill="#38bdf8" opacity="0.08"/>`;
+    let line='';hist.forEach((v,i)=>{const x=(i/(hist.length-1))*(W*histShare),y=250-(v/maxC)*220;line+=i?` L${x},${y}`:`M${x},${y}`;});
+    svg+=`<path d="${line}" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/>`;
+    let fline='';forecast.forEach((v,i)=>{const x=lastX+(i/(forecast.length-1))*(W*(1-histShare)),y=250-(v/maxC)*220;fline+=i?` L${x},${y}`:`M${lastX},${250-(hist[hist.length-1]/maxC)*220}`;});
+    svg+=`<path d="${fline}" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-dasharray="5,3"/>`;
+    svg+=`<line x1="${lastX}" y1="0" x2="${lastX}" y2="250" stroke="#64748b" stroke-width="0.5" stroke-dasharray="4,4"/>`;
+    svg+='<text x="10" y="20" fill="#647184" font-size="9">Historique réel</text>';
+    svg+=`<text x="${lastX+5}" y="20" fill="#a78bfa" font-size="9">Projection linéaire →</text>`;
+    svg+='</svg>';
+    cf.innerHTML=svg;
   }
 
-  const tu = $('tokenUsage');
-  const lat = state.latencyDist || {};
-
-  if (!lat.count) {
-    tu.innerHTML = '<div class="empty-state" style="padding-top:80px"><p class="empty-state-desc">Pas encore de données de latence.</p></div>';
-  } else {
-    const W2 = tu.clientWidth || 500;
-    const bars = [
-      { label: 'p50', v: lat.p50, color: '#16a34a' },
-      { label: 'p95', v: lat.p95, color: '#d97706' },
-      { label: 'p99', v: lat.p99, color: '#dc2626' },
-      { label: 'max', v: lat.max, color: '#7c3aed' }
-    ];
-    const maxV = Math.max(1, ...bars.map(b => b.v));
-    const bw = W2 / bars.length * 0.45;
-
-    let svg2 = `<svg viewBox="0 0 ${W2} 260" style="width:100%;height:100%">`;
-    bars.forEach((b, i) => {
-      const x = (i + 0.275) * (W2 / bars.length);
-      const h = (b.v / maxV) * 200;
-      svg2 += `<rect x="${x}" y="${220 - h}" width="${bw}" height="${h}" fill="${b.color}" rx="6"/>`;
-      svg2 += `<text x="${x + bw / 2}" y="${220 - h - 10}" fill="var(--text-secondary)" font-size="12" text-anchor="middle" font-weight="800">${b.v.toFixed(0)}ms</text>`;
-      svg2 += `<text x="${x + bw / 2}" y="245" fill="var(--text-muted)" font-size="11" text-anchor="middle" font-weight="700">${b.label}</text>`;
+  const tu=$('tokenUsage');
+  const lat=state.latencyDist||{};
+  if(!lat.count){
+    tu.innerHTML='<div class="empty" style="padding-top:90px">Pas encore de données de latence.</div>';
+  }else{
+    const W2=tu.clientWidth||500;
+    const bars=[{label:'p50',v:lat.p50,color:'#35d07f'},{label:'p95',v:lat.p95,color:'#f59e0b'},{label:'p99',v:lat.p99,color:'#ff5d73'},{label:'max',v:lat.max,color:'#a78bfa'}];
+    const maxV=Math.max(1,...bars.map(b=>b.v));
+    const bw=W2/bars.length*0.5;
+    let svg2=`<svg viewBox="0 0 ${W2} 250" style="width:100%;height:100%">`;
+    bars.forEach((b,i)=>{
+      const x=(i+0.25)*(W2/bars.length), h=(b.v/maxV)*200;
+      svg2+=`<rect x="${x}" y="${220-h}" width="${bw}" height="${h}" fill="${b.color}" rx="4"/>`;
+      svg2+=`<text x="${x+bw/2}" y="${220-h-8}" fill="#cbd6e3" font-size="11" text-anchor="middle" font-weight="700">${b.v.toFixed(0)}ms</text>`;
+      svg2+=`<text x="${x+bw/2}" y="240" fill="#536174" font-size="10" text-anchor="middle">${b.label}</text>`;
     });
-    svg2 += '</svg>';
-    tu.innerHTML = svg2;
+    svg2+='</svg>';
+    tu.innerHTML=svg2;
   }
 }
 
-// ============================================
-// RENDER — AUDIT
-// ============================================
-function renderAudit() {
-  const arr = state.allTraces.slice(0, 25);
-  $('auditTable').innerHTML = arr.length ? arr.map(t => `
-    <tr>
-      <td style="color:var(--text-muted);font-weight:600">${esc(t.last_seen || '—')}</td>
-      <td class="mono">${esc(t.trace_id)}</td>
-      <td>${fmt(t.span_count)} span(s)</td>
-      <td style="color:var(--text-tertiary);font-size:11px;font-weight:600">${esc(t.model || '—')}</td>
-      <td><span class="badge ${Number(t.blocked_count) > 0 ? 'badge-danger' : 'badge-success'}">${Number(t.blocked_count) > 0 ? 'BLOQUER' : 'AUTORISER'}</span></td>
-      <td style="color:var(--text-muted);font-weight:600">${esc(t.detection_layers || '—')}</td>
-    </tr>
-  `).join('') : '<tr><td colspan="6" class="empty-state" style="padding:40px"><p class="empty-state-desc">Aucune donnée d'audit.</p></td></tr>';
+function renderAudit(){
+  const arr=state.allTraces.slice(0,25);
+  $('auditTable').innerHTML=arr.length?arr.map(t=>`<tr><td style="color:#647184">${esc(t.last_seen||'—')}</td><td class="mono">${esc(t.trace_id)}</td><td>${fmt(t.span_count)} span(s)</td><td style="color:#8e9bac;font-size:10px">${esc(t.model||'—')}</td><td><span class="badge ${Number(t.blocked_count)>0?'blocked':'safe'}">${Number(t.blocked_count)>0?'BLOCK':'ALLOW'}</span></td><td style="color:#647184">${esc(t.detection_layers||'—')}</td></tr>`).join(''):'<tr><td colspan="6" class="empty">No audit data.</td></tr>';
 }
 
-// ============================================
-// MODAL TRACE
-// ============================================
-async function openTrace(id) {
-  try {
+async function openTrace(id){
+  try{
     $('traceModal').classList.add('open');
-    $('modalTitle').textContent = id;
-    $('modalBody').innerHTML = '<div class="empty-state"><p class="empty-state-desc">Chargement de la trace…</p></div>';
+    $('modalTitle').textContent=id;
+    $('modalBody').innerHTML='<div class="empty">Loading trace…</div>';
+    const rows=await api('/api/traces/'+encodeURIComponent(id));
+    if(!rows.length){$('modalBody').innerHTML='<div class="empty">No span detail available for this trace.</div>';return;}
 
-    const rows = await api('/api/traces/' + encodeURIComponent(id));
-    if (!rows.length) {
-      $('modalBody').innerHTML = '<div class="empty-state"><p class="empty-state-desc">Aucun détail de span disponible pour cette trace.</p></div>';
-      return;
-    }
-
-    const totalDur = Math.max(...rows.map(r => Number(r.timestamp || 0) + Number(r.latency_ms || 0))) - Math.min(...rows.map(r => Number(r.timestamp || 0)));
-    const minT = Math.min(...rows.map(r => Number(r.timestamp || 0)));
-    const trackW = 600;
-
-    let ganttHtml = '<div style="margin-bottom:24px"><div style="font-size:14px;font-weight:900;margin-bottom:12px;color:var(--text-primary)">Timeline d'exécution</div><div style="overflow-x:auto">';
-    ganttHtml += '<div style="min-width:600px">';
-    rows.forEach((r, i) => {
-      const start = ((Number(r.timestamp || 0) - minT) / totalDur) * trackW;
-      const width = Math.max(20, (Number(r.latency_ms || 0) / totalDur) * trackW);
-      const blocked = !!r.blocked;
-      const layer = (r.detection_layer || 'unknown').toLowerCase();
-      const barColor = blocked ? '#dc2626' : layer === 'llm_judge' ? '#d97706' : '#0284c7';
-      ganttHtml += `
-        <div style="display:flex;align-items:center;height:34px;border-bottom:1px solid var(--border-subtle)">
-          <div style="width:180px;flex-shrink:0;font-size:11px;color:var(--text-tertiary);padding-right:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700">${esc(r.span_type || 'span')} — ${esc(r.model || '—')}</div>
-          <div style="flex:1;position:relative;height:100%">
-            <div style="position:absolute;height:16px;top:9px;border-radius:4px;opacity:0.9;transition:opacity 0.15s;left:${start}px;width:${width}px;background:${barColor};box-shadow:0 2px 6px rgba(0,0,0,0.1)" title="${esc(r.span_type || '')} — ${Number(r.latency_ms || 0).toFixed(1)}ms"></div>
-          </div>
-        </div>
-      `;
+    const totalDur=Math.max(...rows.map(r=>Number(r.timestamp||0)+Number(r.latency_ms||0)))-Math.min(...rows.map(r=>Number(r.timestamp||0)));
+    const minT=Math.min(...rows.map(r=>Number(r.timestamp||0)));
+    const trackW=600;
+    let ganttHtml='<div style="margin-bottom:20px"><div style="font-size:12px;font-weight:700;margin-bottom:10px">Execution Timeline</div><div class="gantt">';
+    rows.forEach((r,i)=>{
+      const start=((Number(r.timestamp||0)-minT)/totalDur)*trackW;
+      const width=Math.max(20,(Number(r.latency_ms||0)/totalDur)*trackW);
+      const blocked=!!r.blocked;
+      const layer=(r.detection_layer||'unknown').toLowerCase();
+      const barCls=blocked?'blocked':layer==='llm_judge'?'warn':'safe';
+      ganttHtml+=`<div class="gantt-row"><div class="gantt-label">${esc(r.span_type||'span')} — ${esc(r.model||'—')}</div><div class="gantt-track"><div class="gantt-bar ${barCls}" style="left:${start}px;width:${width}px" title="${esc(r.span_type||'')} — ${Number(r.latency_ms||0).toFixed(1)}ms"></div></div></div>`;
     });
-    ganttHtml += '</div></div></div>';
+    ganttHtml+='</div></div>';
 
-    ganttHtml += '<div class="timeline">' + rows.map(r => {
-      const blocked = !!r.blocked;
-      const checks = Array.isArray(r.security_checks) ? r.security_checks : [];
-      const layer = (r.detection_layer || 'unknown').toLowerCase();
-      const layerCls = layer === 'regex' ? 'layer-regex' : layer === 'ml' ? 'layer-ml' : layer === 'llm_judge' ? 'layer-llm' : layer === 'mixed' ? 'layer-mixed' : 'layer-mixed';
-      const layerTxt = layer === 'regex' ? 'REGEX' : layer === 'ml' ? 'ML' : layer === 'llm_judge' ? 'LLM JUDGE' : layer === 'mixed' ? 'MIXED' : 'UNKNOWN';
-
-      let scores = '';
-      if (r.ml_score != null) scores += `<span class="badge badge-success" style="margin-right:6px">ML ${(r.ml_score * 100).toFixed(1)}%</span>`;
-      if (r.llm_score != null) {
-        const cls = r.llm_score > 0.85 ? 'badge-danger' : r.llm_score > 0.7 ? 'badge-warning' : 'badge-success';
-        scores += `<span class="badge ${cls}">LLM ${(r.llm_score * 100).toFixed(1)}%</span>`;
-      }
-
-      return `
-        <div class="timeline-event">
-          <div class="timeline-time">${esc(r.created_at || '')}</div>
-          <div class="timeline-line"></div>
-          <div class="timeline-card ${blocked ? 'blocked' : ''}">
-            <div class="timeline-title">
-              ${esc(r.span_type || 'span')} 
-              <span class="layer-badge ${layerCls}">${layerTxt}</span> 
-              ${blocked ? '<span class="badge badge-danger">bloqué</span>' : '<span class="badge badge-success">autorisé</span>'} 
-              ${scores}
-            </div>
-            <div class="timeline-meta">${Number(r.latency_ms || 0).toFixed(1)} ms · ${money(r.cost_usd)} · ${esc(r.model || '—')}</div>
-            ${r.block_reason ? `<div class="timeline-meta" style="color:var(--danger);margin-top:8px;font-weight:700">Raison: ${esc(r.block_reason)}</div>` : ''}
-            ${r.llm_reason ? `<div class="timeline-meta" style="color:#d97706;margin-top:4px;font-weight:700">LLM: ${esc(r.llm_reason)}</div>` : ''}
-            <div class="json-block">${esc(JSON.stringify({ input: r.input_data, output: r.output_data, security_checks: checks }, null, 2))}</div>
-          </div>
-        </div>
-      `;
-    }).join('') + '</div>';
-
-    $('modalBody').innerHTML = ganttHtml;
-  } catch (e) {
-    $('modalBody').innerHTML = '<div class="empty-state"><p class="empty-state-desc">Impossible de charger la trace: ' + esc(e.message) + '</p></div>';
-  }
+    ganttHtml+='<div class="timeline">'+rows.map(r=>{
+      const blocked=!!r.blocked;
+      const checks=Array.isArray(r.security_checks)?r.security_checks:[];
+      const layer=(r.detection_layer||'unknown').toLowerCase();
+      const layerCls=layer==='regex'?'layer-regex':layer==='ml'?'layer-ml':layer==='llm_judge'?'layer-llm_judge':layer==='mixed'?'layer-mixed':'layer-unknown';
+      const layerTxt=layer==='regex'?'REGEX':layer==='ml'?'ML':layer==='llm_judge'?'LLM JUDGE':layer==='mixed'?'MIXED':'UNKNOWN';
+      let scores='';
+      if(r.ml_score!=null)scores+=`<span class="score-pill low" style="margin-right:6px">ML ${(r.ml_score*100).toFixed(1)}%</span>`;
+      if(r.llm_score!=null){const cls=r.llm_score>0.85?'high':r.llm_score>0.7?'medium':'low';scores+=`<span class="score-pill ${cls}">LLM ${(r.llm_score*100).toFixed(1)}%</span>`;}
+      return `<div class="event"><div class="event-time">${esc(r.created_at||'')}</div><div class="event-line"></div><div class="event-card ${blocked?'block':''}"><div class="event-title">${esc(r.span_type||'span')} <span class="layer-badge ${layerCls}">${layerTxt}</span> ${blocked?'<span class="badge blocked">blocked</span>':'<span class="badge safe">allowed</span>'} ${scores}</div><div class="event-meta">${Number(r.latency_ms||0).toFixed(1)} ms · ${money(r.cost_usd)} · ${esc(r.model||'—')}</div>${r.block_reason?`<div class="event-meta" style="color:#ff7e8d;margin-top:8px">Reason: ${esc(r.block_reason)}</div>`:''}${r.llm_reason?`<div class="event-meta" style="color:#fbbf24;margin-top:4px">LLM: ${esc(r.llm_reason)}</div>`:''}<div class="json">${esc(JSON.stringify({input:r.input_data,output:r.output_data,security_checks:checks},null,2))}</div></div></div>`;
+    }).join('')+'</div>';
+    $('modalBody').innerHTML=ganttHtml;
+  }catch(e){$('modalBody').innerHTML='<div class="empty">Unable to load trace: '+esc(e.message)+'</div>';}
 }
+function closeModal(){$('traceModal').classList.remove('open')}
 
-function closeModal() {
-  $('traceModal').classList.remove('open');
-}
-
-// ============================================
-// REFRESH & INIT
-// ============================================
-async function refreshAll() {
-  try {
-    $('lastSync').innerHTML = '<span style="color:#d97706">●</span> Synchronisation…';
-
-    const [m, t, d, models, checks, heatmap, expensive, costTrend, latencyDist, recentEvents, dailyTrend] = await Promise.all([
+async function refreshAll(){
+  try{
+    $('lastSync').textContent='Syncing…';
+    const [m,t,d,models,checks,heatmap,expensive,costTrend,latencyDist,recentEvents,dailyTrend]=await Promise.all([
       api('/api/metrics'), api('/api/traces'), api('/api/detection/stats'),
       api('/api/models'), api('/api/checks/breakdown'), api('/api/heatmap'),
       api('/api/spans/expensive'), api('/api/cost/trend'), api('/api/latency/distribution'),
       api('/api/events/recent'), api('/api/trend/daily'),
     ]);
-
-    state.allTraces = t.map(x => ({ ...x, model: x.model || null, p50: x.p50 || null, p99: x.p99 || null }));
-    state.traces = t;
-    state.models = models;
-    state.checksBreakdown = checks;
-    state.heatmap = heatmap;
-    state.expensiveSpans = expensive;
-    state.costTrend = costTrend;
-    state.latencyDist = latencyDist;
-    state.recentEvents = recentEvents;
-    state.dailyTrend = dailyTrend;
-
+    state.allTraces=t.map(x=>({...x, model:x.model||null, p50:x.p50||null, p99:x.p99||null}));
+    state.traces=t;
+    state.models=models;
+    state.checksBreakdown=checks;
+    state.heatmap=heatmap;
+    state.expensiveSpans=expensive;
+    state.costTrend=costTrend;
+    state.latencyDist=latencyDist;
+    state.recentEvents=recentEvents;
+    state.dailyTrend=dailyTrend;
     renderMetrics(m);
     renderDetection(d);
-    $('lastSync').innerHTML = '<span class="status-dot" style="width:6px;height:6px;box-shadow:none;animation:none"></span> Actualisé ' + new Date().toLocaleTimeString('fr-FR');
-    toast('Dashboard actualisé');
-  } catch (e) {
-    $('lastSync').innerHTML = '<span style="color:#dc2626">●</span> Hors ligne';
-    toast('Collecteur indisponible: ' + e.message);
+    $('lastSync').textContent='Updated '+new Date().toLocaleTimeString();
+    toast('Dashboard refreshed');
+  }catch(e){
+    $('lastSync').textContent='Offline';
+    toast('Collector unavailable: '+e.message);
   }
 }
 
-function renderMetrics(m) {
-  state.metrics = m;
+function renderMetrics(m){
+  state.metrics=m;
   renderOverview();
   renderThreats();
   renderUsage();
   renderAudit();
 }
 
-// ============================================
-// EVENTS & INIT
-// ============================================
-window.addEventListener('resize', () => {
-  if (state.metrics) {
-    renderOverview();
-    renderUsage();
-  }
-});
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeModal();
-});
-
+window.addEventListener('resize',()=>{if(state.metrics){renderOverview();renderUsage();}});
 refreshAll();
-setInterval(refreshAll, 15000);
+setInterval(refreshAll,15000);
 </script>
-</body>
-</html>
+</body></html>
 '''
 
 @app.route("/")
@@ -3475,4 +1693,5 @@ if __name__ == "__main__":
     print(f"   DB: {DB_TYPE}")
     print(f"   Detection: Regex + ML (if enabled) + LLM Judge (if enabled)")
     app.run(host="0.0.0.0", port=port, debug=False)
+
 
