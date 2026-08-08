@@ -197,11 +197,11 @@ class MLDetector:
 
 class PolicyEngine:
     """
-    Moteur de détection :
-    1. Regex forte
-    2. ML optionnel
-    3. LLM Judge optionnel
-    4. Regex faible en fallback
+    Moteur de détection multi-couches :
+    1. ML (prioritaire)
+    2. Regex forte
+    3. LLM Judge (cas ambigus)
+    4. Regex faible (fallback)
     """
 
     def __init__(self, policies: Optional[List[Dict[str, Any]]] = None):
@@ -273,6 +273,7 @@ class PolicyEngine:
             r"\bnouvelles?\s+instructions?\s*:",
             r"\br[ée]v[èe]le\s+(?:ton|le)\s+(?:prompt|invite)\s+syst[èe]me\b",
             r"\bignore\s+(?:ce\s+)?qui\s+pr[ée]c[èe]de\b",
+            # NOUVEAUX PATTERNS
             r"\bDAN\s+mode\b",
             r"\bdeveloper\s+mode\b",
             r"\bunrestricted\s+(?:AI|assistant|mode)\b",
@@ -317,6 +318,13 @@ class PolicyEngine:
         )
 
     def check_injection(self, text: str) -> SecurityCheck:
+        """
+        Détection multi-couches avec priorité :
+        1. ML (si disponible) - détection sémantique
+        2. Regex fort - patterns évidents
+        3. LLM Judge - cas ambigus ou non détectés
+        4. Regex faible - fallback
+        """
         text = str(text or "")
 
         if not text.strip():
@@ -327,6 +335,37 @@ class PolicyEngine:
                 "Empty prompt",
             )
 
+        # ═══════════════════════════════════════════════════════════
+        # 1. ML - Détection sémantique (prioritaire)
+        # ═══════════════════════════════════════════════════════════
+        if self.ml_detector.enabled:
+            ml_result = self.ml_detector.predict(text)
+            score = ml_result["score"]
+
+            # ML très confiant → BLOCK
+            if ml_result["risk"] == "HIGH" and score >= 0.85:
+                return SecurityCheck(
+                    "prompt_injection",
+                    False,
+                    RiskLevel.HIGH,
+                    f"ML detected threat (score: {score:.2%})",
+                    {
+                        "ml_score": score,
+                        "confidence": ml_result["confidence"],
+                        "layer": "ml",
+                    },
+                    SecurityAction.BLOCK,
+                )
+
+            # ML détecte mais pas assez confiant → LLM Judge
+            if ml_result["risk"] == "HIGH" and self.use_llm_judge:
+                judge_result = self._call_llm_judge(text)
+                if judge_result:
+                    return judge_result
+
+        # ═══════════════════════════════════════════════════════════
+        # 2. Regex fort - patterns évidents
+        # ═══════════════════════════════════════════════════════════
         strong_matches = self.strong_regex.findall(text)
 
         if strong_matches and self.use_llm_judge:
@@ -349,35 +388,18 @@ class PolicyEngine:
                 SecurityAction.BLOCK,
             )
 
-        if self.ml_detector.enabled:
-            ml_result = self.ml_detector.predict(text)
-            score = ml_result["score"]
-
-            if ml_result["risk"] == "HIGH" and score >= 0.95:
-                return SecurityCheck(
-                    "prompt_injection",
-                    False,
-                    RiskLevel.HIGH,
-                    f"ML detected threat (score: {score:.2%})",
-                    {
-                        "ml_score": score,
-                        "confidence": ml_result["confidence"],
-                        "layer": "ml",
-                    },
-                    SecurityAction.BLOCK,
-                )
-
-            if ml_result["risk"] == "HIGH" and self.use_llm_judge:
-                judge_result = self._call_llm_judge(text)
-                if judge_result:
-                    return judge_result
-
-        weak_matches = self.weak_regex.findall(text)
-
-        if weak_matches and self.use_llm_judge:
+        # ═══════════════════════════════════════════════════════════
+        # 3. LLM Judge - Cas ambigus
+        # ═══════════════════════════════════════════════════════════
+        if self.use_llm_judge:
             judge_result = self._call_llm_judge(text)
             if judge_result:
                 return judge_result
+
+        # ═══════════════════════════════════════════════════════════
+        # 4. Regex faible - Fallback
+        # ═══════════════════════════════════════════════════════════
+        weak_matches = self.weak_regex.findall(text)
 
         if weak_matches:
             blocked = self.block_on_ambiguous
@@ -398,11 +420,6 @@ class PolicyEngine:
                     else SecurityAction.REVIEW
                 ),
             )
-
-        if self.use_llm_judge:
-            judge_result = self._call_llm_judge(text)
-            if judge_result:
-                return judge_result
 
         return SecurityCheck(
             "prompt_injection",
@@ -438,6 +455,9 @@ class PolicyEngine:
         """
         Analyse sémantique d'un cas ambigu.
         """
+        # Vérifier si le LLM Judge est activé
+        if not self.use_llm_judge:
+            return None
 
         api_key = (
             os.getenv("AGENTGUARD_JUDGE_API_KEY")
