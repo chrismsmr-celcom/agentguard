@@ -299,7 +299,7 @@ def check_auth():
 # ── API ──
 @app.route("/span", methods=["POST"])
 @limiter.limit("30 per minute")
-@cross_origin(origins="*", allow_headers=["Content-Type", "X-API-Key"])  # ✅ CORRECTION: allow_headers au lieu de headers
+@cross_origin(origins="*", allow_headers=["Content-Type", "X-API-Key"])
 def receive_span():
     data = request.json
     if not isinstance(data, dict):
@@ -1066,7 +1066,7 @@ body{display:flex;font-size:14px}.app{display:flex;width:100%;min-height:100vh}
 
 const state={metrics:null,traces:[],detection:null,llm:null,allTraces:[]};
 const $=id=>document.getElementById(id);
-const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+const esc=v=>String(v||'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const fmt=n=>new Intl.NumberFormat('en-US').format(Number(n||0));
 const money=n=>'$'+Number(n||0).toFixed(4);
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(window._toast);window._toast=setTimeout(()=>t.classList.remove('show'),2200)}
@@ -1140,16 +1140,12 @@ function renderOverview(){
   ];
   $('kpiRow').innerHTML=kpis.map(k=>`<div class="card kpi"><div class="spark">${sparkSVG(k.spark.length?k.spark:[0,0],k.color,70,24)}</div><div class="kpi-top">${esc(k.label)}</div><div class="kpi-value">${esc(k.value)}</div><div class="kpi-meta">${trendHtml(k.trend)}</div></div>`).join('');
 
-  // Section "Guardrails" — remplacée par les vraies catégories de détection
-  // (PolicyEngine ne fait QUE injection/PII/tool-policy/budget ; pas de
-  // toxicité ni de "denied topics", donc on n'invente pas ces cartes).
   const checkLabels={prompt_injection:'Prompt Injection', pii_detection:'PII Detection', dangerous_params:'Tool Policy', tool_policy:'Tool Policy', budget_policy:'Budget'};
   const checks=state.checksBreakdown||[];
   $('guardrailKpis').innerHTML = checks.length
     ? checks.slice(0,4).map(c=>`<div class="card kpi"><div class="kpi-top">${esc(checkLabels[c.check_name]||c.check_name)}</div><div class="kpi-value ${c.flagged>0?'danger':''}">${c.flag_rate}%</div><div class="kpi-meta">${fmt(c.flagged)} signalé(s) sur ${fmt(c.total)} analysés</div></div>`).join('')
     : '<div class="empty" style="grid-column:1/-1">Pas encore de vérifications de sécurité enregistrées.</div>';
 
-  // Graphique d'activité — vrais totaux journaliers, pas un tracé horaire simulé
   const wrap=$('activityChartWrap');
   const W=wrap.clientWidth||600,H=250;
   if(daily.length<2){
@@ -1177,8 +1173,6 @@ function renderOverview(){
   const maxR=Math.max(1,...['low','medium','high','critical'].map(k=>Number(r[k]||0)));
   $('riskGrid').innerHTML=['low','medium','high','critical'].map(k=>`<div class="risk ${k}"><div class="risk-label"><span>${k}</span><b>${fmt(r[k]||0)}</b></div><div class="risk-count">${maxR?Math.round((Number(r[k]||0)/maxR)*100):0}%</div><div class="risk-bar"><span style="width:${maxR?Number(r[k]||0)/maxR*100:0}%"></span></div></div>`).join('');
 
-  // Répartition par modèle — vraie donnée, vide si le SDK n'a jamais envoyé
-  // de champ "model" (au lieu d'afficher gpt-4o/claude-3.5-sonnet inventés)
   const models=state.models||[];
   if(models.length){
     const maxReq=Math.max(...models.map(x=>x.requests));
@@ -1193,7 +1187,6 @@ function renderOverview(){
   const R=55,C=65;
   $('pieChart').innerHTML=`<svg width="160" height="140" viewBox="0 0 130 130"><circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="#18212d" stroke-width="18"/><path d="${describeArc(C,C,R,0,safePct/100*360)}" fill="none" stroke="#38bdf8" stroke-width="18" stroke-linecap="round"/><path d="${describeArc(C,C,R,safePct/100*360,360)}" fill="none" stroke="#ff5d73" stroke-width="18" stroke-linecap="round"/><text x="${C}" y="${C-4}" text-anchor="middle" fill="#eef4fb" font-size="18" font-weight="800">${safePct}%</text><text x="${C}" y="${C+14}" text-anchor="middle" fill="#647184" font-size="9">Safe</text></svg><div style="margin-left:16px;display:flex;flex-direction:column;gap:8px"><div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:#38bdf8"></span><span style="font-size:11px;color:#8e9bac">Safe — ${fmt(safe)}</span></div><div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:#ff5d73"></span><span style="font-size:11px;color:#8e9bac">Blocked — ${fmt(blk)}</span></div></div>`;
 
-  // Heatmap — vraies heures de blocage (24h agrégées sur 5 jours), plus de Math.random()
   const hm=state.heatmap||[];
   const heat=$('heatmap');
   if(hm.length){
@@ -1211,11 +1204,9 @@ function renderOverview(){
     heat.innerHTML='<div class="empty">Pas encore assez de données horaires.</div>';
   }
 
-  // Spans les plus coûteuses — vraie requête, plus de trace_id inventés
   const expensive=state.expensiveSpans||[];
   $('expensiveSpans').innerHTML=expensive.length?expensive.map(e=>`<div class="threat"><div style="min-width:0"><div style="font-size:12px;color:#cbd6e3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.trace_id)} · ${esc(e.model||'modèle inconnu')}</div><div style="font-size:10px;color:#647184;margin-top:2px">${esc(e.span_type)}</div></div><span style="font-size:12px;font-weight:700;color:#ff5d73">${money(e.cost_usd)}</span></div>`).join(''):'<div class="empty">Aucune span coûteuse enregistrée.</div>';
 
-  // Événements récents — vrais derniers spans, plus de flux fictif
   const events=state.recentEvents||[];
   const layerColors={regex:'#3b82f6',ml:'#8b5cf6',llm_judge:'#f59e0b',mixed:'#a855f7'};
   $('liveEvents').innerHTML=events.length?events.map(ev=>{
@@ -1300,7 +1291,6 @@ function renderGuardrails(){
     ? checks.map(c=>`<div class="card kpi"><div class="kpi-top">${esc(checkLabels[c.check_name]||c.check_name)}</div><div class="kpi-value ${c.flagged>0?'danger':''}">${c.flag_rate}%</div><div class="kpi-meta">${fmt(c.flagged)} signalé(s) · ${fmt(c.total)} analysés au total</div></div>`).join('')
     : '<div class="empty" style="grid-column:1/-1">Aucune vérification enregistrée pour l\\'instant.</div>';
 
-  // "Guardrail activation by type" -> vraie répartition total/signalé par catégorie
   const wrap=$('guardrailStacked');
   if(!checks.length){
     wrap.innerHTML='<div class="empty">Pas encore de données.</div>';
@@ -1322,7 +1312,6 @@ function renderGuardrails(){
     wrap.innerHTML=svg;
   }
 
-  // "Activation trend" -> vrais blocages/jour (14j), réutilise dailyTrend
   const trend=$('guardrailTrend');
   const daily=state.dailyTrend||[];
   if(daily.length<2){
@@ -1370,8 +1359,6 @@ function renderUsage(){
     <div class="card kpi"><div class="kpi-top">Avg Latency</div><div class="kpi-value">${Number(m.avg_latency_ms||0).toFixed(1)}ms</div></div>
     <div class="card kpi"><div class="kpi-top">LLM Analyzed</div><div class="kpi-value">${fmt(m.llm_judge_count||0)}</div></div>`;
 
-  // Cost forecast -> vrai historique (/api/cost/trend) + projection linéaire
-  // simple et clairement labellisée, pas une courbe sophistiquée inventée.
   const cf=$('costForecast');
   const hist=(state.costTrend||[]).map(d=>d.cost);
   if(hist.length<2){
@@ -1400,8 +1387,6 @@ function renderUsage(){
     cf.innerHTML=svg;
   }
 
-  // Remplace l'ancien "Token Usage" (jamais mesuré par le SDK, donc jamais
-  // affiché) par la distribution de latence réelle — vraie donnée utile.
   const tu=$('tokenUsage');
   const lat=state.latencyDist||{};
   if(!lat.count){
@@ -1436,7 +1421,6 @@ async function openTrace(id){
     const rows=await api('/api/traces/'+encodeURIComponent(id));
     if(!rows.length){$('modalBody').innerHTML='<div class="empty">No span detail available for this trace.</div>';return;}
 
-    // Build Gantt chart
     const totalDur=Math.max(...rows.map(r=>Number(r.timestamp||0)+Number(r.latency_ms||0)))-Math.min(...rows.map(r=>Number(r.timestamp||0)));
     const minT=Math.min(...rows.map(r=>Number(r.timestamp||0)));
     const trackW=600;
@@ -1451,7 +1435,6 @@ async function openTrace(id){
     });
     ganttHtml+='</div></div>';
 
-    // Timeline cards
     ganttHtml+='<div class="timeline">'+rows.map(r=>{
       const blocked=!!r.blocked;
       const checks=Array.isArray(r.security_checks)?r.security_checks:[];
@@ -1477,8 +1460,6 @@ async function refreshAll(){
       api('/api/spans/expensive'), api('/api/cost/trend'), api('/api/latency/distribution'),
       api('/api/events/recent'), api('/api/trend/daily'),
     ]);
-    // Pas de valeur inventée ici — un trace sans modèle connu affiche "—",
-    // pas "gpt-4o" par défaut (c'était le cas avant cette correction).
     state.allTraces=t.map(x=>({...x, model:x.model||null, p50:x.p50||null, p99:x.p99||null}));
     state.traces=t;
     state.models=models;
@@ -1575,7 +1556,6 @@ def trace_detail(trace_id):
         checks = json.loads(row["security_checks"])
         blocked = bool(row["blocked"])
         
-        # Badge de détection
         layer = row.get("detection_layer", "unknown")
         badge_classes = {
             "regex": "badge-regex",
@@ -1585,7 +1565,6 @@ def trace_detail(trace_id):
         }
         badge_class = badge_classes.get(layer, "badge-regex")
         
-        # Scores
         ml_score = row.get("ml_score")
         llm_score = row.get("llm_score")
         llm_reason = row.get("llm_reason")
@@ -1640,10 +1619,6 @@ def show_key():
 @app.route("/admin/customers", methods=["POST"])
 @limiter.limit("10 per minute")
 def create_customer():
-    """Provisionne un nouveau client hébergé (Pro/Startup/Enterprise) :
-    génère une clé API, la stocke hashée, et la retourne UNE SEULE FOIS
-    (comme pour n'importe quel provider — on ne peut plus la relire ensuite).
-    Protégé par AGENTGUARD_ADMIN_SECRET, comme /api/key."""
     if not ADMIN_SECRET:
         return jsonify({"error": "AGENTGUARD_ADMIN_SECRET not configured — endpoint disabled"}), 404
     admin_secret = request.headers.get("X-Admin-Secret", "") or request.args.get("admin", "")
@@ -1689,7 +1664,6 @@ def create_customer():
 @app.route("/admin/customers/<org_id>/revoke", methods=["POST"])
 @limiter.limit("10 per minute")
 def revoke_customer(org_id):
-    """Désactive toutes les clés d'un client (résiliation, impayé, abus)."""
     if not ADMIN_SECRET:
         return jsonify({"error": "AGENTGUARD_ADMIN_SECRET not configured — endpoint disabled"}), 404
     admin_secret = request.headers.get("X-Admin-Secret", "") or request.args.get("admin", "")
