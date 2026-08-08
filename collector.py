@@ -1063,7 +1063,6 @@ body{display:flex;font-size:14px}.app{display:flex;width:100%;min-height:100vh}
   </div>
 </div>
 <script>
-
 const state={metrics:null,traces:[],detection:null,llm:null,allTraces:[]};
 const $=id=>document.getElementById(id);
 const esc=v=>String(v||'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -1149,7 +1148,7 @@ function renderOverview(){
   const wrap=$('activityChartWrap');
   const W=wrap.clientWidth||600,H=250;
   if(daily.length<2){
-    wrap.innerHTML='<div class="empty" style="padding-top:90px">Pas assez d\\'historique pour un graphique (minimum 2 jours d\\'activité).</div>';
+    wrap.innerHTML='<div class="empty" style="padding-top:90px">Pas assez d\\\'historique pour un graphique (minimum 2 jours d\\\'activité).</div>';
   }else{
     const maxS=Math.max(1,...dailyTotals);
     const pad={l:40,r:15,t:15,b:28};
@@ -1179,7 +1178,7 @@ function renderOverview(){
     const palette=['#38bdf8','#a78bfa','#22d3ee','#f59e0b','#fb923c','#4ade80'];
     $('modelBreakdown').innerHTML=models.map((mo,i)=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="width:120px;font-size:11px;color:#8e9bac;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(mo.name)}</span><div style="flex:1"><div class="risk-bar"><span style="width:${(mo.requests/maxReq*100).toFixed(1)}%;background:${palette[i%palette.length]};display:block;height:100%;border-radius:9px"></span></div></div><span style="width:50px;text-align:right;font-size:10px;font-weight:700;color:#cbd6e3">${fmt(mo.requests)}</span><span style="width:55px;text-align:right;font-size:10px;color:#647184">${mo.avg_latency_ms}ms</span></div>`).join('');
   }else{
-    $('modelBreakdown').innerHTML='<div class="empty">Aucun modèle identifié pour l\\'instant — passe model="..." à ton appel LLM pour l\\'afficher ici.</div>';
+    $('modelBreakdown').innerHTML='<div class="empty">Aucun modèle identifié pour l\\\'instant — passe model="..." à ton appel LLM pour l\\\'afficher ici.</div>';
   }
 
   const total=Math.max(1,m.total_spans||0),blk=m.blocked_operations||0,safe=total-blk;
@@ -1214,7 +1213,7 @@ function renderOverview(){
     const action=ev.blocked?('Bloqué — '+(ev.reason||'raison non précisée')):(ev.span_type+' autorisé');
     const color=layerColors[ev.layer]||'#8996a8';
     return `<div class="trace-row" style="grid-template-columns:auto 1fr auto;gap:10px"><span style="display:inline-block;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:700;text-transform:uppercase;background:${color}18;color:${color};border:1px solid ${color}35">${esc(ev.layer)}</span><span style="font-size:11px;color:#8e9bac;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(action)}</span><span style="font-size:10px;color:#4e5b6d">${riskDot} ${esc(ev.created_at||'')}</span></div>`;
-  }).join(''):'<div class="empty">Aucun événement pour l\\'instant.</div>';
+  }).join(''):'<div class="empty">Aucun événement pour l\\\'instant.</div>';
 
   renderRecentTraces();
 }
@@ -1257,7 +1256,7 @@ function exportTracesCSV(){
 function renderModels(){
   const models=state.models||[];
   if(!models.length){
-    $('modelCards').innerHTML='<div class="empty" style="grid-column:1/-1">Aucun modèle observé pour l\\'instant. Passe model="..." dans les kwargs de ton appel LLM (guard_llm_call le capture automatiquement) pour peupler cette page.</div>';
+    $('modelCards').innerHTML='<div class="empty" style="grid-column:1/-1">Aucun modèle observé pour l\\\'instant. Passe model="..." dans les kwargs de ton appel LLM (guard_llm_call le capture automatiquement) pour peupler cette page.</div>';
     $('modelComparison').innerHTML='';
     return;
   }
@@ -1289,7 +1288,7 @@ function renderGuardrails(){
 
   $('guardrailDetail').innerHTML = checks.length
     ? checks.map(c=>`<div class="card kpi"><div class="kpi-top">${esc(checkLabels[c.check_name]||c.check_name)}</div><div class="kpi-value ${c.flagged>0?'danger':''}">${c.flag_rate}%</div><div class="kpi-meta">${fmt(c.flagged)} signalé(s) · ${fmt(c.total)} analysés au total</div></div>`).join('')
-    : '<div class="empty" style="grid-column:1/-1">Aucune vérification enregistrée pour l\\'instant.</div>';
+    : '<div class="empty" style="grid-column:1/-1">Aucune vérification enregistrée pour l\\\'instant.</div>';
 
   const wrap=$('guardrailStacked');
   if(!checks.length){
@@ -1315,7 +1314,7 @@ function renderGuardrails(){
   const trend=$('guardrailTrend');
   const daily=state.dailyTrend||[];
   if(daily.length<2){
-    trend.innerHTML='<div class="empty">Pas assez d\\'historique pour une tendance.</div>';
+    trend.innerHTML='<div class="empty">Pas assez d\\\'historique pour une tendance.</div>';
   }else{
     const W2=trend.clientWidth||500;
     const trendData=daily.map(d=>d.blocked);
@@ -1362,7 +1361,7 @@ function renderUsage(){
   const cf=$('costForecast');
   const hist=(state.costTrend||[]).map(d=>d.cost);
   if(hist.length<2){
-    cf.innerHTML='<div class="empty" style="padding-top:90px">Pas assez d\\'historique de coût pour une projection (minimum 2 jours).</div>';
+    cf.innerHTML='<div class="empty" style="padding-top:90px">Pas assez d\\\'historique de coût pour une projection (minimum 2 jours).</div>';
   }else{
     const W=cf.clientWidth||500;
     const dailyAvgDelta=(hist[hist.length-1]-hist[0])/(hist.length-1);
@@ -1694,3 +1693,4 @@ if __name__ == "__main__":
     print(f"   DB: {DB_TYPE}")
     print(f"   Detection: Regex + ML (if enabled) + LLM Judge (if enabled)")
     app.run(host="0.0.0.0", port=port, debug=False)
+
