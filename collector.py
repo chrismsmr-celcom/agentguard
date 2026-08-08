@@ -111,7 +111,8 @@ def init_db():
                 ml_score DOUBLE PRECISION,
                 llm_score DOUBLE PRECISION,
                 llm_reason TEXT,
-                org_id TEXT DEFAULT 'default'
+                org_id TEXT DEFAULT 'default',
+                model TEXT
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_trace_pg ON spans(trace_id)")
@@ -123,6 +124,7 @@ def init_db():
         # Migration douce pour une DB existante créée avant le multi-tenant
         try:
             cur.execute("ALTER TABLE spans ADD COLUMN IF NOT EXISTS org_id TEXT DEFAULT 'default'")
+            cur.execute("ALTER TABLE spans ADD COLUMN IF NOT EXISTS model TEXT")
         except Exception:
             pass
         cur.execute("""
@@ -162,7 +164,8 @@ def init_db():
                 ml_score REAL,
                 llm_score REAL,
                 llm_reason TEXT,
-                org_id TEXT DEFAULT 'default'
+                org_id TEXT DEFAULT 'default',
+                model TEXT
             )
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_trace ON spans(trace_id)")
@@ -175,6 +178,10 @@ def init_db():
         # la colonne existe déjà — on l'ignore proprement dans ce cas).
         try:
             c.execute("ALTER TABLE spans ADD COLUMN org_id TEXT DEFAULT 'default'")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            c.execute("ALTER TABLE spans ADD COLUMN model TEXT")
         except sqlite3.OperationalError:
             pass
         c.execute("""
@@ -203,6 +210,9 @@ def dict_from_row(row, is_pg=False):
 PROTECTED_ENDPOINTS = {
     "receive_span", "list_traces", "get_trace", "get_metrics",
     "dashboard", "trace_detail", "get_detection_stats",
+    "api_models", "api_heatmap", "api_checks_breakdown",
+    "api_expensive_spans", "api_cost_trend", "api_latency_distribution",
+    "api_recent_events", "api_trend_daily",
 }
 
 def safe_compare(a: str, b: str) -> bool:
@@ -333,6 +343,10 @@ def receive_span():
                 llm_reason = check.get("details")
                 break
 
+    # Le modèle appelé (capturé par le SDK depuis kwargs["model"]) — sert au
+    # vrai breakdown par modèle du dashboard, pas de valeur inventée.
+    model = data.get("input_data", {}).get("model") if isinstance(data.get("input_data"), dict) else None
+
     if is_pg:
         conn = get_pg_conn()
         cur = conn.cursor()
@@ -340,8 +354,8 @@ def receive_span():
             INSERT INTO spans (
                 trace_id, span_id, span_type, timestamp, latency_ms,
                 input_data, output_data, security_checks, blocked,
-                block_reason, cost_usd, detection_layer, ml_score, llm_score, llm_reason, org_id
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                block_reason, cost_usd, detection_layer, ml_score, llm_score, llm_reason, org_id, model
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             data["trace_id"], data["span_id"], data["span_type"],
             data["timestamp"], data["latency_ms"],
@@ -349,7 +363,7 @@ def receive_span():
             json.dumps(data["output_data"]),
             json.dumps(data["security_checks"]),
             data["blocked"], data.get("block_reason"), data["cost_usd"],
-            detection_layer, ml_score, llm_score, llm_reason, g.org_id
+            detection_layer, ml_score, llm_score, llm_reason, g.org_id, model
         ))
     else:
         conn = sqlite3.connect(DB_SQLITE_PATH)
@@ -358,8 +372,8 @@ def receive_span():
             INSERT INTO spans (
                 trace_id, span_id, span_type, timestamp, latency_ms,
                 input_data, output_data, security_checks, blocked,
-                block_reason, cost_usd, detection_layer, ml_score, llm_score, llm_reason, org_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                block_reason, cost_usd, detection_layer, ml_score, llm_score, llm_reason, org_id, model
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data["trace_id"], data["span_id"], data["span_type"],
             data["timestamp"], data["latency_ms"],
@@ -368,7 +382,7 @@ def receive_span():
             json.dumps(data["security_checks"]),
             1 if data["blocked"] else 0,
             data.get("block_reason"), data["cost_usd"],
-            detection_layer, ml_score, llm_score, llm_reason, g.org_id
+            detection_layer, ml_score, llm_score, llm_reason, g.org_id, model
         ))
 
     conn.commit()
@@ -669,6 +683,235 @@ def get_llm_stats():
         "status": "operational" if total_llm > 0 else "idle"
     })
 
+# ── ENDPOINTS "DASHBOARD RÉEL" ──
+# Chacun de ces endpoints remplace une section du dashboard qui affichait
+# auparavant des données inventées (modèles fictifs, heatmap Math.random(),
+# "guardrails" jamais implémentés). Tout ici vient d'une vraie requête sur
+# les spans stockées — s'il n'y a pas de données, la réponse est vide,
+# jamais remplie de chiffres plausibles.
+
+@app.route("/api/models")
+def api_models():
+    """Répartition réelle par modèle — nécessite que le SDK envoie
+    kwargs['model'] (fait automatiquement par guard_llm_call)."""
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_db()
+    if is_pg:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        p = "%s"
+    else:
+        cur = conn.cursor()
+        p = "?"
+
+    cur.execute(f"""
+        SELECT model, COUNT(*) as requests, AVG(latency_ms) as avg_latency,
+               SUM(cost_usd) as total_cost,
+               SUM(CASE WHEN blocked THEN 1 ELSE 0 END) as blocked_count
+        FROM spans
+        WHERE org_id = {p} AND model IS NOT NULL AND model != ''
+        GROUP BY model
+        ORDER BY requests DESC
+    """, (g.org_id,))
+    models = []
+    for r in cur.fetchall():
+        row = dict(r) if is_pg else {"model": r[0], "requests": r[1], "avg_latency": r[2], "total_cost": r[3], "blocked_count": r[4]}
+        models.append({
+            "name": row["model"],
+            "requests": row["requests"],
+            "avg_latency_ms": round(float(row["avg_latency"] or 0), 1),
+            "total_cost_usd": round(float(row["total_cost"] or 0), 6),
+            "blocked_count": row["blocked_count"],
+        })
+    conn.close()
+    return jsonify(models)
+
+@app.route("/api/heatmap")
+def api_heatmap():
+    """Activité bloquée par heure réelle, sur les 5 derniers jours."""
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_db()
+    if is_pg:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT EXTRACT(DAY FROM created_at)::int as day, EXTRACT(HOUR FROM created_at)::int as hour,
+                   COUNT(*) as total, SUM(CASE WHEN blocked THEN 1 ELSE 0 END) as blocked
+            FROM spans
+            WHERE org_id = %s AND created_at > NOW() - INTERVAL '5 days'
+            GROUP BY day, hour
+        """, (g.org_id,))
+    else:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT strftime('%j', created_at) as day, CAST(strftime('%H', created_at) AS INTEGER) as hour,
+                   COUNT(*) as total, SUM(CASE WHEN blocked THEN 1 ELSE 0 END) as blocked
+            FROM spans
+            WHERE org_id = ? AND created_at > datetime('now', '-5 days')
+            GROUP BY day, hour
+        """, (g.org_id,))
+    cells = [{"day": r[0], "hour": r[1], "total": r[2], "blocked": r[3] or 0} for r in cur.fetchall()]
+    conn.close()
+    return jsonify(cells)
+
+@app.route("/api/checks/breakdown")
+def api_checks_breakdown():
+    """Le vrai remplaçant de l'ancienne section 'Guardrails' fictive : les
+    catégories qui existent réellement dans PolicyEngine (prompt_injection,
+    pii_detection, tool_policy/dangerous_params, budget_policy) — pas de
+    toxicité ni de 'denied topics', qui ne sont pas des fonctionnalités
+    implémentées."""
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_db()
+    cur = conn.cursor()
+    p = "%s" if is_pg else "?"
+    cur.execute(f"SELECT security_checks FROM spans WHERE org_id = {p} AND security_checks IS NOT NULL", (g.org_id,))
+    rows = cur.fetchall()
+    conn.close()
+
+    breakdown = {}
+    for row in rows:
+        raw = row[0]
+        try:
+            checks = raw if isinstance(raw, list) else json.loads(raw)
+        except Exception:
+            continue
+        for c in (checks or []):
+            name = c.get("check_name", "unknown")
+            entry = breakdown.setdefault(name, {"total": 0, "flagged": 0})
+            entry["total"] += 1
+            if not c.get("passed", True):
+                entry["flagged"] += 1
+
+    result = [
+        {"check_name": name, "total": v["total"], "flagged": v["flagged"],
+         "flag_rate": round(v["flagged"] / v["total"] * 100, 1) if v["total"] else 0}
+        for name, v in breakdown.items()
+    ]
+    return jsonify(sorted(result, key=lambda x: -x["total"]))
+
+@app.route("/api/spans/expensive")
+def api_expensive_spans():
+    """Les vraies spans les plus coûteuses — pas des trace_id inventés."""
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_db()
+    cur = conn.cursor()
+    p = "%s" if is_pg else "?"
+    cur.execute(f"""
+        SELECT trace_id, span_id, span_type, model, cost_usd
+        FROM spans WHERE org_id = {p} AND cost_usd > 0
+        ORDER BY cost_usd DESC LIMIT 5
+    """, (g.org_id,))
+    rows = [{"trace_id": r[0], "span_id": r[1], "span_type": r[2], "model": r[3], "cost_usd": r[4]} for r in cur.fetchall()]
+    conn.close()
+    return jsonify(rows)
+
+@app.route("/api/cost/trend")
+def api_cost_trend():
+    """Coût réel jour par jour, sur les 14 derniers jours — base pour une
+    projection linéaire honnête plutôt qu'une courbe de forecast inventée."""
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_db()
+    cur = conn.cursor()
+    if is_pg:
+        cur.execute("""
+            SELECT DATE(created_at) as day, SUM(cost_usd) as cost
+            FROM spans WHERE org_id = %s AND created_at > NOW() - INTERVAL '14 days'
+            GROUP BY day ORDER BY day
+        """, (g.org_id,))
+    else:
+        cur.execute("""
+            SELECT DATE(created_at) as day, SUM(cost_usd) as cost
+            FROM spans WHERE org_id = ? AND created_at > datetime('now', '-14 days')
+            GROUP BY day ORDER BY day
+        """, (g.org_id,))
+    rows = [{"day": str(r[0]), "cost": round(float(r[1] or 0), 6)} for r in cur.fetchall()]
+    conn.close()
+    return jsonify(rows)
+
+@app.route("/api/latency/distribution")
+def api_latency_distribution():
+    """Vrais percentiles de latence — remplace l'ancien graphique 'token
+    usage' qui affichait des nombres inventés (les tokens ne sont pas
+    mesurés par le SDK actuellement, donc on ne les affiche pas du tout
+    plutôt que de les simuler)."""
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_db()
+    cur = conn.cursor()
+    p = "%s" if is_pg else "?"
+    cur.execute(f"SELECT latency_ms FROM spans WHERE org_id = {p} AND latency_ms > 0 ORDER BY latency_ms", (g.org_id,))
+    values = [r[0] for r in cur.fetchall()]
+    conn.close()
+
+    def pct(vals, q):
+        if not vals:
+            return 0
+        idx = min(len(vals) - 1, int(len(vals) * q))
+        return round(vals[idx], 1)
+
+    return jsonify({
+        "count": len(values),
+        "p50": pct(values, 0.50),
+        "p95": pct(values, 0.95),
+        "p99": pct(values, 0.99),
+        "min": round(min(values), 1) if values else 0,
+        "max": round(max(values), 1) if values else 0,
+    })
+
+@app.route("/api/events/recent")
+def api_recent_events():
+    """Les vrais derniers événements — remplace le flux 'live events' qui
+    affichait 6 lignes hardcodées ('Flagged prompt injection', '2s ago'...)."""
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_db()
+    cur = conn.cursor()
+    p = "%s" if is_pg else "?"
+    cur.execute(f"""
+        SELECT span_type, detection_layer, blocked, block_reason, created_at, security_checks
+        FROM spans WHERE org_id = {p}
+        ORDER BY created_at DESC LIMIT 8
+    """, (g.org_id,))
+    events = []
+    for r in cur.fetchall():
+        try:
+            checks = r[5] if isinstance(r[5], list) else json.loads(r[5] or "[]")
+        except Exception:
+            checks = []
+        risk = "low"
+        for c in checks:
+            if c.get("risk_level") in ("high", "critical"):
+                risk = c.get("risk_level")
+        events.append({
+            "span_type": r[0], "layer": r[1] or "regex", "blocked": bool(r[2]),
+            "reason": r[3], "created_at": str(r[4]), "risk": risk,
+        })
+    conn.close()
+    return jsonify(events)
+
+@app.route("/api/trend/daily")
+def api_trend_daily():
+    """Totaux réels jour par jour (14 derniers jours) — utilisé pour les
+    sparklines des KPI, qui affichaient auparavant des tableaux de nombres
+    écrits en dur (ex: '+186.36%')."""
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_db()
+    cur = conn.cursor()
+    if is_pg:
+        cur.execute("""
+            SELECT DATE(created_at) as day, COUNT(*) as total,
+                   SUM(CASE WHEN blocked THEN 1 ELSE 0 END) as blocked
+            FROM spans WHERE org_id = %s AND created_at > NOW() - INTERVAL '14 days'
+            GROUP BY day ORDER BY day
+        """, (g.org_id,))
+    else:
+        cur.execute("""
+            SELECT DATE(created_at) as day, COUNT(*) as total,
+                   SUM(CASE WHEN blocked THEN 1 ELSE 0 END) as blocked
+            FROM spans WHERE org_id = ? AND created_at > datetime('now', '-14 days')
+            GROUP BY day ORDER BY day
+        """, (g.org_id,))
+    rows = [{"day": str(r[0]), "total": r[1], "blocked": r[2] or 0} for r in cur.fetchall()]
+    conn.close()
+    return jsonify(rows)
+
 # ── DASHBOARD (Professional UI) ──
 DASHBOARD_HTML = r'''
 <!DOCTYPE html>
@@ -740,7 +983,7 @@ body{display:flex;font-size:14px}.app{display:flex;width:100%;min-height:100vh}
   <div class="grid-kpi" id="kpiRow"></div>
   <div class="four" id="guardrailKpis"></div>
   <div class="layout">
-    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Runtime activity</div><div class="panel-desc">Observed spans and blocked decisions — last 6h</div></div><div class="legend"><span><i class="a"></i>Spans</span><span><i class="r"></i>Blocked</span></div></div><div class="chart-wrap" id="activityChartWrap"></div></div>
+    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Runtime activity</div><div class="panel-desc">Observed spans and blocked decisions — last 14 days</div></div><div class="legend"><span><i class="a"></i>Spans</span><span><i class="r"></i>Blocked</span></div></div><div class="chart-wrap" id="activityChartWrap"></div></div>
     <div class="card panel"><div class="panel-head"><div><div class="panel-title">Risk distribution</div><div class="panel-desc">Security checks observed in the last 24h</div></div></div><div class="risk-grid" id="riskGrid"></div></div>
   </div>
   <div class="two">
@@ -771,15 +1014,15 @@ body{display:flex;font-size:14px}.app{display:flex;width:100%;min-height:100vh}
 <section id="view-models" class="view">
   <div class="page-head"><div><div class="eyebrow">Observability</div><h1 class="page-title">Model Performance</h1><p class="page-sub">Per-model latency, cost, token usage and block rate.</p></div></div>
   <div class="three" id="modelCards"></div>
-  <div class="card panel" style="margin-top:14px"><div class="panel-head"><div><div class="panel-title">Model comparison</div><div class="panel-desc">Cost (bars) vs P99 latency (line) per model</div></div></div><div class="chart-wrap" id="modelComparison"></div></div>
+  <div class="card panel" style="margin-top:14px"><div class="panel-head"><div><div class="panel-title">Model comparison</div><div class="panel-desc">Cost (bars) vs avg latency (line) per model</div></div></div><div class="chart-wrap" id="modelComparison"></div></div>
 </section>
 
 <section id="view-guardrails" class="view">
   <div class="page-head"><div><div class="eyebrow">Security</div><h1 class="page-title">Guardrails</h1><p class="page-sub">Runtime policy enforcement and content filtering metrics.</p></div></div>
   <div class="four" id="guardrailDetail"></div>
   <div class="two" style="margin-top:14px">
-    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Guardrail activation by type</div><div class="panel-desc">Stacked activation over time</div></div></div><div class="chart-wrap" id="guardrailStacked"></div></div>
-    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Activation trend</div><div class="panel-desc">Total guardrail triggers over 24h</div></div></div><div class="chart-wrap" id="guardrailTrend"></div></div>
+    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Guardrail activation by type</div><div class="panel-desc">Total analyzed vs flagged, per detection category</div></div></div><div class="chart-wrap" id="guardrailStacked"></div></div>
+    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Activation trend</div><div class="panel-desc">Blocked requests per day — last 14 days</div></div></div><div class="chart-wrap" id="guardrailTrend"></div></div>
   </div>
 </section>
 
@@ -802,7 +1045,7 @@ body{display:flex;font-size:14px}.app{display:flex;width:100%;min-height:100vh}
   <div class="four" id="usageKpis"></div>
   <div class="two" style="margin-top:14px">
     <div class="card panel"><div class="panel-head"><div><div class="panel-title">Cost forecast</div><div class="panel-desc">Projected spend based on current trajectory</div></div></div><div class="chart-wrap" id="costForecast"></div></div>
-    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Token usage</div><div class="panel-desc">Input vs output tokens over time</div></div></div><div class="chart-wrap" id="tokenUsage"></div></div>
+    <div class="card panel"><div class="panel-head"><div><div class="panel-title">Latency distribution</div><div class="panel-desc">Real p50 / p95 / p99 / max observed latency</div></div></div><div class="chart-wrap" id="tokenUsage"></div></div>
   </div>
 </section>
 
@@ -869,74 +1112,123 @@ function polarToCartesian(cx,cy,r,angleDeg){const angleRad=(angleDeg-90)*Math.PI
 
 function renderOverview(){
   const m=state.metrics; if(!m)return;
+  const daily=state.dailyTrend||[];
+  const dailyTotals=daily.map(d=>d.total);
+  const dailyBlocked=daily.map(d=>d.blocked);
+  const costSeries=(state.costTrend||[]).map(d=>d.cost);
+  const lat=state.latencyDist||{};
+
+  function trendOf(series){
+    if(series.length<2)return {has:false};
+    const first=series[0]||0, last=series[series.length-1]||0;
+    const pct=first===0?(last>0?100:0):((last-first)/first*100);
+    return {has:true, up:pct>=0, text:(pct>=0?'+':'')+pct.toFixed(1)+'%'};
+  }
+  const reqTrend=trendOf(dailyTotals), costTrend=trendOf(costSeries);
+  function trendHtml(t){
+    return t.has?`<span style="color:${t.up?'#35d07f':'#ff5d73'}">${t.up?'↑':'↓'} ${esc(t.text)}</span> sur 14j`
+                :`<span style="color:#5c6674">historique &lt; 2 jours</span>`;
+  }
+
   const kpis=[
-    {label:"Security Score",value:securityScore(m)+'/100',trend:'+2.4%',up:true,spark:[82,83,85,84,86,87,88,89,90,89,91,92,93,92,94,93,94,95,94,94],color:'#35d07f'},
-    {label:"Total Requests",value:fmt(m.total_spans),trend:'+186.36%',up:true,spark:[12,15,14,18,22,28,35,42,38,45,52,48,55,62,58,65,72,68,75,82],color:'#38bdf8'},
-    {label:"Avg Duration",value:Number(m.avg_latency_ms||0).toFixed(1)+'ms',trend:'-1.23%',up:false,spark:[45,42,48,44,40,38,42,36,34,32,35,30,28,32,26,24,22,25,20,18],color:'#35d07f'},
-    {label:"P99 Duration",value:'3.38s',trend:'+8.76%',up:true,spark:[30,35,32,38,42,40,45,48,52,50,55,58,62,60,65,68,72,70,75,78],color:'#ff5d73'},
-    {label:"Token Count",value:'387.8K',trend:'+12.4%',up:true,spark:[20,25,30,28,35,40,38,45,50,48,55,60,58,65,70,68,75,80,78,85],color:'#a78bfa'},
-    {label:"AI Spend",value:money(m.total_cost_usd),trend:'+148.13%',up:true,spark:[5,6,8,7,10,12,15,18,22,25,30,35,40,45,50,55,60,65,70,75],color:'#f59e0b'},
+    {label:"Security Score",value:securityScore(m)+'/100',spark:dailyTotals,color:'#35d07f',trend:{has:false}},
+    {label:"Total Requests",value:fmt(m.total_spans),spark:dailyTotals,color:'#38bdf8',trend:reqTrend},
+    {label:"Avg Latency",value:Number(m.avg_latency_ms||0).toFixed(1)+'ms',spark:dailyTotals,color:'#35d07f',trend:{has:false}},
+    {label:"P99 Latency",value:(lat.p99?lat.p99.toFixed(0):'—')+'ms',spark:dailyTotals,color:'#ff5d73',trend:{has:false}},
+    {label:"LLM Judge Analyzed",value:fmt(m.llm_judge_count||0),spark:dailyTotals,color:'#a78bfa',trend:{has:false}},
+    {label:"AI Spend",value:money(m.total_cost_usd),spark:costSeries,color:'#f59e0b',trend:costTrend},
   ];
-  $('kpiRow').innerHTML=kpis.map(k=>`<div class="card kpi"><div class="spark">${sparkSVG(k.spark,k.color,70,24)}</div><div class="kpi-top">${esc(k.label)}</div><div class="kpi-value" style="color:${k.up&&k.color!=='#ff5d73'?'#35d07f':k.color}">${esc(k.value)}</div><div class="kpi-meta"><span style="color:${k.up?'#ff5d73':'#35d07f'}">${k.up?'↑':'↓'} ${esc(k.trend)}</span> vs last period</div></div>`).join('');
+  $('kpiRow').innerHTML=kpis.map(k=>`<div class="card kpi"><div class="spark">${sparkSVG(k.spark.length?k.spark:[0,0],k.color,70,24)}</div><div class="kpi-top">${esc(k.label)}</div><div class="kpi-value">${esc(k.value)}</div><div class="kpi-meta">${trendHtml(k.trend)}</div></div>`).join('');
 
-  const guards=[
-    {label:"Guardrail Exec",value:"0.89%",sub:"181.39 activations",trend:"+35.27%",spark:[10,12,15,14,18,22,25,28,32,35,38,42,45,48,52,55,58,62,65,68]},
-    {label:"Toxicity",value:"1.61%",sub:"164 blocked prompts",trend:"+18.97%",spark:[5,6,8,7,9,11,13,12,15,17,19,18,21,23,25,24,27,29,31,30]},
-    {label:"PII Leaks",value:"1.57%",sub:"160 prevented leaks",trend:"+21.74%",spark:[4,5,7,6,8,10,12,11,14,16,18,17,20,22,24,23,26,28,30,29]},
-    {label:"Denied Topics",value:"1.61%",sub:"164 filtered",trend:"+18.97%",spark:[5,6,8,7,9,11,13,12,15,17,19,18,21,23,25,24,27,29,31,30]},
-  ];
-  $('guardrailKpis').innerHTML=guards.map(g=>`<div class="card kpi"><div class="spark">${sparkSVG(g.spark,'#ff5d73',70,24)}</div><div class="kpi-top">${esc(g.label)}</div><div class="kpi-value danger">${esc(g.value)}</div><div class="kpi-meta">${esc(g.sub)} · <span class="danger">↑ ${esc(g.trend)}</span></div></div>`).join('');
+  // Section "Guardrails" — remplacée par les vraies catégories de détection
+  // (PolicyEngine ne fait QUE injection/PII/tool-policy/budget ; pas de
+  // toxicité ni de "denied topics", donc on n'invente pas ces cartes).
+  const checkLabels={prompt_injection:'Prompt Injection', pii_detection:'PII Detection', dangerous_params:'Tool Policy', tool_policy:'Tool Policy', budget_policy:'Budget'};
+  const checks=state.checksBreakdown||[];
+  $('guardrailKpis').innerHTML = checks.length
+    ? checks.slice(0,4).map(c=>`<div class="card kpi"><div class="kpi-top">${esc(checkLabels[c.check_name]||c.check_name)}</div><div class="kpi-value ${c.flagged>0?'danger':''}">${c.flag_rate}%</div><div class="kpi-meta">${fmt(c.flagged)} signalé(s) sur ${fmt(c.total)} analysés</div></div>`).join('')
+    : '<div class="empty" style="grid-column:1/-1">Pas encore de vérifications de sécurité enregistrées.</div>';
 
+  // Graphique d'activité — vrais totaux journaliers, pas un tracé horaire simulé
   const wrap=$('activityChartWrap');
   const W=wrap.clientWidth||600,H=250;
-  const hours=['18h','19h','20h','21h','22h','23h','00h','01h','02h','03h','04h','05h'];
-  const spans=[120,145,132,178,195,210,168,134,98,87,76,92];
-  const blocked=[2,1,3,5,8,12,4,2,1,0,1,3];
-  const maxS=Math.max(...spans);
-  const pad={l:40,r:15,t:15,b:28};
-  const cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
-  let svg=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:100%">`;
-  for(let i=0;i<4;i++){const y=pad.t+ch*i/3;svg+=`<line x1="${pad.l}" y1="${y}" x2="${W-pad.r}" y2="${y}" stroke="#1b2634" stroke-width="0.5"/>`;}
-  let area=`M${pad.l},${pad.t+ch}`;
-  spans.forEach((v,i)=>{const x=pad.l+(i/(spans.length-1))*cw,y=pad.t+ch-(v/maxS)*ch;area+=` L${x},${y}`;});
-  area+=` L${W-pad.r},${pad.t+ch} Z`;
-  svg+=`<path d="${area}" fill="#38bdf8" opacity="0.1"/>`;
-  let l1='';spans.forEach((v,i)=>{const x=pad.l+(i/(spans.length-1))*cw,y=pad.t+ch-(v/maxS)*ch;l1+=i?` L${x},${y}`:`M${x},${y}`;});
-  svg+=`<path d="${l1}" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/>`;
-  let l2='';blocked.forEach((v,i)=>{const x=pad.l+(i/(blocked.length-1))*cw,y=pad.t+ch-(v/maxS)*ch;l2+=i?` L${x},${y}`:`M${x},${y}`;});
-  svg+=`<path d="${l2}" fill="none" stroke="#ff5d73" stroke-width="2" stroke-linecap="round" stroke-dasharray="4,3"/>`;
-  hours.forEach((h,i)=>{const x=pad.l+(i/(hours.length-1))*cw;svg+=`<text x="${x}" y="${H-8}" fill="#536174" font-size="10" text-anchor="middle">${h}</text>`;});
-  [0,Math.round(maxS/2),maxS].forEach((v,i)=>{const y=pad.t+ch-(i/2)*ch;svg+=`<text x="${pad.l-6}" y="${y+3}" fill="#536174" font-size="9" text-anchor="end">${v}</text>`;});
-  svg+='</svg>'; wrap.innerHTML=svg;
+  if(daily.length<2){
+    wrap.innerHTML='<div class="empty" style="padding-top:90px">Pas assez d\\'historique pour un graphique (minimum 2 jours d\\'activité).</div>';
+  }else{
+    const maxS=Math.max(1,...dailyTotals);
+    const pad={l:40,r:15,t:15,b:28};
+    const cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
+    let svg=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:100%">`;
+    for(let i=0;i<4;i++){const y=pad.t+ch*i/3;svg+=`<line x1="${pad.l}" y1="${y}" x2="${W-pad.r}" y2="${y}" stroke="#1b2634" stroke-width="0.5"/>`;}
+    let area=`M${pad.l},${pad.t+ch}`;
+    dailyTotals.forEach((v,i)=>{const x=pad.l+(i/(dailyTotals.length-1))*cw,y=pad.t+ch-(v/maxS)*ch;area+=` L${x},${y}`;});
+    area+=` L${W-pad.r},${pad.t+ch} Z`;
+    svg+=`<path d="${area}" fill="#38bdf8" opacity="0.1"/>`;
+    let l1='';dailyTotals.forEach((v,i)=>{const x=pad.l+(i/(dailyTotals.length-1))*cw,y=pad.t+ch-(v/maxS)*ch;l1+=i?` L${x},${y}`:`M${x},${y}`;});
+    svg+=`<path d="${l1}" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/>`;
+    let l2='';dailyBlocked.forEach((v,i)=>{const x=pad.l+(i/(dailyBlocked.length-1))*cw,y=pad.t+ch-(v/maxS)*ch;l2+=i?` L${x},${y}`:`M${x},${y}`;});
+    svg+=`<path d="${l2}" fill="none" stroke="#ff5d73" stroke-width="2" stroke-linecap="round" stroke-dasharray="4,3"/>`;
+    daily.forEach((d,i)=>{const x=pad.l+(i/(daily.length-1))*cw;svg+=`<text x="${x}" y="${H-8}" fill="#536174" font-size="9" text-anchor="middle">${esc((d.day||'').slice(5))}</text>`;});
+    [0,Math.round(maxS/2),maxS].forEach((v,i)=>{const y=pad.t+ch-(i/2)*ch;svg+=`<text x="${pad.l-6}" y="${y+3}" fill="#536174" font-size="9" text-anchor="end">${v}</text>`;});
+    svg+='</svg>'; wrap.innerHTML=svg;
+  }
 
   const r=m.risk_distribution||{};
-  const max=Math.max(1,...['low','medium','high','critical'].map(k=>Number(r[k]||0)));
-  $('riskGrid').innerHTML=['low','medium','high','critical'].map(k=>`<div class="risk ${k}"><div class="risk-label"><span>${k}</span><b>${fmt(r[k]||0)}</b></div><div class="risk-count">${max?Math.round((Number(r[k]||0)/max)*100):0}%</div><div class="risk-bar"><span style="width:${max?Number(r[k]||0)/max*100:0}%"></span></div></div>`).join('');
+  const maxR=Math.max(1,...['low','medium','high','critical'].map(k=>Number(r[k]||0)));
+  $('riskGrid').innerHTML=['low','medium','high','critical'].map(k=>`<div class="risk ${k}"><div class="risk-label"><span>${k}</span><b>${fmt(r[k]||0)}</b></div><div class="risk-count">${maxR?Math.round((Number(r[k]||0)/maxR)*100):0}%</div><div class="risk-bar"><span style="width:${maxR?Number(r[k]||0)/maxR*100:0}%"></span></div></div>`).join('');
 
-  const models=[{name:"gpt-4o",requests:4215,latency:1240,color:"#38bdf8"},{name:"claude-3.5-sonnet",requests:2891,latency:980,color:"#a78bfa"},{name:"gpt-4o-mini",requests:1876,latency:420,color:"#22d3ee"},{name:"mistral-small",requests:543,latency:680,color:"#f59e0b"},{name:"amazon.titan",requests:312,latency:2100,color:"#fb923c"}];
-  const maxReq=Math.max(...models.map(m=>m.requests));
-  $('modelBreakdown').innerHTML=models.map(m=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="width:120px;font-size:11px;color:#8e9bac;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.name)}</span><div style="flex:1"><div class="risk-bar"><span style="width:${(m.requests/maxReq*100).toFixed(1)}%;background:${m.color};display:block;height:100%;border-radius:9px"></span></div></div><span style="width:50px;text-align:right;font-size:10px;font-weight:700;color:#cbd6e3">${fmt(m.requests)}</span><span style="width:50px;text-align:right;font-size:10px;color:#647184">${(m.latency/1000).toFixed(2)}s</span></div>`).join('');
+  // Répartition par modèle — vraie donnée, vide si le SDK n'a jamais envoyé
+  // de champ "model" (au lieu d'afficher gpt-4o/claude-3.5-sonnet inventés)
+  const models=state.models||[];
+  if(models.length){
+    const maxReq=Math.max(...models.map(x=>x.requests));
+    const palette=['#38bdf8','#a78bfa','#22d3ee','#f59e0b','#fb923c','#4ade80'];
+    $('modelBreakdown').innerHTML=models.map((mo,i)=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="width:120px;font-size:11px;color:#8e9bac;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(mo.name)}</span><div style="flex:1"><div class="risk-bar"><span style="width:${(mo.requests/maxReq*100).toFixed(1)}%;background:${palette[i%palette.length]};display:block;height:100%;border-radius:9px"></span></div></div><span style="width:50px;text-align:right;font-size:10px;font-weight:700;color:#cbd6e3">${fmt(mo.requests)}</span><span style="width:55px;text-align:right;font-size:10px;color:#647184">${mo.avg_latency_ms}ms</span></div>`).join('');
+  }else{
+    $('modelBreakdown').innerHTML='<div class="empty">Aucun modèle identifié pour l\\'instant — passe model="..." à ton appel LLM pour l\\'afficher ici.</div>';
+  }
 
   const total=Math.max(1,m.total_spans||0),blk=m.blocked_operations||0,safe=total-blk;
-  const safePct=(safe/total*100).toFixed(1),blkPct=(blk/total*100).toFixed(1);
+  const safePct=(safe/total*100).toFixed(1);
   const R=55,C=65;
   $('pieChart').innerHTML=`<svg width="160" height="140" viewBox="0 0 130 130"><circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="#18212d" stroke-width="18"/><path d="${describeArc(C,C,R,0,safePct/100*360)}" fill="none" stroke="#38bdf8" stroke-width="18" stroke-linecap="round"/><path d="${describeArc(C,C,R,safePct/100*360,360)}" fill="none" stroke="#ff5d73" stroke-width="18" stroke-linecap="round"/><text x="${C}" y="${C-4}" text-anchor="middle" fill="#eef4fb" font-size="18" font-weight="800">${safePct}%</text><text x="${C}" y="${C+14}" text-anchor="middle" fill="#647184" font-size="9">Safe</text></svg><div style="margin-left:16px;display:flex;flex-direction:column;gap:8px"><div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:#38bdf8"></span><span style="font-size:11px;color:#8e9bac">Safe — ${fmt(safe)}</span></div><div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:#ff5d73"></span><span style="font-size:11px;color:#8e9bac">Blocked — ${fmt(blk)}</span></div></div>`;
 
+  // Heatmap — vraies heures de blocage (24h agrégées sur 5 jours), plus de Math.random()
+  const hm=state.heatmap||[];
   const heat=$('heatmap');
-  heat.innerHTML='<div class="heat">'+Array.from({length:60},()=>{const intensity=Math.random();const bg=intensity>0.85?'#ff5d73':intensity>0.65?'#f59e0b':intensity>0.45?'#38bdf8':intensity>0.25?'#a78bfa':'#111824';return `<div class="heat-cell" style="background:${bg};opacity:${0.3+intensity*0.7}"></div>`;}).join('')+'</div>';
+  if(hm.length){
+    const byHour={};
+    hm.forEach(c=>{byHour[c.hour]=(byHour[c.hour]||0)+c.blocked;});
+    const maxB=Math.max(1,...Object.values(byHour));
+    let cells='';
+    for(let h=0;h<24;h++){
+      const v=byHour[h]||0, intensity=v/maxB;
+      const bg=intensity>0.66?'#ff5d73':intensity>0.33?'#f59e0b':intensity>0?'#38bdf8':'#111824';
+      cells+=`<div class="heat-cell" style="background:${bg};opacity:${v?0.4+intensity*0.6:0.5}" title="${h}h — ${v} blocage(s) réel(s)"></div>`;
+    }
+    heat.innerHTML=`<div class="heat" style="grid-template-columns:repeat(24,1fr)">${cells}</div>`;
+  }else{
+    heat.innerHTML='<div class="empty">Pas encore assez de données horaires.</div>';
+  }
 
-  const expensive=[{name:"trace_2f9a4d6c1b · claude-3.5-sonnet",cost:0.0245,tokens:2840},{name:"trace_1d4e7f6a3c · claude-3.5-sonnet",cost:0.0187,tokens:2100},{name:"trace_3e6f1a8b4d · gpt-4o",cost:0.0098,tokens:1240},{name:"trace_8a5c3b7e2f · mistral-small",cost:0.0034,tokens:890},{name:"trace_7a3f9e2d1b · gpt-4o",cost:0.0042,tokens:720}];
-  $('expensiveSpans').innerHTML=expensive.map(e=>`<div class="threat"><div style="min-width:0"><div style="font-size:12px;color:#cbd6e3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.name)}</div><div style="font-size:10px;color:#647184;margin-top:2px">${fmt(e.tokens)} tokens</div></div><span style="font-size:12px;font-weight:700;color:#ff5d73">${money(e.cost)}</span></div>`).join('');
+  // Spans les plus coûteuses — vraie requête, plus de trace_id inventés
+  const expensive=state.expensiveSpans||[];
+  $('expensiveSpans').innerHTML=expensive.length?expensive.map(e=>`<div class="threat"><div style="min-width:0"><div style="font-size:12px;color:#cbd6e3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.trace_id)} · ${esc(e.model||'modèle inconnu')}</div><div style="font-size:10px;color:#647184;margin-top:2px">${esc(e.span_type)}</div></div><span style="font-size:12px;font-weight:700;color:#ff5d73">${money(e.cost_usd)}</span></div>`).join(''):'<div class="empty">Aucune span coûteuse enregistrée.</div>';
 
-  const events=[{layer:'llm_judge',action:'Flagged prompt injection',risk:'high',time:'2s ago'},{layer:'regex',action:'PII detected in output',risk:'medium',time:'5s ago'},{layer:'ml',action:'Anomaly score 0.87',risk:'medium',time:'8s ago'},{layer:'mixed',action:'Consensus block — jailbreak',risk:'critical',time:'12s ago'},{layer:'regex',action:'Allowed — clean',risk:'low',time:'15s ago'},{layer:'llm_judge',action:'Toxic content flagged',risk:'high',time:'18s ago'}];
+  // Événements récents — vrais derniers spans, plus de flux fictif
+  const events=state.recentEvents||[];
   const layerColors={regex:'#3b82f6',ml:'#8b5cf6',llm_judge:'#f59e0b',mixed:'#a855f7'};
-  $('liveEvents').innerHTML=events.map(ev=>{const riskDot=ev.risk==='critical'?'🔴':ev.risk==='high'?'🟠':ev.risk==='medium'?'🟡':'🟢';return `<div class="trace-row" style="grid-template-columns:auto 1fr auto;gap:10px"><span style="display:inline-block;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:700;text-transform:uppercase;background:${layerColors[ev.layer]}18;color:${layerColors[ev.layer]};border:1px solid ${layerColors[ev.layer]}35">${ev.layer}</span><span style="font-size:11px;color:#8e9bac;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(ev.action)}</span><span style="font-size:10px;color:#4e5b6d">${riskDot} ${esc(ev.time)}</span></div>`;}).join('');
+  $('liveEvents').innerHTML=events.length?events.map(ev=>{
+    const riskDot=ev.risk==='critical'?'🔴':ev.risk==='high'?'🟠':ev.risk==='medium'?'🟡':'🟢';
+    const action=ev.blocked?('Bloqué — '+(ev.reason||'raison non précisée')):(ev.span_type+' autorisé');
+    const color=layerColors[ev.layer]||'#8996a8';
+    return `<div class="trace-row" style="grid-template-columns:auto 1fr auto;gap:10px"><span style="display:inline-block;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:700;text-transform:uppercase;background:${color}18;color:${color};border:1px solid ${color}35">${esc(ev.layer)}</span><span style="font-size:11px;color:#8e9bac;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(action)}</span><span style="font-size:10px;color:#4e5b6d">${riskDot} ${esc(ev.created_at||'')}</span></div>`;
+  }).join(''):'<div class="empty">Aucun événement pour l\\'instant.</div>';
+
   renderRecentTraces();
 }
 
 function renderRecentTraces(){
-  const arr=state.allTraces.slice(0,6);
-  $('recentTraces').innerHTML=arr.length?arr.map(t=>`<div class="trace-row" onclick="openTrace('${esc(t.trace_id)}')"><div class="trace-main"><div class="trace-id">${esc(t.trace_id)}</div><div class="trace-sub">${fmt(t.span_count)} spans · ${money(t.total_cost)} · ${esc(t.detection_layers||'—')}</div></div><span class="badge ${Number(t.blocked_count)>0?'blocked':'safe'}">${Number(t.blocked_count)>0?'blocked':'safe'}</span><span style="color:#647184;font-size:10px">${esc(t.last_seen||'')}</span></div>`).join(''):'<div class="empty">No traces yet.</div>';
 }
 
 function renderTraceTable(data){
@@ -972,77 +1264,82 @@ function exportTracesCSV(){
 }
 
 function renderModels(){
-  const models=[
-    {name:"gpt-4o",requests:4215,avgLatency:1240,p99Latency:3420,cost:4.82,tokens:156200,spark:[20,25,30,35,40,38,42,45,48,52,55,58,62,65,68,72,75,78,82,85]},
-    {name:"claude-3.5-sonnet",requests:2891,avgLatency:980,p99Latency:2800,cost:3.14,tokens:124500,spark:[15,18,22,25,28,30,32,35,38,40,42,45,48,50,52,55,58,60,62,65]},
-    {name:"gpt-4o-mini",requests:1876,avgLatency:420,p99Latency:890,cost:0.87,tokens:67800,spark:[10,12,15,18,20,22,25,28,30,32,35,38,40,42,45,48,50,52,55,58]},
-    {name:"mistral-small",requests:543,avgLatency:680,p99Latency:1560,cost:0.56,tokens:23400,spark:[5,6,8,10,12,14,15,17,19,20,22,24,25,27,29,30,32,34,35,37]},
-    {name:"amazon.titan",requests:312,avgLatency:2100,p99Latency:5200,cost:1.83,tokens:8900,spark:[3,4,5,6,8,9,10,12,13,15,16,18,19,21,22,24,25,27,28,30]},
-  ];
-  $('modelCards').innerHTML=models.map(m=>`<div class="card kpi"><div class="spark">${sparkSVG(m.spark,'#38bdf8',60,20)}</div><div class="kpi-top">${esc(m.name)}</div><div class="kpi-value">${fmt(m.requests)}</div><div class="kpi-meta">${money(m.cost)} · ${fmt(m.tokens)} tokens</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;font-size:10px;color:#647184"><div>P50: <strong style="color:#8e9bac">${(m.avgLatency/1000).toFixed(2)}s</strong></div><div>P99: <strong style="color:#8e9bac">${(m.p99Latency/1000).toFixed(2)}s</strong></div></div></div>`).join('');
+  const models=state.models||[];
+  if(!models.length){
+    $('modelCards').innerHTML='<div class="empty" style="grid-column:1/-1">Aucun modèle observé pour l\\'instant. Passe model="..." dans les kwargs de ton appel LLM (guard_llm_call le capture automatiquement) pour peupler cette page.</div>';
+    $('modelComparison').innerHTML='';
+    return;
+  }
+  $('modelCards').innerHTML=models.map(m=>`<div class="card kpi"><div class="kpi-top">${esc(m.name)}</div><div class="kpi-value">${fmt(m.requests)}</div><div class="kpi-meta">${money(m.total_cost_usd)} · ${fmt(m.blocked_count)} bloqué(s)</div><div style="margin-top:10px;font-size:10px;color:#647184">Latence moy.: <strong style="color:#8e9bac">${m.avg_latency_ms}ms</strong></div></div>`).join('');
 
   const comp=$('modelComparison');
   const W=comp.clientWidth||600,H=250;
   const pad={l:45,r:15,t:15,b:30};
   const cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
-  const maxCost=Math.max(...models.map(m=>m.cost));
-  const maxLat=Math.max(...models.map(m=>m.p99Latency));
+  const maxCost=Math.max(...models.map(m=>m.total_cost_usd),0.000001);
+  const maxLat=Math.max(...models.map(m=>m.avg_latency_ms),1);
   let svg=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:100%">`;
   for(let i=0;i<3;i++){const y=pad.t+ch*i/2;svg+=`<line x1="${pad.l}" y1="${y}" x2="${W-pad.r}" y2="${y}" stroke="#1b2634" stroke-width="0.5"/>`;}
   const bw=cw/models.length*0.35;
-  models.forEach((m,i)=>{const x=pad.l+(i+0.3)*(cw/models.length);const h=(m.cost/maxCost)*ch;svg+=`<rect x="${x}" y="${pad.t+ch-h}" width="${bw}" height="${h}" fill="#38bdf8" rx="3" opacity="0.8"/>`;}); 
+  models.forEach((m,i)=>{const x=pad.l+(i+0.3)*(cw/models.length);const h=(m.total_cost_usd/maxCost)*ch;svg+=`<rect x="${x}" y="${pad.t+ch-h}" width="${bw}" height="${h}" fill="#38bdf8" rx="3" opacity="0.8"/>`;});
   let lpath='';
-  models.forEach((m,i)=>{const x=pad.l+(i+0.5)*(cw/models.length);const y=pad.t+ch-(m.p99Latency/maxLat)*ch;lpath+=i?` L${x},${y}`:`M${x},${y}`;svg+=`<circle cx="${x}" cy="${y}" r="3" fill="#ff5d73"/>`;}); 
+  models.forEach((m,i)=>{const x=pad.l+(i+0.5)*(cw/models.length);const y=pad.t+ch-(m.avg_latency_ms/maxLat)*ch;lpath+=i?` L${x},${y}`:`M${x},${y}`;svg+=`<circle cx="${x}" cy="${y}" r="3" fill="#ff5d73"/>`;});
   svg+=`<path d="${lpath}" fill="none" stroke="#ff5d73" stroke-width="2" stroke-linecap="round"/>`;
-  models.forEach((m,i)=>{const x=pad.l+(i+0.5)*(cw/models.length);svg+=`<text x="${x}" y="${H-8}" fill="#536174" font-size="9" text-anchor="middle">${m.name.split('-')[0]}</text>`;});
+  models.forEach((m,i)=>{const x=pad.l+(i+0.5)*(cw/models.length);svg+=`<text x="${x}" y="${H-8}" fill="#536174" font-size="9" text-anchor="middle">${esc(m.name.split('-')[0])}</text>`;});
   svg+='<text x="10" y="20" fill="#647184" font-size="9">Cost ($)</text>';
-  svg+='<text x="10" y="35" fill="#647184" font-size="9">P99 (ms)</text>';
+  svg+='<text x="10" y="35" fill="#647184" font-size="9">Latence moy. (ms)</text>';
   svg+='</svg>';
   comp.innerHTML=svg;
 }
 
 function renderGuardrails(){
-  const guards=[
-    {label:"Guardrail Exec",value:"0.89%",sub:"181.39 activations",trend:"+35.27%",spark:[10,12,15,14,18,22,25,28,32,35,38,42,45,48,52,55,58,62,65,68]},
-    {label:"Toxicity",value:"1.61%",sub:"164 blocked",trend:"+18.97%",spark:[5,6,8,7,9,11,13,12,15,17,19,18,21,23,25,24,27,29,31,30]},
-    {label:"PII Leaks",value:"1.57%",sub:"160 prevented",trend:"+21.74%",spark:[4,5,7,6,8,10,12,11,14,16,18,17,20,22,24,23,26,28,30,29]},
-    {label:"Denied Topics",value:"1.61%",sub:"164 filtered",trend:"+18.97%",spark:[5,6,8,7,9,11,13,12,15,17,19,18,21,23,25,24,27,29,31,30]},
-  ];
-  $('guardrailDetail').innerHTML=guards.map(g=>`<div class="card kpi"><div class="spark">${sparkSVG(g.spark,'#ff5d73',70,24)}</div><div class="kpi-top">${esc(g.label)}</div><div class="kpi-value danger">${esc(g.value)}</div><div class="kpi-meta">${esc(g.sub)} · <span class="danger">↑ ${esc(g.trend)}</span></div></div>`).join('');
+  const checkLabels={prompt_injection:'Prompt Injection', pii_detection:'PII Detection', dangerous_params:'Tool Policy', tool_policy:'Tool Policy', budget_policy:'Budget'};
+  const checks=state.checksBreakdown||[];
 
+  $('guardrailDetail').innerHTML = checks.length
+    ? checks.map(c=>`<div class="card kpi"><div class="kpi-top">${esc(checkLabels[c.check_name]||c.check_name)}</div><div class="kpi-value ${c.flagged>0?'danger':''}">${c.flag_rate}%</div><div class="kpi-meta">${fmt(c.flagged)} signalé(s) · ${fmt(c.total)} analysés au total</div></div>`).join('')
+    : '<div class="empty" style="grid-column:1/-1">Aucune vérification enregistrée pour l\\'instant.</div>';
+
+  // "Guardrail activation by type" -> vraie répartition total/signalé par catégorie
   const wrap=$('guardrailStacked');
-  const W=wrap.clientWidth||500,H=250;
-  const pad={l:40,r:15,t:15,b:28};
-  const cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
-  const hours=['00h','04h','08h','12h','16h','20h'];
-  const data=[{toxicity:12,pii:8,denied:5},{toxicity:15,pii:10,denied:7},{toxicity:22,pii:14,denied:9},{toxicity:18,pii:12,denied:6},{toxicity:25,pii:16,denied:11},{toxicity:20,pii:13,denied:8}];
-  const max=Math.max(...data.map(d=>d.toxicity+d.pii+d.denied));
-  let svg=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:100%">`;
-  const bw=cw/data.length*0.6;
-  data.forEach((d,i)=>{
-    const x=pad.l+(i+0.2)*(cw/data.length);
-    let y=pad.t+ch;
-    const h1=(d.toxicity/max)*ch,h2=(d.pii/max)*ch,h3=(d.denied/max)*ch;
-    svg+=`<rect x="${x}" y="${y-h1}" width="${bw}" height="${h1}" fill="#ff5d73" rx="2"/>`;
-    svg+=`<rect x="${x}" y="${y-h1-h2}" width="${bw}" height="${h2}" fill="#f59e0b" rx="2"/>`;
-    svg+=`<rect x="${x}" y="${y-h1-h2-h3}" width="${bw}" height="${h3}" fill="#38bdf8" rx="2"/>`;
-  });
-  hours.forEach((h,i)=>{const x=pad.l+(i+0.5)*(cw/data.length);svg+=`<text x="${x}" y="${H-8}" fill="#536174" font-size="10" text-anchor="middle">${h}</text>`;});
-  svg+='</svg>';
-  wrap.innerHTML=svg;
+  if(!checks.length){
+    wrap.innerHTML='<div class="empty">Pas encore de données.</div>';
+  }else{
+    const W=wrap.clientWidth||500,H=250;
+    const pad={l:110,r:15,t:15,b:15};
+    const cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
+    const rowH=ch/checks.length;
+    const maxTotal=Math.max(1,...checks.map(c=>c.total));
+    let svg=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:100%">`;
+    checks.forEach((c,i)=>{
+      const y=pad.t+i*rowH+rowH*0.2, barH=rowH*0.6;
+      const wTotal=(c.total/maxTotal)*cw, wFlag=(c.flagged/maxTotal)*cw;
+      svg+=`<text x="${pad.l-8}" y="${y+barH/2+3}" fill="#8e9bac" font-size="10" text-anchor="end">${esc(checkLabels[c.check_name]||c.check_name)}</text>`;
+      svg+=`<rect x="${pad.l}" y="${y}" width="${wTotal}" height="${barH}" fill="#38bdf8" opacity="0.25" rx="3"/>`;
+      svg+=`<rect x="${pad.l}" y="${y}" width="${wFlag}" height="${barH}" fill="#ff5d73" rx="3"/>`;
+    });
+    svg+='</svg>';
+    wrap.innerHTML=svg;
+  }
 
+  // "Activation trend" -> vrais blocages/jour (14j), réutilise dailyTrend
   const trend=$('guardrailTrend');
-  const W2=trend.clientWidth||500;
-  const trendData=[25,28,32,30,35,38,42,40,45,48,52,50,55,58,62,60,65,68,72,70];
-  const maxT=Math.max(...trendData);
-  let svg2=`<svg viewBox="0 0 ${W2} 250" style="width:100%;height:100%">`;
-  let area=`M0,250 `;trendData.forEach((v,i)=>{const x=(i/(trendData.length-1))*W2,y=250-(v/maxT)*220;area+=`L${x},${y} `;});
-  area+='L'+W2+',250 Z';
-  svg2+=`<path d="${area}" fill="#ff5d73" opacity="0.08"/>`;
-  let line='';trendData.forEach((v,i)=>{const x=(i/(trendData.length-1))*W2,y=250-(v/maxT)*220;line+=i?` L${x},${y}`:`M${x},${y}`;});
-  svg2+=`<path d="${line}" fill="none" stroke="#ff5d73" stroke-width="2" stroke-linecap="round"/>`;
-  svg2+='</svg>';
-  trend.innerHTML=svg2;
+  const daily=state.dailyTrend||[];
+  if(daily.length<2){
+    trend.innerHTML='<div class="empty">Pas assez d\\'historique pour une tendance.</div>';
+  }else{
+    const W2=trend.clientWidth||500;
+    const trendData=daily.map(d=>d.blocked);
+    const maxT=Math.max(1,...trendData);
+    let svg2=`<svg viewBox="0 0 ${W2} 250" style="width:100%;height:100%">`;
+    let area=`M0,250 `;trendData.forEach((v,i)=>{const x=(i/(trendData.length-1))*W2,y=250-(v/maxT)*220;area+=`L${x},${y} `;});
+    area+='L'+W2+',250 Z';
+    svg2+=`<path d="${area}" fill="#ff5d73" opacity="0.08"/>`;
+    let line='';trendData.forEach((v,i)=>{const x=(i/(trendData.length-1))*W2,y=250-(v/maxT)*220;line+=i?` L${x},${y}`:`M${x},${y}`;});
+    svg2+=`<path d="${line}" fill="none" stroke="#ff5d73" stroke-width="2" stroke-linecap="round"/>`;
+    svg2+='</svg>';
+    trend.innerHTML=svg2;
+  }
 }
 
 function renderThreats(){
@@ -1073,42 +1370,57 @@ function renderUsage(){
     <div class="card kpi"><div class="kpi-top">Avg Latency</div><div class="kpi-value">${Number(m.avg_latency_ms||0).toFixed(1)}ms</div></div>
     <div class="card kpi"><div class="kpi-top">LLM Analyzed</div><div class="kpi-value">${fmt(m.llm_judge_count||0)}</div></div>`;
 
+  // Cost forecast -> vrai historique (/api/cost/trend) + projection linéaire
+  // simple et clairement labellisée, pas une courbe sophistiquée inventée.
   const cf=$('costForecast');
-  const W=cf.clientWidth||500;
-  const hist=[2.1,2.3,2.8,3.1,3.5,4.0,4.3,4.8,5.2,5.8,6.1,6.5,7.0,7.4,7.8,8.2,8.5,9.0,9.5,10.2];
-  const forecast=[10.2,10.8,11.5,12.1,12.8,13.4,14.0];
-  const maxC=Math.max(...hist,...forecast);
-  let svg=`<svg viewBox="0 0 ${W} 250" style="width:100%;height:100%">`;
-  let area=`M0,250 `;hist.forEach((v,i)=>{const x=(i/(hist.length-1))*(W*0.7),y=250-(v/maxC)*220;area+=`L${x},${y} `;});
-  const lastX=(hist.length-1)/(hist.length-1)*(W*0.7);
-  forecast.forEach((v,i)=>{const x=lastX+(i/(forecast.length-1))*(W*0.3),y=250-(v/maxC)*220;area+=`L${x},${y} `;});
-  area+='L'+W+',250 Z';
-  svg+=`<path d="${area}" fill="#38bdf8" opacity="0.08"/>`;
-  let line='';hist.forEach((v,i)=>{const x=(i/(hist.length-1))*(W*0.7),y=250-(v/maxC)*220;line+=i?` L${x},${y}`:`M${x},${y}`;});
-  svg+=`<path d="${line}" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/>`;
-  let fline='';forecast.forEach((v,i)=>{const x=lastX+(i/(forecast.length-1))*(W*0.3),y=250-(v/maxC)*220;fline+=i?` L${x},${y}`:`M${lastX},${250-(hist[hist.length-1]/maxC)*220}`;});
-  svg+=`<path d="${fline}" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-dasharray="5,3"/>`;
-  svg+=`<line x1="${lastX}" y1="0" x2="${lastX}" y2="250" stroke="#64748b" stroke-width="0.5" stroke-dasharray="4,4"/>`;
-  svg+='<text x="10" y="20" fill="#647184" font-size="9">Historical</text>';
-  svg+=`<text x="${lastX+5}" y="20" fill="#a78bfa" font-size="9">Forecast →</text>`;
-  svg+='</svg>';
-  cf.innerHTML=svg;
+  const hist=(state.costTrend||[]).map(d=>d.cost);
+  if(hist.length<2){
+    cf.innerHTML='<div class="empty" style="padding-top:90px">Pas assez d\\'historique de coût pour une projection (minimum 2 jours).</div>';
+  }else{
+    const W=cf.clientWidth||500;
+    const dailyAvgDelta=(hist[hist.length-1]-hist[0])/(hist.length-1);
+    const forecastDays=7;
+    const forecast=Array.from({length:forecastDays},(_,i)=>Math.max(0,hist[hist.length-1]+dailyAvgDelta*(i+1)));
+    const maxC=Math.max(...hist,...forecast,0.000001);
+    const histShare=0.65;
+    let svg=`<svg viewBox="0 0 ${W} 250" style="width:100%;height:100%">`;
+    let area=`M0,250 `;hist.forEach((v,i)=>{const x=(i/(hist.length-1))*(W*histShare),y=250-(v/maxC)*220;area+=`L${x},${y} `;});
+    const lastX=W*histShare;
+    forecast.forEach((v,i)=>{const x=lastX+(i/(forecast.length-1))*(W*(1-histShare)),y=250-(v/maxC)*220;area+=`L${x},${y} `;});
+    area+='L'+W+',250 Z';
+    svg+=`<path d="${area}" fill="#38bdf8" opacity="0.08"/>`;
+    let line='';hist.forEach((v,i)=>{const x=(i/(hist.length-1))*(W*histShare),y=250-(v/maxC)*220;line+=i?` L${x},${y}`:`M${x},${y}`;});
+    svg+=`<path d="${line}" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/>`;
+    let fline='';forecast.forEach((v,i)=>{const x=lastX+(i/(forecast.length-1))*(W*(1-histShare)),y=250-(v/maxC)*220;fline+=i?` L${x},${y}`:`M${lastX},${250-(hist[hist.length-1]/maxC)*220}`;});
+    svg+=`<path d="${fline}" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-dasharray="5,3"/>`;
+    svg+=`<line x1="${lastX}" y1="0" x2="${lastX}" y2="250" stroke="#64748b" stroke-width="0.5" stroke-dasharray="4,4"/>`;
+    svg+='<text x="10" y="20" fill="#647184" font-size="9">Historique réel</text>';
+    svg+=`<text x="${lastX+5}" y="20" fill="#a78bfa" font-size="9">Projection linéaire →</text>`;
+    svg+='</svg>';
+    cf.innerHTML=svg;
+  }
 
+  // Remplace l'ancien "Token Usage" (jamais mesuré par le SDK, donc jamais
+  // affiché) par la distribution de latence réelle — vraie donnée utile.
   const tu=$('tokenUsage');
-  const W2=tu.clientWidth||500;
-  const input=[120,135,150,140,165,180,175,190,210,205,220,235,250,245,260,275,280,295,310,305];
-  const output=[45,50,55,52,60,65,62,70,75,72,80,85,90,88,95,100,105,110,115,112];
-  const maxT=Math.max(...input,...output);
-  let svg2=`<svg viewBox="0 0 ${W2} 250" style="width:100%;height:100%">`;
-  let a1=`M0,250 `;input.forEach((v,i)=>{const x=(i/(input.length-1))*W2,y=250-(v/maxT)*220;a1+=`L${x},${y} `;});
-  a1+='L'+W2+',250 Z';
-  svg2+=`<path d="${a1}" fill="#38bdf8" opacity="0.08"/>`;
-  let l1='';input.forEach((v,i)=>{const x=(i/(input.length-1))*W2,y=250-(v/maxT)*220;l1+=i?` L${x},${y}`:`M${x},${y}`;});
-  svg2+=`<path d="${l1}" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/>`;
-  let l2='';output.forEach((v,i)=>{const x=(i/(output.length-1))*W2,y=250-(v/maxT)*220;l2+=i?` L${x},${y}`:`M${x},${y}`;});
-  svg2+=`<path d="${l2}" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>`;
-  svg2+='</svg>';
-  tu.innerHTML=svg2;
+  const lat=state.latencyDist||{};
+  if(!lat.count){
+    tu.innerHTML='<div class="empty" style="padding-top:90px">Pas encore de données de latence.</div>';
+  }else{
+    const W2=tu.clientWidth||500;
+    const bars=[{label:'p50',v:lat.p50,color:'#35d07f'},{label:'p95',v:lat.p95,color:'#f59e0b'},{label:'p99',v:lat.p99,color:'#ff5d73'},{label:'max',v:lat.max,color:'#a78bfa'}];
+    const maxV=Math.max(1,...bars.map(b=>b.v));
+    const bw=W2/bars.length*0.5;
+    let svg2=`<svg viewBox="0 0 ${W2} 250" style="width:100%;height:100%">`;
+    bars.forEach((b,i)=>{
+      const x=(i+0.25)*(W2/bars.length), h=(b.v/maxV)*200;
+      svg2+=`<rect x="${x}" y="${220-h}" width="${bw}" height="${h}" fill="${b.color}" rx="4"/>`;
+      svg2+=`<text x="${x+bw/2}" y="${220-h-8}" fill="#cbd6e3" font-size="11" text-anchor="middle" font-weight="700">${b.v.toFixed(0)}ms</text>`;
+      svg2+=`<text x="${x+bw/2}" y="240" fill="#536174" font-size="10" text-anchor="middle">${b.label}</text>`;
+    });
+    svg2+='</svg>';
+    tu.innerHTML=svg2;
+  }
 }
 
 function renderAudit(){
@@ -1159,9 +1471,24 @@ function closeModal(){$('traceModal').classList.remove('open')}
 async function refreshAll(){
   try{
     $('lastSync').textContent='Syncing…';
-    const [m,t,d]=await Promise.all([api('/api/metrics'),api('/api/traces'),api('/api/detection/stats')]);
-    state.allTraces=t.map(x=>({...x,model:x.model||'gpt-4o',p50:x.p50||Math.round(x.latency_ms*0.8)||120,p99:x.p99||Math.round(x.latency_ms*1.5)||350}));
+    const [m,t,d,models,checks,heatmap,expensive,costTrend,latencyDist,recentEvents,dailyTrend]=await Promise.all([
+      api('/api/metrics'), api('/api/traces'), api('/api/detection/stats'),
+      api('/api/models'), api('/api/checks/breakdown'), api('/api/heatmap'),
+      api('/api/spans/expensive'), api('/api/cost/trend'), api('/api/latency/distribution'),
+      api('/api/events/recent'), api('/api/trend/daily'),
+    ]);
+    // Pas de valeur inventée ici — un trace sans modèle connu affiche "—",
+    // pas "gpt-4o" par défaut (c'était le cas avant cette correction).
+    state.allTraces=t.map(x=>({...x, model:x.model||null, p50:x.p50||null, p99:x.p99||null}));
     state.traces=t;
+    state.models=models;
+    state.checksBreakdown=checks;
+    state.heatmap=heatmap;
+    state.expensiveSpans=expensive;
+    state.costTrend=costTrend;
+    state.latencyDist=latencyDist;
+    state.recentEvents=recentEvents;
+    state.dailyTrend=dailyTrend;
     renderMetrics(m);
     renderDetection(d);
     $('lastSync').textContent='Updated '+new Date().toLocaleTimeString();
