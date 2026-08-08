@@ -1,0 +1,232 @@
+AGENTGUARD NON-COMMERCIAL SOURCE-AVAILABLE LICENSE
+
+Version 1.0 — August 2026
+
+Copyright © 2026 Christopher Dikesa
+Project: AgentGuard
+
+All rights reserved except as expressly granted below.
+
+1. Purpose
+
+AgentGuard is a software project developed and maintained by Christopher Dikesa.
+
+This License is intended to allow individuals, researchers, developers, students, security professionals, and non-profit communities to inspect, study, test, modify, and contribute to AgentGuard while protecting the project’s authorship, attribution, identity, and non-commercial nature.
+
+AgentGuard is source-available but is not an OSI-approved Open Source license because commercial use is expressly prohibited.
+
+2. Grant of Non-Commercial Rights
+
+Subject to the terms of this License, the copyright holder grants you a limited, worldwide, non-exclusive, non-transferable, royalty-free license to:
+
+* access and read the source code;
+* use the software for personal purposes;
+* use the software for educational purposes;
+* use the software for academic and scientific research;
+* use the software for internal non-commercial experimentation;
+* modify the source code for non-commercial purposes;
+* create non-commercial forks;
+* create and distribute patches or modifications for non-commercial purposes;
+* contribute modifications to the AgentGuard project.
+
+These rights are granted only for purposes that do not constitute Commercial Use as defined below.
+
+3. Commercial Use Prohibited
+
+Commercial Use is strictly prohibited without prior written permission from the copyright holder.
+
+Commercial Use includes, but is not limited to:
+
+1. selling AgentGuard or a modified version of AgentGuard;
+2. offering AgentGuard as a paid software product;
+3. providing AgentGuard or a modified version as a paid SaaS, API, hosted service, cloud service, managed service, or security service;
+4. incorporating AgentGuard code into a commercial product or service;
+5. using AgentGuard to provide paid services to customers;
+6. licensing, sublicensing, renting, leasing, or selling AgentGuard or derivative works;
+7. using AgentGuard as part of a commercial security platform;
+8. using AgentGuard code to develop a competing commercial product;
+9. monetizing a fork of AgentGuard;
+10. removing AgentGuard’s attribution and using the resulting software commercially;
+11. using AgentGuard or derivative works for direct or indirect commercial revenue generation.
+
+A person or organization wishing to engage in Commercial Use must obtain a separate written commercial license from the copyright holder.
+
+4. SaaS and Hosted Services
+
+Operating AgentGuard, a modified version of AgentGuard, or a derivative work as a hosted service, cloud service, API, SaaS product, managed security service, or similar service for third parties is considered Commercial Use when the service is offered for compensation or as part of a revenue-generating business activity.
+
+Such use requires prior written authorization from the copyright holder.
+
+5. Attribution Requirement
+
+Any permitted copy, fork, modification, publication, distribution, academic work, research project, documentation, presentation, or other public use of AgentGuard must provide clear attribution to the original project.
+
+The following attribution must be retained where reasonably visible:
+
+AgentGuard — created by Christopher Dikesa
+
+The attribution must include, where technically and reasonably possible, a reference to the original AgentGuard repository:
+
+https://github.com/chrismsmr-celcom/agentguard
+
+You may not falsely represent yourself as the original author or creator of AgentGuard.
+
+You may not remove, obscure, alter, or falsify existing copyright, authorship, license, or attribution notices.
+
+6. Forks and Modified Versions
+
+You may create forks and modified versions of AgentGuard for permitted non-commercial purposes.
+
+However:
+
+* the fork must retain this License;
+* the original copyright notices must remain intact;
+* the original project must be identified as the source;
+* modifications must be clearly distinguished from the original AgentGuard project;
+* you may not represent a fork as the official AgentGuard project without written authorization;
+* you may not use the AgentGuard name, branding, or identity to imply official endorsement without permission.
+
+A modified version must include a notice substantially similar to:
+
+This project is derived from AgentGuard, originally created by Christopher Dikesa.
+
+7. Contributions
+
+Contributions to AgentGuard are welcome.
+
+By submitting a contribution, pull request, patch, issue, documentation, test, or other material to the project, you represent that you have the right to submit that material.
+
+Unless otherwise agreed in writing, contributions are made under the same terms applicable to the AgentGuard project.
+
+Contributors retain copyright in original material they independently create, but grant the AgentGuard project the necessary rights to use, modify, reproduce, distribute, and maintain their contribution as part of AgentGuard.
+
+Contributors must not knowingly submit third-party material that they are not authorized to contribute.
+
+8. No Transfer of Ownership
+
+This License does not transfer ownership of AgentGuard, its source code, documentation, branding, trademarks, or other intellectual property to any recipient.
+
+All rights not expressly granted by this License remain with the respective copyright holders.
+
+9. Name and Branding
+
+The name AgentGuard and associated logos, trademarks, visual identity, and branding are not automatically licensed by this License.
+
+You may refer to AgentGuard as the original project when necessary for attribution.
+
+You may not:
+
+* claim to be the official AgentGuard organization;
+* use AgentGuard branding to market an unofficial fork as the official project;
+* imply endorsement, partnership, certification, or authorization by Christopher Dikesa without written permission.
+
+10. Research and Academic Use
+
+Non-commercial academic and scientific research is permitted.
+
+Researchers may analyze, benchmark, modify, and publish results involving AgentGuard provided that:
+
+* the use remains non-commercial;
+* appropriate attribution is provided;
+* the original project is identified;
+* published results do not falsely claim authorship of AgentGuard.
+
+Where AgentGuard is used in an academic publication, presentation, thesis, paper, or report, reasonable citation of the original project and author is required.
+
+11. Security Research
+
+Security testing, auditing, vulnerability research, penetration testing, and defensive security research involving AgentGuard are permitted when conducted for non-commercial purposes and in compliance with applicable law.
+
+Responsible disclosure of vulnerabilities is encouraged.
+
+Nothing in this License authorizes unlawful access, unauthorized interception, abuse of third-party systems, or other illegal activity.
+
+12. Redistribution
+
+You may redistribute unmodified or modified copies of AgentGuard for permitted non-commercial purposes provided that:
+
+* this License is included;
+* copyright notices are preserved;
+* attribution is preserved;
+* the source of the software is clearly identified;
+* you do not charge a fee specifically for the software itself, except for reasonable costs directly associated with physical distribution where applicable;
+* you do not bundle the software into a commercial offering without written permission.
+
+13. No Sublicensing
+
+You may not sublicense AgentGuard under terms that grant rights broader than those provided by this License.
+
+In particular, you may not redistribute AgentGuard under MIT, BSD, Apache-2.0, GPL, or another license that permits Commercial Use.
+
+14. Commercial License
+
+The copyright holder may grant separate commercial licenses to individuals, companies, organizations, or other entities.
+
+A commercial license may authorize uses otherwise prohibited by this License.
+
+Nothing in this License obligates the copyright holder to grant a commercial license or to offer identical terms to different parties.
+
+15. Termination
+
+The rights granted under this License automatically terminate if you materially violate its terms.
+
+Upon termination, you must cease the prohibited use and, where applicable, cease distribution of copies or derivative works that are being used in violation of this License.
+
+Rights obtained independently by lawful means are not affected by termination.
+
+16. No Warranty
+
+AgentGuard is provided “AS IS”, without warranty of any kind, express or implied.
+
+To the maximum extent permitted by applicable law, the copyright holder shall not be liable for any claim, damages, losses, security incidents, system failures, data loss, or other consequences arising from the use of AgentGuard.
+
+AgentGuard is a security tool and does not guarantee that any system, model, agent, application, infrastructure, or organization will be secure.
+
+17. Limitation of Liability
+
+To the maximum extent permitted by applicable law, Christopher Dikesa and contributors to AgentGuard shall not be liable for any indirect, incidental, special, consequential, exemplary, or punitive damages arising from the use, modification, distribution, or inability to use the software.
+
+18. Applicable Law
+
+This License shall be interpreted in accordance with applicable copyright and intellectual-property laws.
+
+If any provision of this License is found to be invalid or unenforceable, the remaining provisions shall remain in effect to the maximum extent permitted by law.
+
+19. No Implied Rights
+
+Nothing in this License grants rights by implication, estoppel, or otherwise.
+
+Any right not expressly granted remains reserved by the copyright holder.
+
+20. Copyright Notice
+
+Copyright © 2026 Christopher Dikesa.
+
+AgentGuard is the original project identified by the copyright holder and its contributors.
+
+For permissions beyond those expressly granted by this License, contact the copyright holder.
+
+⸻
+
+Summary of Permissions
+
+Use	Allowed?
+Personal use	✅ Yes
+Education	✅ Yes
+Academic research	✅ Yes
+Non-commercial security research	✅ Yes
+Non-commercial modifications	✅ Yes
+Non-commercial forks	✅ Yes
+Contributions	✅ Yes
+Public attribution	✅ Required
+Commercial software	❌ No
+Commercial SaaS	❌ No
+Paid API/service	❌ No
+Commercial fork	❌ No
+Selling modified AgentGuard	❌ No
+Removing attribution	❌ No
+Using AgentGuard in a commercial product	❌ No
+Creating a competing commercial product from AgentGuard code	❌ No
+Commercial use with written permission	✅ Yes
+
+Copyright © 2026 Christopher Dikesa — All rights reserved except as expressly permitted by this License.
