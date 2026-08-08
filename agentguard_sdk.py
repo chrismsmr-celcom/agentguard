@@ -716,38 +716,38 @@ class PolicyEngine:
                 SecurityAction.BLOCK,
             )
 
-        dangerous_keywords = [
-            "delete_all",
-            "drop",
-            "truncate",
-            "rm -rf",
-            "transfer",
-            "password",
-            "secret",
-        ]
+        strong_keywords_regex = re.compile(
+            r"(\bdelete_all\b|\bdrop\s+table\b|\btruncate\b|rm\s+-rf|drop\s+database|"
+            r";\s*--|--\s*$|\bunion\s+select\b)",
+            re.IGNORECASE
+        )
+        weak_keywords_regex = re.compile(r"\b(transfer|password|secret)\b", re.IGNORECASE)
 
         try:
-            params_string = json.dumps(
-                params,
-                default=str,
-            ).lower()
+            params_string = json.dumps(params, default=str)
         except Exception:
-            params_string = str(params).lower()
+            params_string = str(params)
 
-        found = [
-            keyword
-            for keyword in dangerous_keywords
-            if keyword in params_string
-        ]
-
-        if found:
+        strong_found = strong_keywords_regex.findall(params_string)
+        if strong_found:
             return SecurityCheck(
                 "dangerous_params",
                 False,
                 RiskLevel.HIGH,
-                f"Dangerous keywords in params: {found}",
-                {"keywords": found},
+                f"Dangerous pattern(s) in params: {strong_found[:3]}",
+                {"keywords": strong_found[:5], "confidence": "high"},
                 SecurityAction.BLOCK,
+            )
+
+        weak_found = weak_keywords_regex.findall(params_string)
+        if weak_found:
+            return SecurityCheck(
+                "dangerous_params",
+                False,
+                RiskLevel.MEDIUM,
+                f"Ambiguous keyword(s), needs review: {weak_found[:3]}",
+                {"keywords": weak_found[:5], "confidence": "ambiguous"},
+                SecurityAction.REVIEW,
             )
 
         return SecurityCheck(
@@ -1315,6 +1315,7 @@ class AgentGuard:
 
         if (
             not check.passed
+            and check.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL)
             and self.block_on_high
         ):
             span = GuardSpan(
