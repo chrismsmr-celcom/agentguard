@@ -10,6 +10,13 @@ import json
 import time
 import secrets
 import hashlib
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:
+    # psycopg2 n'est nécessaire qu'en prod PostgreSQL ; en self-host SQLite
+    # pur, son absence ne doit pas empêcher le collector de démarrer.
+    psycopg2 = None
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template_string, make_response, g
 from flask_cors import CORS, cross_origin
@@ -70,8 +77,11 @@ if _sqlite_dir and not os.path.isdir(_sqlite_dir):
 
 def get_pg_conn():
     """Connexion PostgreSQL (production Render)."""
-    import psycopg2
-    import psycopg2.extras
+    if psycopg2 is None:
+        raise RuntimeError(
+            "psycopg2 n'est pas installé — requis pour AGENTGUARD_DB_TYPE=postgres. "
+            "pip install psycopg2-binary"
+        )
     conn = psycopg2.connect(DATABASE_URL, sslmode="require")
     return conn
 
@@ -397,16 +407,18 @@ def list_traces():
     if is_pg:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         org_filter = "%s"
+        concat_fn = "STRING_AGG(DISTINCT detection_layer, ',')"
     else:
         cur = conn.cursor()
         org_filter = "?"
+        concat_fn = "GROUP_CONCAT(DISTINCT detection_layer)"
 
     cur.execute(f"""
         SELECT trace_id, COUNT(*) as span_count,
                SUM(CASE WHEN blocked THEN 1 ELSE 0 END) as blocked_count,
                SUM(cost_usd) as total_cost,
                MAX(created_at) as last_seen,
-               GROUP_CONCAT(DISTINCT detection_layer) as detection_layers
+               {concat_fn} as detection_layers
         FROM spans
         WHERE org_id = {org_filter}
         GROUP BY trace_id
@@ -445,7 +457,7 @@ def get_metrics():
     conn = get_db()
 
     if is_pg:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur = conn.cursor()
         p = "%s"
     else:
         cur = conn.cursor()
@@ -554,7 +566,7 @@ def get_detection_stats():
     conn = get_db()
 
     if is_pg:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur = conn.cursor()
         p = "%s"
     else:
         cur = conn.cursor()
@@ -639,7 +651,7 @@ def get_llm_stats():
     conn = get_db()
 
     if is_pg:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur = conn.cursor()
     else:
         cur = conn.cursor()
 
@@ -1693,5 +1705,3 @@ if __name__ == "__main__":
     print(f"   DB: {DB_TYPE}")
     print(f"   Detection: Regex + ML (if enabled) + LLM Judge (if enabled)")
     app.run(host="0.0.0.0", port=port, debug=False)
-
-
