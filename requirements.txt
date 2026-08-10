@@ -7,6 +7,12 @@ gunicorn>=21.0.0
 psycopg2-binary>=2.9.9
 pytest>=8.0.0
 
+# Rate-limiter partagé entre workers — requis dès que tu tournes avec
+# --workers > 1 (sinon chaque worker garde son propre compteur en mémoire,
+# et la vraie limite devient N × la valeur configurée, silencieusement).
+# Active avec AGENTGUARD_LIMITER_STORAGE=redis://host:6379
+redis>=5.0.0
+
 # Détection ML (optionnel - commenté pour réduire l'empreinte)
 # transformers>=4.36.0
 # torch>=2.0.0
