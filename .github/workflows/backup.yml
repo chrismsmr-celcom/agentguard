@@ -1,0 +1,42 @@
+name: Database Backup
+
+# Sauvegarde quotidienne automatique. Nécessite que DATABASE_URL soit
+# configuré dans les secrets du repo GitHub (Settings > Secrets > Actions).
+# Les sauvegardes sont uploadées comme artefact du run — pour une vraie
+# rétention long-terme, adapte le dernier step pour pousser vers S3 ou un
+# autre stockage externe plutôt que de compter sur les artefacts GitHub
+# (retenus 90 jours par défaut, pas fait pour du stockage permanent).
+"on":
+  schedule:
+    - cron: "0 3 * * *"  # tous les jours à 3h UTC
+  workflow_dispatch: {}  # déclenchement manuel possible depuis l'onglet Actions
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Install dependencies
+        run: pip install psycopg2-binary
+
+      - name: Run backup
+        env:
+          AGENTGUARD_DB_TYPE: postgres
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python scripts/backup_db.py --dir backups --keep 30
+
+      - name: Upload backup as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentguard-backup-${{ github.run_id }}
+          path: backups/
+          retention-days: 90
