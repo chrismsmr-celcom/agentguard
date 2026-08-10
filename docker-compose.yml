@@ -24,6 +24,10 @@ services:
       # Rate-limiting assoupli pour les tests
       - AGENTGUARD_RATE_LIMIT=300 per minute
       - AGENTGUARD_SPAN_RATE_LIMIT=150 per minute
+      # Sans ça, ces deux limites ci-dessus restent en mémoire PAR WORKER —
+      # mesuré : avec memory:// et 3 workers, 0/35 requêtes rate-limitées
+      # malgré une limite configurée. redis:// partage l'état entre workers.
+      - AGENTGUARD_LIMITER_STORAGE=redis://redis:6379
       
       # PostgreSQL
       - DATABASE_URL=postgresql://agentguard:${POSTGRES_PASSWORD}@postgres:5432/agentguard
@@ -37,6 +41,8 @@ services:
       - agentguard_data:/data
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
