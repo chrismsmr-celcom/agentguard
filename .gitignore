@@ -1,0 +1,34 @@
+# Secrets et config locale — ne doivent JAMAIS être committés
+.env
+*.env
+!.env.example
+
+# Bases de données locales — contiennent potentiellement des données clients
+*.db
+*.sqlite
+*.sqlite3
+
+# Sauvegardes — contiennent des dumps complets (spans + clés API hashées
+# des clients), voir scripts/backup_db.py
+backups/
+
+# Modèles ML entraînés — trop volumineux pour git, et generate_dataset.py /
+# train_detector.py les régénèrent
+*.pt
+*.bin
+prompt_dataset.csv
+test_dataset.csv
+models/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+venv/
+.venv/
+
+# Éditeurs / OS
+.vscode/
+.idea/
+.DS_Store
