@@ -29,9 +29,10 @@ app.secret_key = os.environ.get("AGENTGUARD_FLASK_SECRET", secrets.token_urlsafe
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=["120 per minute"],
+    default_limits=[os.environ.get("AGENTGUARD_RATE_LIMIT", "120 per minute")],
     storage_uri=os.environ.get("AGENTGUARD_LIMITER_STORAGE", "memory://"),
 )
+SPAN_RATE_LIMIT = os.environ.get("AGENTGUARD_SPAN_RATE_LIMIT", "30 per minute")
 
 # ── CONFIG ──
 DB_TYPE = os.environ.get("AGENTGUARD_DB_TYPE", "sqlite")
@@ -308,7 +309,7 @@ def check_auth():
 
 # ── API ──
 @app.route("/span", methods=["POST"])
-@limiter.limit("30 per minute")
+@limiter.limit(SPAN_RATE_LIMIT)
 @cross_origin(origins="*", allow_headers=["Content-Type", "X-API-Key"])
 def receive_span():
     data = request.json
