@@ -730,13 +730,18 @@ class PolicyEngine:
         if tool_name == "send_email":
             body = params.get("body", "")
             to = params.get("to", "")
+            subject = params.get("subject", "")
+            # Le destinataire et le sujet comptent aussi pour l'exfiltration —
+            # avant cette correction, seul "body" était scanné, donc un email
+            # vers "external-attacker@..." avec juste "CUSTOMER_DATABASE"
+            # dans le sujet passait sans être jamais inspecté.
+            full_content = f"{to} {subject} {body}"
 
             # Détection d'exfiltration — patterns FORTS (spécifiques, rares
             # en usage légitime) : bloquants direct.
             exfil_strong_patterns = [
-                r"customer\s+(?:data|database|list)",
+                r"customer[\s_]*(?:data|database|list)",
                 r"export\s+(?:all|the)?\s*(?:data|database)",
-                r"external[-_]?@",
                 r"\battacker\b",
                 r"\bexfiltrate\b",
                 r"\bcredentials\b",
@@ -759,7 +764,7 @@ class PolicyEngine:
             ]
 
             for pattern in exfil_strong_patterns:
-                if re.search(pattern, body, re.IGNORECASE):
+                if re.search(pattern, full_content, re.IGNORECASE):
                     return SecurityCheck(
                         "tool_policy",
                         False,
@@ -770,7 +775,7 @@ class PolicyEngine:
                     )
 
             for pattern in exfil_weak_patterns:
-                if re.search(pattern, body, re.IGNORECASE):
+                if re.search(pattern, full_content, re.IGNORECASE):
                     return SecurityCheck(
                         "tool_policy",
                         False,
@@ -784,6 +789,10 @@ class PolicyEngine:
             # est trop fréquente en correspondance normale ("contactez
             # support@..." ) pour bloquer d'office ; seuls SSN/carte
             # bancaire (patterns précis, rares en usage légitime) bloquent.
+            # On exclut "to" ici : c'est structurellement toujours une
+            # adresse email (le destinataire), donc l'y chercher
+            # déclencherait le flag PII sur CHAQUE email envoyé, sans valeur.
+            pii_content = f"{subject} {body}"
             pii_block_patterns = [
                 r"\b\d{3}-\d{2}-\d{4}\b",
                 r"\b(?:\d[ -]*?){13,19}\b",
@@ -793,7 +802,7 @@ class PolicyEngine:
             ]
 
             for pattern in pii_block_patterns:
-                if re.search(pattern, body, re.IGNORECASE):
+                if re.search(pattern, pii_content, re.IGNORECASE):
                     return SecurityCheck(
                         "tool_policy",
                         False,
@@ -804,7 +813,7 @@ class PolicyEngine:
                     )
 
             for pattern in pii_review_patterns:
-                if re.search(pattern, body, re.IGNORECASE):
+                if re.search(pattern, pii_content, re.IGNORECASE):
                     return SecurityCheck(
                         "tool_policy",
                         False,
