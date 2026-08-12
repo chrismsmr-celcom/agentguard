@@ -103,55 +103,66 @@ def init_db():
     if DB_TYPE == "postgres" and DATABASE_URL:
         conn = get_pg_conn()
         cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS spans (
-                id SERIAL PRIMARY KEY,
-                trace_id TEXT,
-                span_id TEXT,
-                span_type TEXT,
-                timestamp DOUBLE PRECISION,
-                latency_ms DOUBLE PRECISION,
-                input_data JSONB,
-                output_data JSONB,
-                security_checks JSONB,
-                blocked BOOLEAN DEFAULT FALSE,
-                block_reason TEXT,
-                cost_usd DOUBLE PRECISION DEFAULT 0.0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                detection_layer TEXT,
-                ml_score DOUBLE PRECISION,
-                llm_score DOUBLE PRECISION,
-                llm_reason TEXT,
-                org_id TEXT DEFAULT 'default',
-                model TEXT
-            )
-        """)
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_trace_pg ON spans(trace_id)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_created_pg ON spans(created_at)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_pg ON spans(blocked)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_detection_layer_pg ON spans(detection_layer)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_score_pg ON spans(llm_score)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_org_pg ON spans(org_id)")
-        # Migration douce pour une DB existante créée avant le multi-tenant
+        # Verrou consultatif Postgres : plusieurs workers Gunicorn démarrent
+        # en même temps et appellent tous init_db() — sans ce verrou, leurs
+        # CREATE TABLE/INDEX concurrents se percutent et empoisonnent la
+        # transaction (mesuré en charge réelle : 1 worker sur 3 plantait au
+        # boot). Ici, un seul worker exécute vraiment le DDL ; les autres
+        # attendent le verrou puis repartent sans rien faire, la table étant
+        # déjà là.
+        cur.execute("SELECT pg_advisory_lock(727271)")
         try:
-            cur.execute("ALTER TABLE spans ADD COLUMN IF NOT EXISTS org_id TEXT DEFAULT 'default'")
-            cur.execute("ALTER TABLE spans ADD COLUMN IF NOT EXISTS model TEXT")
-        except Exception:
-            pass
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS api_keys (
-                id SERIAL PRIMARY KEY,
-                key_hash TEXT UNIQUE NOT NULL,
-                org_id TEXT NOT NULL,
-                org_name TEXT,
-                plan TEXT DEFAULT 'free',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                active BOOLEAN DEFAULT TRUE
-            )
-        """)
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_hash_pg ON api_keys(key_hash)")
-        conn.commit()
-        conn.close()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS spans (
+                    id SERIAL PRIMARY KEY,
+                    trace_id TEXT,
+                    span_id TEXT,
+                    span_type TEXT,
+                    timestamp DOUBLE PRECISION,
+                    latency_ms DOUBLE PRECISION,
+                    input_data JSONB,
+                    output_data JSONB,
+                    security_checks JSONB,
+                    blocked BOOLEAN DEFAULT FALSE,
+                    block_reason TEXT,
+                    cost_usd DOUBLE PRECISION DEFAULT 0.0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    detection_layer TEXT,
+                    ml_score DOUBLE PRECISION,
+                    llm_score DOUBLE PRECISION,
+                    llm_reason TEXT,
+                    org_id TEXT DEFAULT 'default',
+                    model TEXT
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_trace_pg ON spans(trace_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_created_pg ON spans(created_at)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_pg ON spans(blocked)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_detection_layer_pg ON spans(detection_layer)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_score_pg ON spans(llm_score)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_org_pg ON spans(org_id)")
+            # Migration douce pour une DB existante créée avant le multi-tenant
+            try:
+                cur.execute("ALTER TABLE spans ADD COLUMN IF NOT EXISTS org_id TEXT DEFAULT 'default'")
+                cur.execute("ALTER TABLE spans ADD COLUMN IF NOT EXISTS model TEXT")
+            except Exception:
+                conn.rollback()  # sans ça, l'échec de l'ALTER poisonne les requêtes suivantes
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id SERIAL PRIMARY KEY,
+                    key_hash TEXT UNIQUE NOT NULL,
+                    org_id TEXT NOT NULL,
+                    org_name TEXT,
+                    plan TEXT DEFAULT 'free',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    active BOOLEAN DEFAULT TRUE
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_hash_pg ON api_keys(key_hash)")
+            conn.commit()
+        finally:
+            cur.execute("SELECT pg_advisory_unlock(727271)")
+            conn.close()
         print("[AG] ✅ PostgreSQL initialisé v4.1")
     else:
         conn = sqlite3.connect(DB_SQLITE_PATH)
