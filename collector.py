@@ -19,12 +19,27 @@ except ImportError:
     psycopg2 = None
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template_string, make_response, g
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from flask_cors import CORS, cross_origin
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("AGENTGUARD_FLASK_SECRET", secrets.token_urlsafe(32))
+app.secret_key = os.environ.get("AGENTGUARD_FLASK_SECRET") or secrets.token_urlsafe(32)
+app.config["MAX_CONTENT_LENGTH"] = int(
+    os.environ.get("AGENTGUARD_MAX_BODY_BYTES", "262144")
+)
+AUTH_SERIALIZER = URLSafeTimedSerializer(
+    app.secret_key, salt="agentguard-auth-v1"
+)
+AUTH_SESSION_MAX_AGE = int(
+    os.environ.get("AGENTGUARD_AUTH_SESSION_TTL", "900")
+)
+CORS_ORIGINS = [
+    x.strip()
+    for x in os.environ.get("AGENTGUARD_CORS_ORIGINS", "").split(",")
+    if x.strip()
+]
 
 limiter = Limiter(
     get_remote_address,
@@ -280,28 +295,81 @@ def resolve_org_id(key: str):
         return "default"
     return _lookup_org_by_key(key)
 
+def _cookie_secure():
+    return request.is_secure or request.headers.get("X-Forwarded-Proto", "").lower() == "https"
+
+
+def _build_session_token(org_id: str, key_hash: str) -> str:
+    return AUTH_SERIALIZER.dumps({"org_id": org_id, "key_hash": key_hash})
+
+
+def _validate_session_token(token: str):
+    if not token:
+        return None
+    try:
+        payload = AUTH_SERIALIZER.loads(token, max_age=AUTH_SESSION_MAX_AGE)
+    except (BadSignature, SignatureExpired, TypeError, ValueError):
+        return None
+
+    org_id = payload.get("org_id")
+    key_hash = payload.get("key_hash")
+    if not org_id or not key_hash:
+        return None
+
+    is_pg = DB_TYPE == "postgres" and DATABASE_URL
+    conn = get_pg_conn() if is_pg else sqlite3.connect(DB_SQLITE_PATH)
+    try:
+        cur = conn.cursor()
+        if is_pg:
+            cur.execute(
+                "SELECT 1 FROM api_keys WHERE org_id = %s AND key_hash = %s AND active = TRUE",
+                (org_id, key_hash),
+            )
+        else:
+            cur.execute(
+                "SELECT 1 FROM api_keys WHERE org_id = ? AND key_hash = ? AND active = 1",
+                (org_id, key_hash),
+            )
+        return org_id if cur.fetchone() else None
+    finally:
+        conn.close()
+
+
 def require_auth():
     if not API_KEY:
         g.org_id = "default"
         return True
-    key = request.headers.get("X-API-Key", "")
+
+    key = request.headers.get("X-API-Key", "").strip()
     org_id = resolve_org_id(key) if key else None
-    if not org_id:
-        key = request.args.get("api_key") or request.args.get("key") or ""
-        org_id = resolve_org_id(key) if key else None
-    if not org_id:
-        org_id = resolve_org_id(request.cookies.get(AUTH_COOKIE, ""))
+    if org_id:
+        g.auth_key = key
+        g.org_id = org_id
+        return True
+
+    # Browser session created by POST /api/auth-login.
+    org_id = _validate_session_token(request.cookies.get(AUTH_COOKIE, ""))
     if org_id:
         g.org_id = org_id
         return True
+
     return False
 
+
 def set_auth_cookie_if_valid(resp):
-    key = request.args.get("api_key") or request.args.get("key")
-    if key and resolve_org_id(key):
-        resp.set_cookie(AUTH_COOKIE, key, httponly=True, samesite="Lax",
-                         secure=True, max_age=60 * 60 * 24 * 30)
+    key = getattr(g, "auth_key", None)
+    org_id = getattr(g, "org_id", None)
+    if key and org_id:
+        resp.set_cookie(
+            AUTH_COOKIE,
+            _build_session_token(org_id, hash_key(key)),
+            httponly=True,
+            samesite="Strict",
+            secure=_cookie_secure(),
+            max_age=AUTH_SESSION_MAX_AGE,
+        )
     return resp
+
 
 @app.before_request
 def check_auth():
@@ -313,24 +381,77 @@ def check_auth():
         if request.endpoint in ("dashboard", "trace_detail"):
             return (
                 "<h3>🛡️ AgentGuard — accès protégé</h3>"
-                "<p>Ajoute ta clé à l'URL : <code>?key=TA_CLE</code></p>",
+                "<p>Authentification requise via <code>X-API-Key</code> "
+                "ou la page de connexion.</p>",
                 401,
             )
-        return jsonify({"error": "Unauthorized — X-API-Key header or ?key= required"}), 401
+        return jsonify({"error": "Unauthorized — X-API-Key header required or login session"}), 401
 
 # ── API ──
+@app.route("/healthz")
+def healthz():
+    try:
+        conn = get_db()
+        conn.close()
+        return jsonify({"status": "ok"}), 200
+    except Exception:
+        return jsonify({"status": "degraded"}), 503
+
+
+@app.route("/api/auth-login", methods=["POST"])
+@limiter.limit("10 per minute")
+def auth_login():
+    data = request.get_json(silent=True) or {}
+    key = str(data.get("api_key", "")).strip()
+    org_id = resolve_org_id(key)
+    if not org_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    resp = jsonify({"status": "ok", "org_id": org_id})
+    resp.set_cookie(
+        AUTH_COOKIE,
+        _build_session_token(org_id, hash_key(key)),
+        httponly=True,
+        samesite="Strict",
+        secure=_cookie_secure(),
+        max_age=AUTH_SESSION_MAX_AGE,
+    )
+    return resp
+
+
 @app.route("/span", methods=["POST"])
 @limiter.limit(SPAN_RATE_LIMIT)
-@cross_origin(origins="*", allow_headers=["Content-Type", "X-API-Key"])
+@cross_origin(origins=CORS_ORIGINS or [], allow_headers=["Content-Type", "X-API-Key"], supports_credentials=True)
 def receive_span():
-    data = request.json
+    data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "Body must be a JSON object"}), 400
+
+    raw_body = request.get_data(cache=True)
+    if len(raw_body) > app.config["MAX_CONTENT_LENGTH"]:
+        return jsonify({"error": "Payload too large"}), 413
 
     required_fields = ["trace_id", "span_id", "span_type", "timestamp", "latency_ms"]
     missing = [f for f in required_fields if f not in data]
     if missing:
         return jsonify({"error": f"Missing required field(s): {missing}"}), 400
+
+    for field_name in ("trace_id", "span_id", "span_type"):
+        value = data.get(field_name)
+        if not isinstance(value, str) or not value.strip() or len(value) > 256:
+            return jsonify({"error": f"Invalid {field_name}"}), 400
+
+    if not isinstance(data.get("timestamp"), (int, float)):
+        return jsonify({"error": "Invalid timestamp"}), 400
+
+    latency = data.get("latency_ms")
+    if (
+        not isinstance(latency, (int, float))
+        or isinstance(latency, bool)
+        or latency < 0
+        or latency > 86_400_000
+    ):
+        return jsonify({"error": "Invalid latency_ms"}), 400
 
     data.setdefault("input_data", {})
     data.setdefault("output_data", {})
@@ -568,7 +689,7 @@ def get_metrics():
         "risk_distribution": risk_counts,
         "top_threats": top_threats,
         "detection_layers": detection_stats,
-        "version": "v4.1.0"
+        "version": "v4.2.0-hardening"
     })
 
 @app.route("/api/detection/stats")
@@ -649,7 +770,7 @@ def get_detection_stats():
     conn.close()
     return jsonify({
         "layer_distribution": layer_distribution,
-        "layer_accuracy": layer_accuracy,
+        "layer_block_rate": layer_accuracy,
         "ml_score_distribution": ml_score_distribution,
         "llm_score_distribution": llm_score_distribution,
         "total_analyzed": sum(l["count"] for l in layer_distribution) if layer_distribution else 0
@@ -668,33 +789,44 @@ def get_llm_stats():
         cur = conn.cursor()
 
     # Nombre de spans analysées par LLM
-    cur.execute("""
+    cur.execute(
+        f"""
         SELECT COUNT(*) as total_llm_analysis
         FROM spans
-        WHERE detection_layer = 'llm_judge'
-    """)
+        WHERE detection_layer = 'llm_judge' AND org_id = {p}
+        """,
+        (g.org_id,),
+    )
     total_llm = cur.fetchone()[0]
 
     # Taux de blocage du LLM
-    cur.execute("""
-        SELECT 
+    cur.execute(
+        f"""
+        SELECT
             COUNT(*) as total,
             SUM(CASE WHEN blocked THEN 1 ELSE 0 END) as blocked
         FROM spans
-        WHERE detection_layer = 'llm_judge'
-    """)
+        WHERE detection_layer = 'llm_judge' AND org_id = {p}
+        """,
+        (g.org_id,),
+    )
     row = cur.fetchone()
     block_rate = round((row[1] / row[0] * 100), 2) if row[0] > 0 else 0
 
     # Top raisons LLM
-    cur.execute("""
+    cur.execute(
+        f"""
         SELECT llm_reason, COUNT(*) as count
         FROM spans
-        WHERE llm_reason IS NOT NULL AND detection_layer = 'llm_judge'
+        WHERE llm_reason IS NOT NULL
+          AND detection_layer = 'llm_judge'
+          AND org_id = {p}
         GROUP BY llm_reason
         ORDER BY count DESC
         LIMIT 5
-    """)
+        """,
+        (g.org_id,),
+    )
     top_reasons = [{"reason": r[0], "count": r[1]} for r in cur.fetchall()] if is_pg else \
                   [{"reason": r[0], "count": r[1]} for r in cur.fetchall()]
 
@@ -1644,7 +1776,7 @@ def show_key():
 def create_customer():
     if not ADMIN_SECRET:
         return jsonify({"error": "AGENTGUARD_ADMIN_SECRET not configured — endpoint disabled"}), 404
-    admin_secret = request.headers.get("X-Admin-Secret", "") or request.args.get("admin", "")
+    admin_secret = request.headers.get("X-Admin-Secret", "")
     if not safe_compare(admin_secret, ADMIN_SECRET):
         return jsonify({"error": "Admin secret required"}), 403
 
