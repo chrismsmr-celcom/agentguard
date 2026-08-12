@@ -72,6 +72,12 @@ class MLDetector:
         self.threshold = self._float_env(
             "AGENTGUARD_ML_THRESHOLD", 0.85, 0.0, 1.0
         )
+        self.failure_mode = os.getenv(
+            "AGENTGUARD_DETECTOR_FAILURE_MODE", "fail_open"
+        ).lower()
+        if self.failure_mode not in ("fail_open", "fail_closed", "review"):
+            self.failure_mode = "fail_open"
+        self.degraded = False
         self.model_path = os.getenv(
             "AGENTGUARD_MODEL_PATH", "./agentguard-model"
         )
@@ -121,10 +127,12 @@ class MLDetector:
             print(f"[AG] ✅ ML activé ({self.device}, threshold={self.threshold:.2f})")
 
         except ImportError:
-            warnings.warn("[AG] transformers/torch absent — ML désactivé")
+            warnings.warn("[AG] transformers/torch absent — ML dégradé")
+            self.degraded = True
             self.enabled = False
         except Exception as exc:
             warnings.warn(f"[AG] Impossible de charger le modèle ML: {exc}")
+            self.degraded = True
             self.enabled = False
 
     @staticmethod
@@ -139,10 +147,25 @@ class MLDetector:
 
     def predict(self, text: str) -> Dict[str, Any]:
         if not self.enabled or self.model is None:
+            if self.degraded and self.failure_mode == "fail_closed":
+                return {
+                    "score": 1.0,
+                    "risk": "HIGH",
+                    "confidence": "high",
+                    "degraded": True,
+                }
+            if self.degraded and self.failure_mode == "review":
+                return {
+                    "score": 0.0,
+                    "risk": "MEDIUM",
+                    "confidence": "low",
+                    "degraded": True,
+                }
             return {
                 "score": 0.0,
                 "risk": "UNKNOWN",
                 "confidence": "low",
+                "degraded": self.degraded,
             }
 
         try:
@@ -190,10 +213,26 @@ class MLDetector:
 
         except Exception as exc:
             warnings.warn(f"[AG] Erreur ML: {exc}")
+            self.degraded = True
+            if self.failure_mode == "fail_closed":
+                return {
+                    "score": 1.0,
+                    "risk": "HIGH",
+                    "confidence": "high",
+                    "degraded": True,
+                }
+            if self.failure_mode == "review":
+                return {
+                    "score": 0.0,
+                    "risk": "MEDIUM",
+                    "confidence": "low",
+                    "degraded": True,
+                }
             return {
                 "score": 0.0,
                 "risk": "UNKNOWN",
                 "confidence": "low",
+                "degraded": True,
             }
 
 
@@ -337,6 +376,40 @@ class PolicyEngine:
                 "Empty prompt",
             )
 
+        if (
+            self.ml_detector.degraded
+            and self.ml_detector.failure_mode == "fail_closed"
+        ):
+            return SecurityCheck(
+                "prompt_injection",
+                False,
+                RiskLevel.HIGH,
+                "ML detector unavailable in fail-closed mode",
+                {
+                    "layer": "ml",
+                    "degraded": True,
+                    "confidence": "high",
+                },
+                SecurityAction.BLOCK,
+            )
+
+        if (
+            self.ml_detector.degraded
+            and self.ml_detector.failure_mode == "review"
+        ):
+            return SecurityCheck(
+                "prompt_injection",
+                False,
+                RiskLevel.MEDIUM,
+                "ML detector unavailable; manual review required",
+                {
+                    "layer": "ml",
+                    "degraded": True,
+                    "confidence": "low",
+                },
+                SecurityAction.REVIEW,
+            )
+
         # ═══════════════════════════════════════════════════════════
         # 1. ML - Détection sémantique (prioritaire)
         # ═══════════════════════════════════════════════════════════
@@ -461,12 +534,45 @@ class PolicyEngine:
         if not self.use_llm_judge:
             return None
 
+        judge_failure_mode = os.getenv(
+            "AGENTGUARD_JUDGE_FAILURE_MODE",
+            os.getenv("AGENTGUARD_DETECTOR_FAILURE_MODE", "fail_open"),
+        ).lower()
+        if judge_failure_mode not in ("fail_open", "fail_closed", "review"):
+            judge_failure_mode = "fail_open"
+
         api_key = (
             os.getenv("AGENTGUARD_JUDGE_API_KEY")
             or os.getenv("DEEPSEEK_API_KEY")
         )
 
         if not api_key:
+            if judge_failure_mode == "fail_closed":
+                return SecurityCheck(
+                    "llm_judge",
+                    False,
+                    RiskLevel.HIGH,
+                    "LLM Judge enabled but API key is unavailable",
+                    {
+                        "layer": "llm_judge",
+                        "degraded": True,
+                        "confidence": "high",
+                    },
+                    SecurityAction.BLOCK,
+                )
+            if judge_failure_mode == "review":
+                return SecurityCheck(
+                    "llm_judge",
+                    False,
+                    RiskLevel.MEDIUM,
+                    "LLM Judge enabled but API key is unavailable",
+                    {
+                        "layer": "llm_judge",
+                        "degraded": True,
+                        "confidence": "low",
+                    },
+                    SecurityAction.REVIEW,
+                )
             return None
 
         cache_key = hashlib.sha256(
@@ -592,6 +698,32 @@ class PolicyEngine:
                 f"[AG] LLM Judge unavailable: "
                 f"{type(exc).__name__}: {exc}"
             )
+            if judge_failure_mode == "fail_closed":
+                return SecurityCheck(
+                    "llm_judge",
+                    False,
+                    RiskLevel.HIGH,
+                    "LLM Judge unavailable in fail-closed mode",
+                    {
+                        "layer": "llm_judge",
+                        "degraded": True,
+                        "confidence": "high",
+                    },
+                    SecurityAction.BLOCK,
+                )
+            if judge_failure_mode == "review":
+                return SecurityCheck(
+                    "llm_judge",
+                    False,
+                    RiskLevel.MEDIUM,
+                    "LLM Judge unavailable; manual review required",
+                    {
+                        "layer": "llm_judge",
+                        "degraded": True,
+                        "confidence": "low",
+                    },
+                    SecurityAction.REVIEW,
+                )
             return None
 
     def check_pii(self, text: str) -> SecurityCheck:
@@ -1441,12 +1573,37 @@ class AgentGuard:
     def guard_tool_call(
         self,
         tool_name: str,
-        params: Dict[str, Any],
-        func: Callable,
+        params: Optional[Dict[str, Any]] = None,
+        func: Optional[Callable] = None,
     ):
         """
         Vérifie une tool call avant exécution.
+
+        API historique :
+            guard.guard_tool_call("tool", params, func)
+
+        API décorateur :
+            @guard.guard_tool_call("tool")
+            def tool(...):
+                ...
         """
+        if params is None and func is None:
+            def decorator(wrapped):
+                @wraps(wrapped)
+                def wrapper(*args, **kwargs):
+                    return self.guard_tool_call(
+                        tool_name,
+                        {"__args__": args, "__kwargs__": kwargs},
+                        lambda **_ignored: wrapped(*args, **kwargs),
+                    )
+                return wrapper
+            return decorator
+
+        if params is None or func is None:
+            raise TypeError(
+                "params et func doivent être fournis ensemble, "
+                "ou utiliser @guard.guard_tool_call('tool')"
+            )
 
         span_id = self._generate_id()
         start = time.time()
@@ -1498,7 +1655,10 @@ class AgentGuard:
             )
 
         try:
-            result = func(**params)
+            if "__args__" in params and "__kwargs__" in params:
+                result = func(**params)
+            else:
+                result = func(**params)
 
         except Exception as exc:
             span = GuardSpan(
