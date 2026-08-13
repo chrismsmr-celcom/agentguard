@@ -1441,12 +1441,27 @@ class AgentGuard:
     def guard_tool_call(
         self,
         tool_name: str,
-        params: Dict[str, Any],
-        func: Callable,
+        params: Optional[Dict[str, Any]] = None,
+        func: Optional[Callable] = None,
     ):
         """
         Vérifie une tool call avant exécution.
+
+        Formes compatibles :
+            guard.guard_tool_call("tool", params, func)
+            @guard.guard_tool_call("tool")
+            def tool(...): ...
         """
+        if params is None and func is None:
+            def decorator(wrapped: Callable):
+                @wraps(wrapped)
+                def wrapper(*args, **kwargs):
+                    return self.guard_tool_call(tool_name, kwargs, wrapped)
+                return wrapper
+            return decorator
+
+        if params is None or func is None:
+            raise TypeError("params et func doivent être fournis ensemble")
 
         span_id = self._generate_id()
         start = time.time()
@@ -1696,7 +1711,7 @@ class AgentGuard:
         return summary
 
 
-__version__ = "2.1.0"
+__version__ = "2.1.1"
 
 __all__ = [
     "AgentGuard",
