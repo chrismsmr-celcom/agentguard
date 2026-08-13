@@ -18,13 +18,17 @@ except ImportError:
     # pur, son absence ne doit pas empêcher le collector de démarrer.
     psycopg2 = None
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, render_template_string, make_response, g
+from flask import Flask, request, jsonify, render_template_string, make_response, g, redirect, url_for
 from flask_cors import CORS, cross_origin
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("AGENTGUARD_FLASK_SECRET", secrets.token_urlsafe(32))
+app.secret_key = os.environ.get("AGENTGUARD_FLASK_SECRET") or secrets.token_urlsafe(32)
+AUTH_SERIALIZER = URLSafeTimedSerializer(app.secret_key, salt="agentguard-auth-v1")
+AUTH_SESSION_TTL = int(os.environ.get("AGENTGUARD_AUTH_SESSION_TTL", "900"))
+AUTH_COOKIE_SECURE = os.environ.get("AGENTGUARD_COOKIE_SECURE", "true").lower() in ("1", "true", "yes", "on")
 
 limiter = Limiter(
     get_remote_address,
@@ -40,6 +44,13 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 API_KEY = os.environ.get("AGENTGUARD_API_KEY", None)
 ADMIN_SECRET = os.environ.get("AGENTGUARD_ADMIN_SECRET")
 AUTH_COOKIE = "ag_auth"
+
+LOGIN_HTML = r"""
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AgentGuard — Sign in</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:Inter,system-ui,sans-serif;background:#07111f;color:#e5eefb;display:grid;place-items:center}.shell{width:min(440px,calc(100vw - 32px))}.card{background:#0b182a;border:1px solid #253b54;box-shadow:0 30px 80px rgba(0,0,0,.42);border-radius:24px;padding:34px}.logo{width:52px;height:52px;border-radius:15px;display:grid;place-items:center;background:linear-gradient(135deg,#0ea5e9,#6366f1);font-size:26px}h1{font-size:28px;margin:22px 0 8px}.sub{margin:0 0 28px;color:#8ea4bd;font-size:14px;line-height:1.6}label{display:block;font-size:13px;color:#b7c7d9;margin-bottom:8px;font-weight:600}input{width:100%;height:50px;border:1px solid #2d425b;background:#081526;color:#edf5ff;border-radius:12px;padding:0 14px;font-size:14px;outline:none}input:focus{border-color:#38bdf8;box-shadow:0 0 0 3px rgba(56,189,248,.12)}button{width:100%;height:50px;margin-top:16px;border:0;border-radius:12px;background:linear-gradient(135deg,#0ea5e9,#6366f1);color:#fff;font-weight:700;font-size:14px;cursor:pointer}button:disabled{opacity:.6}.notice{margin-top:18px;padding:12px 14px;border-radius:12px;background:#0a1b2d;color:#7f96ae;font-size:12px;line-height:1.55}.error{margin-top:14px;padding:12px 14px;border-radius:12px;background:#2a1117;border:1px solid #64222d;color:#fca5a5;font-size:13px;display:none}.footer{margin-top:18px;text-align:center;color:#53677f;font-size:11px}
+</style></head><body><div class="shell"><main class="card"><div class="logo">🛡️</div><h1>AgentGuard</h1><p class="sub">Runtime Security Console<br>Secure access to your agent telemetry and enforcement dashboard.</p><form id="loginForm"><label for="apiKey">API Key</label><input id="apiKey" type="password" autocomplete="current-password" placeholder="ag-••••••••••••••••" required><button id="submitBtn" type="submit">Sign in to dashboard</button><div id="error" class="error"></div></form><div class="notice">Your API key is sent over HTTPS and is never placed in the URL. A short-lived signed session is created after authentication.</div></main><div class="footer">AgentGuard Runtime Security</div></div><script>const f=document.getElementById('loginForm'),i=document.getElementById('apiKey'),b=document.getElementById('submitBtn'),e=document.getElementById('error');f.addEventListener('submit',async x=>{x.preventDefault();e.style.display='none';b.disabled=true;b.textContent='Authenticating…';try{const r=await fetch('/api/auth-login',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({api_key:i.value})}),d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Authentication failed');location.replace('/')}catch(x){e.textContent=x.message||'Authentication failed';e.style.display='block'}finally{b.disabled=false;b.textContent='Sign in to dashboard'}});</script></body></html>
+"""
 
 # Génère une clé si aucune n'est définie
 _API_KEY_WAS_GENERATED = API_KEY is None
@@ -280,30 +291,81 @@ def resolve_org_id(key: str):
         return "default"
     return _lookup_org_by_key(key)
 
+def _set_session(resp, org_id: str, key: str):
+    token = AUTH_SERIALIZER.dumps({"org_id": org_id, "key_hash": hash_key(key)})
+    resp.set_cookie(AUTH_COOKIE, token, httponly=True, samesite="Lax", secure=AUTH_COOKIE_SECURE, max_age=AUTH_SESSION_TTL, path="/")
+    return resp
+
+def _resolve_session_org(token: str):
+    if not token:
+        return None
+    try:
+        payload = AUTH_SERIALIZER.loads(token, max_age=AUTH_SESSION_TTL)
+        org_id = payload.get("org_id")
+        key_hash = payload.get("key_hash")
+        if not org_id or not key_hash:
+            return None
+        if org_id == "default" and API_KEY and safe_compare(key_hash, hash_key(API_KEY)):
+            return "default"
+        is_pg = DB_TYPE == "postgres" and DATABASE_URL
+        conn = get_pg_conn() if is_pg else sqlite3.connect(DB_SQLITE_PATH)
+        cur = conn.cursor()
+        if is_pg:
+            cur.execute("SELECT org_id FROM api_keys WHERE org_id = %s AND key_hash = %s AND active = TRUE", (org_id, key_hash))
+        else:
+            cur.execute("SELECT org_id FROM api_keys WHERE org_id = ? AND key_hash = ? AND active = 1", (org_id, key_hash))
+        row = cur.fetchone()
+        conn.close()
+        return row[0] if row else None
+    except (BadSignature, SignatureExpired, TypeError, ValueError):
+        return None
+
 def require_auth():
     if not API_KEY:
         g.org_id = "default"
         return True
-
-    # Les credentials dans l'URL sont refusés explicitement.
-    # Cela évite notamment qu'une valeur ?key= déclenche une lookup DB
-    # avant que l'on puisse renvoyer un 401 propre.
-    if request.args.get("api_key") is not None or request.args.get("key") is not None:
-        return False
-
     key = request.headers.get("X-API-Key", "").strip()
-    org_id = resolve_org_id(key) if key else None
-
+    if key:
+        org_id = resolve_org_id(key)
+        if org_id:
+            g.org_id = org_id
+            g.auth_key = key
+            return True
+    org_id = _resolve_session_org(request.cookies.get(AUTH_COOKIE, ""))
     if org_id:
         g.org_id = org_id
         return True
-
-    # Les cookies historiques contenant une clé brute ne sont plus acceptés.
     return False
 
-def set_auth_cookie_if_valid(resp):
-    # Auth API uniquement par header. Aucun secret n'est copié dans un cookie.
+@app.route("/login", methods=["GET"])
+def login_page():
+    if not API_KEY or require_auth():
+        return redirect(url_for("dashboard"))
+    return LOGIN_HTML
+
+@app.route("/api/auth-login", methods=["POST"])
+@limiter.limit("10 per minute")
+def auth_login():
+    data = request.get_json(silent=True) or {}
+    key = str(data.get("api_key", "")).strip()
+    if not key:
+        return jsonify({"error": "API key is required"}), 400
+    org_id = resolve_org_id(key)
+    if not org_id:
+        return jsonify({"error": "Invalid API key"}), 401
+    return _set_session(jsonify({"status": "ok", "org_id": org_id}), org_id, key)
+
+@app.route("/api/auth-logout", methods=["POST"])
+def auth_logout():
+    resp = jsonify({"status": "ok"})
+    resp.delete_cookie(AUTH_COOKIE, path="/")
     return resp
+
+@app.route("/api/auth-session", methods=["GET"])
+def auth_session():
+    if require_auth():
+        return jsonify({"authenticated": True, "org_id": g.org_id})
+    return jsonify({"authenticated": False}), 401
 
 @app.before_request
 def check_auth():
@@ -313,17 +375,8 @@ def check_auth():
         return None
     if not require_auth():
         if request.endpoint in ("dashboard", "trace_detail"):
-            return (
-                "<h3>🛡️ AgentGuard — accès protégé</h3>"
-                "<p>Authentification requise via <code>X-API-Key</code>.</p>",
-                401,
-            )
+            return redirect(url_for("login_page"))
         return jsonify({"error": "Unauthorized — X-API-Key header required"}), 401
-
-@app.route("/healthz")
-def healthz():
-    """Liveness endpoint public, sans authentification ni accès DB obligatoire."""
-    return jsonify({"status": "ok", "service": "agentguard-collector"}), 200
 
 # ── API ──
 @app.route("/span", methods=["POST"])
@@ -575,7 +628,7 @@ def get_metrics():
         "risk_distribution": risk_counts,
         "top_threats": top_threats,
         "detection_layers": detection_stats,
-        "version": "v4.1.0"
+        "version": "v4.2.0"
     })
 
 @app.route("/api/detection/stats")
@@ -1522,13 +1575,17 @@ window.addEventListener('resize',()=>{if(state.metrics){renderOverview();renderU
 refreshAll();
 setInterval(refreshAll,15000);
 </script>
+<script>
+(function(){const b=document.createElement("button");b.textContent="Sign out";b.style.cssText="position:fixed;right:18px;top:18px;z-index:9999;background:#0f1f33;color:#dbeafe;border:1px solid #29415f;border-radius:10px;padding:9px 12px;font-weight:700;cursor:pointer";b.onclick=async()=>{await fetch('/api/auth-logout',{method:'POST',credentials:'same-origin'});location.replace('/login');};document.body.appendChild(b);})();
+</script>
 </body></html>
 '''
 
 @app.route("/")
 def dashboard():
-    resp = make_response(render_template_string(DASHBOARD_HTML))
-    return set_auth_cookie_if_valid(resp)
+    if not require_auth():
+        return redirect(url_for("login_page"))
+    return make_response(render_template_string(DASHBOARD_HTML))
 
 @app.route("/trace/<trace_id>")
 def trace_detail(trace_id):
@@ -1626,7 +1683,7 @@ def trace_detail(trace_id):
         """
     html += "</body></html>"
     resp = make_response(html)
-    return set_auth_cookie_if_valid(resp)
+    return resp
 
 @app.errorhandler(Exception)
 def handle_unexpected_error(e):
