@@ -292,23 +292,78 @@ def _session_token(org_id: str, key_hash: str) -> str:
 def _session_org_id(token: str):
     if not token:
         return None
+
     try:
-        payload = AUTH_SERIALIZER.loads(token, max_age=AUTH_SESSION_TTL)
+        payload = AUTH_SERIALIZER.loads(
+            token,
+            max_age=AUTH_SESSION_TTL,
+        )
+
         org_id = payload.get("org_id")
         key_hash = payload.get("key_hash")
+
         if not org_id or not key_hash:
             return None
+
+        # Self-host / master key:
+        # AGENTGUARD_API_KEY n'est volontairement pas stockée
+        # dans api_keys.
+        if (
+            org_id == "default"
+            and API_KEY
+            and safe_compare(
+                key_hash,
+                hash_key(API_KEY),
+            )
+        ):
+            return "default"
+
+        # Hosted multi-tenant customer key:
+        # validation dynamique pour respecter une révocation immédiate.
         is_pg = DB_TYPE == "postgres" and DATABASE_URL
-        conn = get_pg_conn() if is_pg else sqlite3.connect(DB_SQLITE_PATH)
+
+        conn = (
+            get_pg_conn()
+            if is_pg
+            else sqlite3.connect(DB_SQLITE_PATH)
+        )
+
         cur = conn.cursor()
+
         if is_pg:
-            cur.execute("SELECT 1 FROM api_keys WHERE org_id = %s AND key_hash = %s AND active = TRUE", (org_id, key_hash))
+            cur.execute(
+                """
+                SELECT 1
+                FROM api_keys
+                WHERE org_id = %s
+                  AND key_hash = %s
+                  AND active = TRUE
+                """,
+                (org_id, key_hash),
+            )
         else:
-            cur.execute("SELECT 1 FROM api_keys WHERE org_id = ? AND key_hash = ? AND active = 1", (org_id, key_hash))
+            cur.execute(
+                """
+                SELECT 1
+                FROM api_keys
+                WHERE org_id = ?
+                  AND key_hash = ?
+                  AND active = 1
+                """,
+                (org_id, key_hash),
+            )
+
         valid = cur.fetchone() is not None
         conn.close()
+
         return org_id if valid else None
-    except (BadSignature, SignatureExpired, TypeError, ValueError):
+
+    except (
+        BadSignature,
+        SignatureExpired,
+        TypeError,
+        ValueError,
+    ):
         return None
 
 def require_auth():
