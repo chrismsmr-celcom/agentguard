@@ -1,5 +1,4 @@
-"""
-AgentGuard Collector v4 — PostgreSQL production + SQLite local fallback
+local fallback
 Support de la détection multi-couches (ML + LLM Judge)
 Stats avancées et badges de détection dans le dashboard
 """
