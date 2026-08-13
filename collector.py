@@ -284,23 +284,25 @@ def require_auth():
     if not API_KEY:
         g.org_id = "default"
         return True
-    key = request.headers.get("X-API-Key", "")
+
+    # Les credentials dans l'URL sont refusés explicitement.
+    # Cela évite notamment qu'une valeur ?key= déclenche une lookup DB
+    # avant que l'on puisse renvoyer un 401 propre.
+    if request.args.get("api_key") is not None or request.args.get("key") is not None:
+        return False
+
+    key = request.headers.get("X-API-Key", "").strip()
     org_id = resolve_org_id(key) if key else None
-    if not org_id:
-        key = request.args.get("api_key") or request.args.get("key") or ""
-        org_id = resolve_org_id(key) if key else None
-    if not org_id:
-        org_id = resolve_org_id(request.cookies.get(AUTH_COOKIE, ""))
+
     if org_id:
         g.org_id = org_id
         return True
+
+    # Les cookies historiques contenant une clé brute ne sont plus acceptés.
     return False
 
 def set_auth_cookie_if_valid(resp):
-    key = request.args.get("api_key") or request.args.get("key")
-    if key and resolve_org_id(key):
-        resp.set_cookie(AUTH_COOKIE, key, httponly=True, samesite="Lax",
-                         secure=True, max_age=60 * 60 * 24 * 30)
+    # Auth API uniquement par header. Aucun secret n'est copié dans un cookie.
     return resp
 
 @app.before_request
@@ -313,10 +315,15 @@ def check_auth():
         if request.endpoint in ("dashboard", "trace_detail"):
             return (
                 "<h3>🛡️ AgentGuard — accès protégé</h3>"
-                "<p>Ajoute ta clé à l'URL : <code>?key=TA_CLE</code></p>",
+                "<p>Authentification requise via <code>X-API-Key</code>.</p>",
                 401,
             )
-        return jsonify({"error": "Unauthorized — X-API-Key header or ?key= required"}), 401
+        return jsonify({"error": "Unauthorized — X-API-Key header required"}), 401
+
+@app.route("/healthz")
+def healthz():
+    """Liveness endpoint public, sans authentification ni accès DB obligatoire."""
+    return jsonify({"status": "ok", "service": "agentguard-collector"}), 200
 
 # ── API ──
 @app.route("/span", methods=["POST"])
