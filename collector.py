@@ -240,7 +240,7 @@ PROTECTED_ENDPOINTS = {
     "dashboard", "trace_detail", "get_detection_stats",
     "api_models", "api_heatmap", "api_checks_breakdown",
     "api_expensive_spans", "api_cost_trend", "api_latency_distribution",
-    "api_recent_events", "api_trend_daily",
+    "api_recent_events", "api_trend_daily", "get_llm_stats",
 }
 
 def safe_compare(a: str, b: str) -> bool:
@@ -734,48 +734,42 @@ def get_detection_stats():
 @app.route("/api/llm/stats")
 @limiter.limit("10 per minute")
 def get_llm_stats():
-    """Statistiques spécifiques au LLM Judge."""
+    """Statistiques LLM Judge strictement isolées par tenant."""
     is_pg = DB_TYPE == "postgres" and DATABASE_URL
     conn = get_db()
+    cur = conn.cursor()
+    p = "%s" if is_pg else "?"
 
-    if is_pg:
-        cur = conn.cursor()
-    else:
-        cur = conn.cursor()
-
-    # Nombre de spans analysées par LLM
-    cur.execute("""
-        SELECT COUNT(*) as total_llm_analysis
+    cur.execute(f"""
+        SELECT COUNT(*)
         FROM spans
-        WHERE detection_layer = 'llm_judge'
-    """)
-    total_llm = cur.fetchone()[0]
+        WHERE detection_layer = 'llm_judge' AND org_id = {p}
+    """, (g.org_id,))
+    total_llm = cur.fetchone()[0] or 0
 
-    # Taux de blocage du LLM
-    cur.execute("""
-        SELECT 
-            COUNT(*) as total,
-            SUM(CASE WHEN blocked THEN 1 ELSE 0 END) as blocked
+    cur.execute(f"""
+        SELECT COUNT(*), SUM(CASE WHEN blocked THEN 1 ELSE 0 END)
         FROM spans
-        WHERE detection_layer = 'llm_judge'
-    """)
-    row = cur.fetchone()
-    block_rate = round((row[1] / row[0] * 100), 2) if row[0] > 0 else 0
+        WHERE detection_layer = 'llm_judge' AND org_id = {p}
+    """, (g.org_id,))
+    total, blocked = cur.fetchone()
+    total = total or 0
+    blocked = blocked or 0
+    block_rate = round((blocked / total * 100), 2) if total else 0
 
-    # Top raisons LLM
-    cur.execute("""
+    cur.execute(f"""
         SELECT llm_reason, COUNT(*) as count
         FROM spans
-        WHERE llm_reason IS NOT NULL AND detection_layer = 'llm_judge'
+        WHERE llm_reason IS NOT NULL
+          AND detection_layer = 'llm_judge'
+          AND org_id = {p}
         GROUP BY llm_reason
         ORDER BY count DESC
         LIMIT 5
-    """)
-    top_reasons = [{"reason": r[0], "count": r[1]} for r in cur.fetchall()] if is_pg else \
-                  [{"reason": r[0], "count": r[1]} for r in cur.fetchall()]
+    """, (g.org_id,))
+    top_reasons = [{"reason": r[0], "count": r[1]} for r in cur.fetchall()]
 
     conn.close()
-    
     return jsonify({
         "total_analyzed": total_llm,
         "block_rate": block_rate,
