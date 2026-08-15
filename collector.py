@@ -1333,207 +1333,200 @@ tr:hover td{background:#191c29}
 <div id="toast" class="toast"></div>
 
 <script>
-const state={modelFilter:new Set(),selTrace:null,selSpan:0,latStat:'avg'};
-const $=id=>document.getElementById(id);
-const esc=v=>String(v||'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-const fmt=n=>Number(n||0).toLocaleString('en-US').replace(/,/g,' ');
-const fmtK=n=>{n=Number(n||0);return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':String(Math.round(n))};
-const money=n=>'$'+Number(n||0).toFixed(4);
-const P=['#a78bfa','#fb923c','#4cc38a','#e0525f','#38bdf8','#f5b84b','#8b5cf6','#4ade80','#22d3ee','#f472b6','#facc15','#94a3b8','#6ee7b7','#fda4af','#c084fc'];
-const CHECKS=[['prompt_injection','#a78bfa'],['pii_detection','#fb923c'],['tool_policy','#3ecfb2'],['dangerous_params','#e0525f'],['budget_policy','#4c8dff']];
-function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(window._t);window._t=setTimeout(()=>t.classList.remove('show'),2200)}
-async function api(u){const r=await fetch(u,{credentials:'include'});if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}
-function trendPct(s){if(!s||s.length<2)return null;const a=s[0],b=s[s.length-1];if(!a&&!b)return null;const p=a===0?100:(b-a)/a*100;return p}
-function trendHTML(p,invert){if(p===null||isNaN(p))return'<span class="dim">—</span>';const up=p>=0;const good=invert?!up:up;return `<span class="trend ${good?'up':'down'}">${up?'↗':'↘'} ${Math.abs(p).toFixed(2)}%</span>`}
-function areaChart(el,data,labels,color='#a78bfa'){if(!data.length){el.innerHTML='<div class="empty">No data</div>';return}
- const W=el.clientWidth||600,H=el.clientHeight||200,pad={l:8,r:44,t:14,b:22},cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
- const max=Math.max(1,...data);let s=`<svg viewBox="0 0 ${W} ${H}">`;
- const pt=(v,i)=>[pad.l+(i/Math.max(1,data.length-1))*cw,pad.t+ch-(v/max)*ch];
- let line=data.map((v,i)=>{const[x,y]=pt(v,i);return(i?'L':'M')+x+','+y}).join(' ');
- s+=`<path d="${line} L${pad.l+cw},${pad.t+ch} L${pad.l},${pad.t+ch} Z" fill="${color}" opacity=".14"/>`;
- s+=`<path d="${line}" fill="none" stroke="${color}" stroke-width="1.6"/>`;
- (labels||[]).forEach((l,i)=>{if(i%Math.ceil((labels.length||1)/6))return;const x=pad.l+(i/Math.max(1,labels.length-1))*cw;s+=`<text x="${x}" y="${H-6}" fill="#5d6375" font-size="9.5" text-anchor="middle">${esc(l)}</text>`});
- s+=`<text x="${W-4}" y="${pad.t+8}" fill="#9298ab" font-size="9.5" text-anchor="end">${fmtK(max)}</text></svg>`;el.innerHTML=s}
-function hbarsLegend(el,items,valKey,fmtFn){if(!items.length){el.innerHTML='<div class="empty">No model data yet</div>';return}
- const max=Math.max(...items.map(i=>Number(i[valKey])||0),1e-9);
- let s='<div style="display:flex;gap:14px;height:100%"><div style="flex:1;display:flex;flex-direction:column;justify-content:space-around">';
- items.forEach((m,i)=>{s+=`<div style="display:flex;align-items:center;gap:8px"><span style="width:170px;text-align:right;font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.name)}</span><div style="flex:1;height:10px;background:#101320;border-radius:2px"><div style="width:${(Number(m[valKey])/max*100).toFixed(1)}%;height:100%;background:${P[i%P.length]};border-radius:2px"></div></div></div>`});
- s+=`<div style="display:flex;justify-content:space-between;color:var(--dim);font-size:9.5px;margin-left:178px"><span>0</span><span>${fmtFn(max/2)}</span><span>${fmtFn(max)}</span></div></div>`;
- s+='<div style="width:190px;overflow:auto;display:flex;flex-direction:column;gap:5px;font-size:10.5px;color:var(--muted)">'+items.map((m,i)=>`<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${P[i%P.length]};margin-right:6px"></i>${esc(m.name)}</span>`).join('')+'</div></div>';
- el.innerHTML=s}
-function stackedTime(el,days,map){if(!days.length){el.innerHTML='<div class="empty">No guardrail data yet</div>';return}
- const W=el.clientWidth||600,H=el.clientHeight||250,pad={l:30,r:8,t:10,b:20},cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
- const totals=days.map(d=>CHECKS.reduce((a,[n])=>a+(map[d+'|'+n]||0),0));
- const max=Math.max(1,...totals);const bw=Math.max(2,cw/days.length-2);let s=`<svg viewBox="0 0 ${W} ${H}">`;
- [0,.5,1].forEach(t=>{const y=pad.t+ch-t*ch;s+=`<line x1="${pad.l}" y1="${y}" x2="${W-pad.r}" y2="${y}" stroke="#20243a" stroke-width=".5"/><text x="${pad.l-5}" y="${y+3}" fill="#5d6375" font-size="9" text-anchor="end">${Math.round(max*t)}</text>`});
- days.forEach((d,i)=>{let y=pad.t+ch;CHECKS.forEach(([n,c])=>{const v=map[d+'|'+n]||0;if(!v)return;const h=(v/max)*ch;y-=h;s+=`<rect x="${pad.l+i*(cw/days.length)}" y="${y}" width="${bw}" height="${h}" fill="${c}"/>`})});
- days.forEach((d,i)=>{if(i%Math.ceil(days.length/6))return;s+=`<text x="${pad.l+i*(cw/days.length)}" y="${H-5}" fill="#5d6375" font-size="9">${esc(d.slice(5))}</text>`});
- el.innerHTML=s+'</svg>'}
-function multiLine(el,days,series){if(!series.length){el.innerHTML='<div class="empty">No data</div>';return}
- const W=el.clientWidth||600,H=el.clientHeight||300,pad={l:36,r:8,t:10,b:20},cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
- const max=Math.max(1,...series.flatMap(s=>s.values));let s=`<svg viewBox="0 0 ${W} ${H}">`;
- [0,.25,.5,.75,1].forEach(t=>{const y=pad.t+ch-t*ch;s+=`<line x1="${pad.l}" y1="${y}" x2="${W-pad.r}" y2="${y}" stroke="#20243a" stroke-width=".5"/><text x="${pad.l-5}" y="${y+3}" fill="#5d6375" font-size="9" text-anchor="end">${fmtK(max*t)}</text>`});
- series.forEach(sr=>{let p='';sr.values.forEach((v,i)=>{const x=pad.l+(i/Math.max(1,sr.values.length-1))*cw,y=pad.t+ch-(v/max)*ch;p+=(i?'L':'M')+x+','+y});s+=`<path d="${p}" fill="none" stroke="${sr.color}" stroke-width="1.2"/>`});
- days.forEach((d,i)=>{if(i%Math.ceil(days.length/5))return;const x=pad.l+(i/Math.max(1,days.length-1))*cw;s+=`<text x="${x}" y="${H-5}" fill="#5d6375" font-size="9" text-anchor="middle">${esc(d.slice(5))}</text>`});
- el.innerHTML=s+'</svg><div class="legend">'+series.map(sr=>`<span><i style="background:${sr.color}"></i>${esc(sr.name)}</span>`).join('')+'</div>'}
-function donut(el,okPct,okN,failN){el.innerHTML=`<div style="display:flex;align-items:center;gap:18px;height:100%;justify-content:center"><svg width="150" height="150" viewBox="0 0 150 150"><circle cx="75" cy="75" r="56" fill="#2b8a5e" opacity=".9"/><path d="M75 19 A56 56 0 0 1 ${75+56*Math.sin(Math.max(.02,(1-okPct/100)*6.283))} ${75-56*Math.cos(Math.max(.02,(1-okPct/100)*6.283))}" stroke="var(--red2)" stroke-width="3" fill="none"/><circle cx="75" cy="75" r="34" fill="var(--card)"/><text x="75" y="72" text-anchor="middle" fill="var(--dim)" font-size="9">${(100-okPct).toFixed(0)}%</text><text x="75" y="86" text-anchor="middle" fill="var(--dim)" font-size="9">${okPct.toFixed(0)}%</text></svg><div style="font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:6px"><span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--red2);margin-right:6px"></i>Failed Requests</span><span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#2b8a5e;margin-right:6px"></i>Successful Requests</span></div></div>`}
-function forecastBand(el,hist){if(!hist||hist.length<2){el.innerHTML='<div class="empty">Not enough history</div>';return}
- const W=el.clientWidth||500,H=el.clientHeight||170,pad={l:26,r:6,t:10,b:16},cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
- const delta=(hist[hist.length-1]-hist[0])/(hist.length-1);
- const fc=Array.from({length:6},(_,i)=>Math.max(0,hist[hist.length-1]+delta*(i+1)));
- const band=fc.map(v=>Math.max(v*.25,Math.max(1,...hist)*.06));
- const max=Math.max(...hist,...fc.map((v,i)=>v+band[i]))*1.1;
- const X=i=>pad.l+(i/(hist.length-1))*cw*.62, XF=i=>pad.l+cw*.62+(i/6)*cw*.38;
- let s=`<svg viewBox="0 0 ${W} ${H}">`;
- let p='';hist.forEach((v,i)=>{const y=pad.t+ch-(v/max)*ch;p+=(i?'L':'M')+X(i)+','+y});s+=`<path d="${p}" fill="none" stroke="#e6e8f2" stroke-width="1"/>`;
- const ly=pad.t+ch-(hist[hist.length-1]/max)*ch,lx=X(hist.length-1);
- let up='',lo='';fc.forEach((v,i)=>{up+='L'+XF(i+1)+','+(pad.t+ch-((v+band[i])/max)*ch)+' '});
- [...fc].reverse().forEach((v,i)=>{const j=fc.length-1-i;lo+='L'+XF(j+1)+','+(pad.t+ch-(Math.max(0,fc[j]-band[j])/max)*ch)+' '});
- s+=`<path d="M${lx},${ly} ${up}${lo} Z" fill="#4c8dff" opacity=".25"/>`;
- let fl='';fc.forEach((v,i)=>{fl+=(i?'L':'M'+lx+','+ly+'L')+XF(i+1)+','+(pad.t+ch-(v/max)*ch)});s+=`<path d="M${lx},${ly} `+fc.map((v,i)=>'L'+XF(i+1)+','+(pad.t+ch-(v/max)*ch)).join(' ')+'" fill="none" stroke="#7aa7ff" stroke-width="1"/></svg>`;
- el.innerHTML=s}
-function spark(el,data,color='#4c8dff'){if(!data||data.length<2){el.innerHTML='';return}const W=el.clientWidth||180,H=40,max=Math.max(1,...data);let p='';data.forEach((v,i)=>{p+=(i?'L':'M')+(i/(data.length-1))*W+','+(H-4-(v/max)*(H-8))});el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:40px"><path d="${p}" fill="none" stroke="${color}" stroke-width="1"/></svg>`}
-function showView(n){document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));$('view-'+n).classList.add('active');document.querySelectorAll('#topTabs button').forEach(b=>b.classList.toggle('active',b.dataset.view===n));$('fside').style.display=(n==='health')?'':'none';
- if(n==='health')renderHealth();if(n==='overview')renderOverview();if(n==='tracing')renderTracing();if(n==='audit')renderAudit()}
-document.querySelectorAll('#topTabs button').forEach(b=>b.addEventListener('click',()=>b.dataset.view&&showView(b.dataset.view)));
-document.querySelectorAll('#latTabs button').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('#latTabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');state.latStat=b.dataset.s;renderLatency()}));
+var state={modelFilter:new Set(),selTrace:null,selSpan:0,latStat:'avg'};
+var $=function(id){return document.getElementById(id);};
+var esc=function(v){return String(v||'').replace(/[&<>'"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c];});};
+var fmt=function(n){return Number(n||0).toLocaleString('en-US').replace(/,/g,' ');};
+var fmtK=function(n){n=Number(n||0);return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':String(Math.round(n));};
+var money=function(n){return '$'+Number(n||0).toFixed(4);};
+var P=['#a78bfa','#fb923c','#4cc38a','#e0525f','#38bdf8','#f5b84b','#8b5cf6','#4ade80','#22d3ee','#f472b6','#facc15','#94a3b8','#6ee7b7','#fda4af','#c084fc'];
+var CHECKS=[['prompt_injection','#a78bfa'],['pii_detection','#fb923c'],['tool_policy','#3ecfb2'],['dangerous_params','#e0525f'],['budget_policy','#4c8dff']];
+function toast(m){var t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(window._t);window._t=setTimeout(function(){t.classList.remove('show');},2200);}
+function api(u){return fetch(u,{credentials:'include'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();});}
+function trendPct(s){if(!s||s.length<2)return null;var a=s[0],b=s[s.length-1];if(!a&&!b)return null;var p=a===0?100:(b-a)/a*100;return p;}
+function trendHTML(p,invert){if(p===null||isNaN(p))return'<span class="dim">—</span>';var up=p>=0;var good=invert?!up:up;return '<span class="trend '+(good?'up':'down')+'">'+(up?'↗':'↘')+' '+Math.abs(p).toFixed(2)+'%</span>';}
+function areaChart(el,data,labels,color){color=color||'#a78bfa';if(!data.length){el.innerHTML='<div class="empty">No data</div>';return;}
+ var W=el.clientWidth||600,H=el.clientHeight||200,pad={l:8,r:44,t:14,b:22},cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
+ var max=Math.max.apply(null,[1].concat(data));var s='<svg viewBox="0 0 '+W+' '+H+'">';
+ var pt=function(v,i){return[pad.l+(i/Math.max(1,data.length-1))*cw,pad.t+ch-(v/max)*ch];};
+ var line='';data.forEach(function(v,i){var xy=pt(v,i);line+=(i?'L':'M')+xy[0]+','+xy[1];});
+ s+='<path d="'+line+' L'+(pad.l+cw)+','+(pad.t+ch)+' L'+pad.l+','+(pad.t+ch)+' Z" fill="'+color+'" opacity=".14"/>';
+ s+='<path d="'+line+'" fill="none" stroke="'+color+'" stroke-width="1.6"/>';
+ (labels||[]).forEach(function(l,i){if(i%Math.ceil((labels.length||1)/6))return;var x=pad.l+(i/Math.max(1,labels.length-1))*cw;s+='<text x="'+x+'" y="'+(H-6)+'" fill="#5d6375" font-size="9.5" text-anchor="middle">'+esc(l)+'</text>';});
+ s+='<text x="'+(W-4)+'" y="'+(pad.t+8)+'" fill="#9298ab" font-size="9.5" text-anchor="end">'+fmtK(max)+'</text></svg>';el.innerHTML=s;}
+function hbarsLegend(el,items,valKey,fmtFn){if(!items.length){el.innerHTML='<div class="empty">No model data yet</div>';return;}
+ var max=Math.max.apply(null,items.map(function(i){return Number(i[valKey])||0;}).concat([1e-9]));
+ var s='<div style="display:flex;gap:14px;height:100%"><div style="flex:1;display:flex;flex-direction:column;justify-content:space-around">';
+ items.forEach(function(m,i){s+='<div style="display:flex;align-items:center;gap:8px"><span style="width:170px;text-align:right;font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(m.name)+'</span><div style="flex:1;height:10px;background:#101320;border-radius:2px"><div style="width:'+(Number(m[valKey])/max*100).toFixed(1)+'%;height:100%;background:'+P[i%P.length]+';border-radius:2px"></div></div></div>';});
+ s+='<div style="display:flex;justify-content:space-between;color:var(--dim);font-size:9.5px;margin-left:178px"><span>0</span><span>'+fmtFn(max/2)+'</span><span>'+fmtFn(max)+'</span></div></div>';
+ s+='<div style="width:190px;overflow:auto;display:flex;flex-direction:column;gap:5px;font-size:10.5px;color:var(--muted)">';
+ items.forEach(function(m,i){s+='<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+P[i%P.length]+';margin-right:6px"></i>'+esc(m.name)+'</span>';});
+ s+='</div></div>';
+ el.innerHTML=s;}
+function stackedTime(el,days,map){if(!days.length){el.innerHTML='<div class="empty">No guardrail data yet</div>';return;}
+ var W=el.clientWidth||600,H=el.clientHeight||250,pad={l:30,r:8,t:10,b:20},cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
+ var totals=days.map(function(d){return CHECKS.reduce(function(a,arr){return a+(map[d+'|'+arr[0]]||0);},0);});
+ var max=Math.max.apply(null,[1].concat(totals));var bw=Math.max(2,cw/days.length-2);var s='<svg viewBox="0 0 '+W+' '+H+'">';
+ [0,.5,1].forEach(function(t){var y=pad.t+ch-t*ch;s+='<line x1="'+pad.l+'" y1="'+y+'" x2="'+(W-pad.r)+'" y2="'+y+'" stroke="#20243a" stroke-width=".5"/><text x="'+(pad.l-5)+'" y="'+(y+3)+'" fill="#5d6375" font-size="9" text-anchor="end">'+Math.round(max*t)+'</text>';});
+ days.forEach(function(d,i){var y=pad.t+ch;CHECKS.forEach(function(arr){var n=arr[0],c=arr[1];var v=map[d+'|'+n]||0;if(!v)return;var h=(v/max)*ch;y-=h;s+='<rect x="'+(pad.l+i*(cw/days.length))+'" y="'+y+'" width="'+bw+'" height="'+h+'" fill="'+c+'"/>';});});
+ days.forEach(function(d,i){if(i%Math.ceil(days.length/6))return;s+='<text x="'+(pad.l+i*(cw/days.length))+'" y="'+(H-5)+'" fill="#5d6375" font-size="9">'+esc(d.slice(5))+'</text>';});
+ el.innerHTML=s+'</svg>';}
+function multiLine(el,days,series){if(!series.length){el.innerHTML='<div class="empty">No data</div>';return;}
+ var W=el.clientWidth||600,H=el.clientHeight||300,pad={l:36,r:8,t:10,b:20},cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
+ var allVals=[];series.forEach(function(sr){allVals=allVals.concat(sr.values);});var max=Math.max.apply(null,[1].concat(allVals));var s='<svg viewBox="0 0 '+W+' '+H+'">';
+ [0,.25,.5,.75,1].forEach(function(t){var y=pad.t+ch-t*ch;s+='<line x1="'+pad.l+'" y1="'+y+'" x2="'+(W-pad.r)+'" y2="'+y+'" stroke="#20243a" stroke-width=".5"/><text x="'+(pad.l-5)+'" y="'+(y+3)+'" fill="#5d6375" font-size="9" text-anchor="end">'+fmtK(max*t)+'</text>';});
+ series.forEach(function(sr){var p='';sr.values.forEach(function(v,i){var x=pad.l+(i/Math.max(1,sr.values.length-1))*cw,y=pad.t+ch-(v/max)*ch;p+=(i?'L':'M')+x+','+y;});s+='<path d="'+p+'" fill="none" stroke="'+sr.color+'" stroke-width="1.2"/>';});
+ days.forEach(function(d,i){if(i%Math.ceil(days.length/5))return;var x=pad.l+(i/Math.max(1,days.length-1))*cw;s+='<text x="'+x+'" y="'+(H-5)+'" fill="#5d6375" font-size="9" text-anchor="middle">'+esc(d.slice(5))+'</text>';});
+ el.innerHTML=s+'</svg><div class="legend">';
+ series.forEach(function(sr){s+='<span><i style="background:'+sr.color+'"></i>'+esc(sr.name)+'</span>';});
+ el.innerHTML=s+'</div>';}
+function donut(el,okPct,okN,failN){var r1=75+56*Math.sin(Math.max(.02,(1-okPct/100)*6.283));var r2=75-56*Math.cos(Math.max(.02,(1-okPct/100)*6.283));el.innerHTML='<div style="display:flex;align-items:center;gap:18px;height:100%;justify-content:center"><svg width="150" height="150" viewBox="0 0 150 150"><circle cx="75" cy="75" r="56" fill="#2b8a5e" opacity=".9"/><path d="M75 19 A56 56 0 0 1 '+r1+' '+r2+'" stroke="var(--red2)" stroke-width="3" fill="none"/><circle cx="75" cy="75" r="34" fill="var(--card)"/><text x="75" y="72" text-anchor="middle" fill="var(--dim)" font-size="9">'+(100-okPct).toFixed(0)+'%</text><text x="75" y="86" text-anchor="middle" fill="var(--dim)" font-size="9">'+okPct.toFixed(0)+'%</text></svg><div style="font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:6px"><span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--red2);margin-right:6px"></i>Failed Requests</span><span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#2b8a5e;margin-right:6px"></i>Successful Requests</span></div></div>';}
+function forecastBand(el,hist){if(!hist||hist.length<2){el.innerHTML='<div class="empty">Not enough history</div>';return;}
+ var W=el.clientWidth||500,H=el.clientHeight||170,pad={l:26,r:6,t:10,b:16},cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
+ var delta=(hist[hist.length-1]-hist[0])/(hist.length-1);
+ var fc=[];for(var i=0;i<6;i++){fc.push(Math.max(0,hist[hist.length-1]+delta*(i+1)));}
+ var histMax=Math.max.apply(null,[1].concat(hist));
+ var band=fc.map(function(v){return Math.max(v*.25,histMax*.06);});
+ var fcWithBand=fc.map(function(v,i){return v+band[i];});
+ var max=Math.max.apply(null,hist.concat(fcWithBand))*1.1;
+ var X=function(i){return pad.l+(i/(hist.length-1))*cw*.62;};
+ var XF=function(i){return pad.l+cw*.62+(i/6)*cw*.38;};
+ var s='<svg viewBox="0 0 '+W+' '+H+'">';
+ var p='';hist.forEach(function(v,i){var y=pad.t+ch-(v/max)*ch;p+=(i?'L':'M')+X(i)+','+y;});s+='<path d="'+p+'" fill="none" stroke="#e6e8f2" stroke-width="1"/>';
+ var ly=pad.t+ch-(hist[hist.length-1]/max)*ch,lx=X(hist.length-1);
+ var up='',lo='';fc.forEach(function(v,i){up+='L'+XF(i+1)+','+(pad.t+ch-((v+band[i])/max)*ch)+' ';});
+ for(var j=fc.length-1;j>=0;j--){lo+='L'+XF(j+1)+','+(pad.t+ch-(Math.max(0,fc[j]-band[j])/max)*ch)+' ';}
+ s+='<path d="M'+lx+','+ly+' '+up+lo+' Z" fill="#4c8dff" opacity=".25"/>';
+ var fl='M'+lx+','+ly;fc.forEach(function(v,i){fl+=' L'+XF(i+1)+','+(pad.t+ch-(v/max)*ch);});s+='<path d="'+fl+'" fill="none" stroke="#7aa7ff" stroke-width="1"/></svg>';
+ el.innerHTML=s;}
+function spark(el,data,color){color=color||'#4c8dff';if(!data||data.length<2){el.innerHTML='';return;}var W=el.clientWidth||180,H=40,max=Math.max.apply(null,[1].concat(data));var p='';data.forEach(function(v,i){p+=(i?'L':'M')+(i/(data.length-1))*W+','+(H-4-(v/max)*(H-8));});el.innerHTML='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:40px"><path d="'+p+'" fill="none" stroke="'+color+'" stroke-width="1"/></svg>';}
+function showView(n){document.querySelectorAll('.view').forEach(function(v){v.classList.remove('active');});$('view-'+n).classList.add('active');document.querySelectorAll('#topTabs button').forEach(function(b){b.classList.toggle('active',b.dataset.view===n);});$('fside').style.display=(n==='health')?'':'none';
+ if(n==='health')renderHealth();if(n==='overview')renderOverview();if(n==='tracing')renderTracing();if(n==='audit')renderAudit();}
+document.querySelectorAll('#topTabs button').forEach(function(b){b.addEventListener('click',function(){if(b.dataset.view)showView(b.dataset.view);});});
+document.querySelectorAll('#latTabs button').forEach(function(b){b.addEventListener('click',function(){document.querySelectorAll('#latTabs button').forEach(function(x){x.classList.remove('active');});b.classList.add('active');state.latStat=b.dataset.s;renderLatency();});});
 function buildSidebar(){
-  const models=(state.models||[]).map(m=>m.name);
-  if(!state.modelFilter.size)models.forEach(m=>state.modelFilter.add(m));
-  
-  function makeItem(checked, onchange, name){
+  var models=(state.models||[]).map(function(m){return m.name;});
+  if(!state.modelFilter.size)models.forEach(function(m){state.modelFilter.add(m);});
+  function makeItem(checked,onchange,name){
     return '<label class="fitem"><input type="checkbox" '+(checked?'checked':'')+' onchange="'+onchange+'(this,\''+esc(name)+'\')">'+esc(name)+'</label>';
   }
-  
-  function makeGroup(title, items, checked, cb){
-    const content = items.length 
-      ? items.map(i=>makeItem(checked.has(i), cb, i)).join('')
-      : '<div class="dim" style="padding:4px 6px;font-size:11px">—</div>';
+  function makeGroup(title,items,checked,cb){
+    var content=items.length?items.map(function(i){return makeItem(checked.has(i),cb,i);}).join(''):'<div class="dim" style="padding:4px 6px;font-size:11px">—</div>';
     return '<div class="fgroup"><div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'\':\'none\'">▾ '+esc(title)+'</div><div class="fitems">'+content+'</div></div>';
   }
-  
-  const noop='noop';
+  var noop='noop';
   window.noop=function(){};
   window.toggleModel=function(el,name){
-    el.checked?state.modelFilter.add(name):state.modelFilter.delete(name);
+    if(el.checked){state.modelFilter.add(name);}else{state.modelFilter.delete(name);}
     renderHealth();
   };
-  
-  const modelItems = models.length
-    ? models.map(m=>makeItem(state.modelFilter.has(m),'toggleModel',m)).join('')
-    : '<div class="dim" style="padding:4px 6px;font-size:11px">no models yet</div>';
-  
-  $('fside').innerHTML = 
-    makeGroup('Provider',['agentguard'],new Set(['agentguard']),noop) +
-    '<div class="fgroup"><div>▾ Model</div><div class="fitems">'+modelItems+'</div></div>' +
-    makeGroup('Service',['agentguard-collector'],new Set(['agentguard-collector']),noop) +
-    makeGroup('Agent',['sdk-agent'],new Set(),noop);
+  var modelItems=models.length?models.map(function(m){return makeItem(state.modelFilter.has(m),'toggleModel',m);}).join(''):'<div class="dim" style="padding:4px 6px;font-size:11px">no models yet</div>';
+  $('fside').innerHTML=makeGroup('Provider',['agentguard'],new Set(['agentguard']),noop)+'<div class="fgroup"><div>▾ Model</div><div class="fitems">'+modelItems+'</div></div>'+makeGroup('Service',['agentguard-collector'],new Set(['agentguard-collector']),noop)+makeGroup('Agent',['sdk-agent'],new Set(),noop);
 }
-function filteredModels(){return (state.models||[]).filter(m=>state.modelFilter.has(m.name))}
+function filteredModels(){return(state.models||[]).filter(function(m){return state.modelFilter.has(m.name);});}
 function renderHealth(){buildSidebar();renderLatency();
- const m=state.metrics||{};
+ var m=state.metrics||{};
  $('tokHero').textContent=fmtK(m.total_tokens||0);
- const avg=(m.total_cost_usd||0)/Math.max(1,m.total_spans||0);
+ var avg=(m.total_cost_usd||0)/Math.max(1,m.total_spans||0);
  $('avgCostHero').innerHTML=(avg*1e6).toFixed(1)+'<span class="unit">µ$</span>';
- areaChart($('avgCostChart'),(state.costTrend||[]).map(d=>d.cost),null);
- forecastBand($('tokForecast'),(state.costTrend||[]).map(d=>d.tokens||0));
+ areaChart($('avgCostChart'),(state.costTrend||[]).map(function(d){return d.cost;}),null);
+ forecastBand($('tokForecast'),(state.costTrend||[]).map(function(d){return d.tokens||0;}));
  $('grHero').textContent=fmtK(m.total_spans||0);
- const days=[...new Set((state.checksDaily||[]).map(c=>c.day))].sort();
- const map={};(state.checksDaily||[]).forEach(c=>map[c.day+'|'+c.name]=c.flagged);
+ var daySet={};(state.checksDaily||[]).forEach(function(c){daySet[c.day]=1;});var days=Object.keys(daySet).sort();
+ var map={};(state.checksDaily||[]).forEach(function(c){map[c.day+'|'+c.name]=c.flagged;});
  stackedTime($('grStacked'),days,map);
- $('grLegend').innerHTML=CHECKS.map(([n,c])=>`<span><i style="background:${c}"></i>${n}</span>`).join('');
- hbarsLegend($('tokModel'),filteredModels().slice().sort((a,b)=>(b.input_tokens+b.output_tokens)-(a.input_tokens+a.output_tokens)),'output_tokens',v=>fmtK(v));
+ var legendHTML='';CHECKS.forEach(function(arr){legendHTML+='<span><i style="background:'+arr[1]+'"></i>'+arr[0]+'</span>';});
+ $('grLegend').innerHTML=legendHTML;
+ hbarsLegend($('tokModel'),filteredModels().slice().sort(function(a,b){return(b.input_tokens+b.output_tokens)-(a.input_tokens+a.output_tokens);}),'output_tokens',function(v){return fmtK(v);});
 }
-function renderLatency(){const m=state.metrics||{},lat=state.latencyDist||{};
- const val=state.latStat==='avg'?m.avg_latency_ms:lat[state.latStat];
+function renderLatency(){var m=state.metrics||{},lat=state.latencyDist||{};
+ var val=state.latStat==='avg'?m.avg_latency_ms:lat[state.latStat];
  $('ttrHero').innerHTML=val?(Number(val)/1000).toFixed(2)+'<span class="unit">s</span>':'—';
- areaChart($('ttrChart'),(state.dailyTrend||[]).map(d=>d.total),(state.dailyTrend||[]).map(d=>(d.day||'').slice(5)));
- hbarsLegend($('rtModel'),filteredModels().slice().sort((a,b)=>b.avg_latency_ms-a.avg_latency_ms),'avg_latency_ms',v=>Number(v).toFixed(0)+'ms')}
-function renderOverview(){const m=state.metrics||{},r=m.risk_distribution||{};
+ areaChart($('ttrChart'),(state.dailyTrend||[]).map(function(d){return d.total;}),(state.dailyTrend||[]).map(function(d){return(d.day||'').slice(5);}));
+ hbarsLegend($('rtModel'),filteredModels().slice().sort(function(a,b){return b.avg_latency_ms-a.avg_latency_ms;}),'avg_latency_ms',function(v){return Number(v).toFixed(0)+'ms';});}
+function renderOverview(){var m=state.metrics||{},r=m.risk_distribution||{};
  $('ovProblems').textContent=Number(r.high||0)+Number(r.critical||0);
  $('ovRequests').textContent=fmtK(m.total_spans||0);
- $('ovRequestsT').innerHTML=trendHTML(trendPct((state.dailyTrend||[]).map(d=>d.total)));
+ $('ovRequestsT').innerHTML=trendHTML(trendPct((state.dailyTrend||[]).map(function(d){return d.total;})));
  $('ovCost').textContent='$'+(m.total_cost_usd||0).toFixed(2);
- $('ovCostT').innerHTML=trendHTML(trendPct((state.costTrend||[]).map(d=>d.cost)),true);
- const total=Math.max(1,m.total_spans||0),blk=m.blocked_operations||0;
+ $('ovCostT').innerHTML=trendHTML(trendPct((state.costTrend||[]).map(function(d){return d.cost;})),true);
+ var total=Math.max(1,m.total_spans||0),blk=m.blocked_operations||0;
  donut($('ovDonut'),(total-blk)/total*100,total-blk,blk);
  $('ovAvg').innerHTML=(Number(m.avg_latency_ms||0)/1000).toFixed(2)+'<span class="unit">s</span>';
- $('ovAvgT').innerHTML=trendHTML(trendPct((state.dailyTrend||[]).map(d=>d.total)),true);
- $('ovP99').innerHTML=(state.latencyDist||{}).p99?((state.latencyDist.p99)/1000).toFixed(2)+'<span class="unit">s</span>':'—';
- $('ovP99T').innerHTML='<span class="trend down">↗ 8.76%</span>'.replace('8.76',(((state.latencyDist||{}).p99||0)/Math.max(1,(state.latencyDist||{}).p95||1)*8).toFixed(2));
- forecastBand($('ovForecast'),(state.costTrend||[]).map(d=>d.cost));
- const cb=state.checksBreakdown||[];const get=n=>cb.find(c=>c.check_name===n);
- const inj=get('prompt_injection'),pii=get('pii_detection'),tool=get('tool_policy')||get('dangerous_params'),bud=get('budget_policy');
- const big=(t,v)=>`<div class="card"><div class="hero mid" style="font-size:34px">${v}</div><div class="clabel" style="text-align:center;margin-top:4px">${t}</div></div>`;
- $('gqBig').innerHTML=big('Guardrail Executions','100%')+big('Prompt Injection',inj?inj.flag_rate+'%':'0%')+big('PII Leaks',pii?pii.flag_rate+'%':'0%')+big('Tool Policy',tool?tool.flag_rate+'%':'0%')+`<div class="card"><div class="clabel" style="text-align:center">ML Confidence</div><div class="hero sm" style="text-align:center">${((m.avg_ml_score||0)*100).toFixed(2)}</div><div id="spkML"></div></div>`;
- const sm=(t,v,sparkId)=>`<div class="card"><div class="clabel" style="font-size:10.5px">${t}</div><div class="hero sm">${v}</div><div id="${sparkId}"></div></div>`;
- $('gqSmall').innerHTML=sm('Overall Guardrail Activation',fmt(cb.reduce((a,c)=>a+c.flagged,0)),'s1')+sm('Blocked Prompts',fmt(m.blocked_operations||0),'s2')+sm('Prevented PII Leaks',fmt(pii?pii.flagged:0),'s3')+sm('Budget Blocks',fmt(bud?bud.flagged:0),'s4')+`<div class="card"><div class="clabel" style="font-size:10.5px">Judge Confidence</div><div class="hero sm">${((m.avg_llm_score||0)*100).toFixed(2)}</div><div id="s5"></div></div>`;
- spark($('s1'),(state.checksDaily||[]).filter(c=>c.name==='prompt_injection').map(c=>c.flagged));
- spark($('s2'),(state.dailyTrend||[]).map(d=>d.blocked));
- spark($('s3'),(state.checksDaily||[]).filter(c=>c.name==='pii_detection').map(c=>c.flagged));
- spark($('s4'),(state.checksDaily||[]).filter(c=>c.name==='budget_policy').map(c=>c.flagged));
- spark($('s5'),(state.dailyTrend||[]).map(d=>d.total));
- $('expTable').innerHTML=(state.expensive||[]).map(e=>`<tr><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.prompt||'')}">${esc(e.prompt||'—')}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.response||'—')}</td><td class="mono">${esc(e.trace_id)}</td><td class="mono">${fmt((e.input_tokens||0)+(e.output_tokens||0))}</td><td class="mono">${money(e.cost_usd)}</td></tr>`).join('')||'<tr><td colspan="5" class="empty">No spans yet</td></tr>'}
-function renderTracing(){const traces=state.traces||[];
+ $('ovAvgT').innerHTML=trendHTML(trendPct((state.dailyTrend||[]).map(function(d){return d.total;})),true);
+ var p99=(state.latencyDist||{}).p99;
+ $('ovP99').innerHTML=p99?((p99)/1000).toFixed(2)+'<span class="unit">s</span>':'—';
+ var p95=(state.latencyDist||{}).p95||1;
+ $('ovP99T').innerHTML='<span class="trend down">↗ '+(((p99||0)/Math.max(1,p95)*8).toFixed(2))+'%</span>';
+ forecastBand($('ovForecast'),(state.costTrend||[]).map(function(d){return d.cost;}));
+ var cb=state.checksBreakdown||[];var get=function(n){return cb.find(function(c){return c.check_name===n;});};
+ var inj=get('prompt_injection'),pii=get('pii_detection'),tool=get('tool_policy')||get('dangerous_params'),bud=get('budget_policy');
+ function bigCard(t,v){return '<div class="card"><div class="hero mid" style="font-size:34px">'+esc(v)+'</div><div class="clabel" style="text-align:center;margin-top:4px">'+esc(t)+'</div></div>';}
+ $('gqBig').innerHTML=bigCard('Guardrail Executions','100%')+bigCard('Prompt Injection',inj?inj.flag_rate+'%':'0%')+bigCard('PII Leaks',pii?pii.flag_rate+'%':'0%')+bigCard('Tool Policy',tool?tool.flag_rate+'%':'0%')+'<div class="card"><div class="clabel" style="text-align:center">ML Confidence</div><div class="hero sm" style="text-align:center">'+(((m.avg_ml_score||0)*100).toFixed(2))+'</div><div id="spkML"></div></div>';
+ function smCard(t,v,id){return '<div class="card"><div class="clabel" style="font-size:10.5px">'+esc(t)+'</div><div class="hero sm">'+esc(v)+'</div><div id="'+id+'"></div></div>';}
+ $('gqSmall').innerHTML=smCard('Overall Guardrail Activation',fmt(cb.reduce(function(a,c){return a+c.flagged;},0)),'s1')+smCard('Blocked Prompts',fmt(m.blocked_operations||0),'s2')+smCard('Prevented PII Leaks',fmt(pii?pii.flagged:0),'s3')+smCard('Budget Blocks',fmt(bud?bud.flagged:0),'s4')+'<div class="card"><div class="clabel" style="font-size:10.5px">Judge Confidence</div><div class="hero sm">'+(((m.avg_llm_score||0)*100).toFixed(2))+'</div><div id="s5"></div></div>';
+ spark($('s1'),(state.checksDaily||[]).filter(function(c){return c.name==='prompt_injection';}).map(function(c){return c.flagged;}));
+ spark($('s2'),(state.dailyTrend||[]).map(function(d){return d.blocked;}));
+ spark($('s3'),(state.checksDaily||[]).filter(function(c){return c.name==='pii_detection';}).map(function(c){return c.flagged;}));
+ spark($('s4'),(state.checksDaily||[]).filter(function(c){return c.name==='budget_policy';}).map(function(c){return c.flagged;}));
+ spark($('s5'),(state.dailyTrend||[]).map(function(d){return d.total;}));
+ var expRows='';(state.expensive||[]).forEach(function(e){expRows+='<tr><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(e.prompt||'')+'">'+esc(e.prompt||'—')+'</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(e.response||'—')+'</td><td class="mono">'+esc(e.trace_id)+'</td><td class="mono">'+fmt((e.input_tokens||0)+(e.output_tokens||0))+'</td><td class="mono">'+money(e.cost_usd)+'</td></tr>';});
+ $('expTable').innerHTML=expRows||'<tr><td colspan="5" class="empty">No spans yet</td></tr>';}
+function renderTracing(){var traces=state.traces||[];
  if(!state.selTrace&&traces.length)state.selTrace=traces[0].trace_id;
- $('traceSelect').innerHTML=traces.map(t=>`<option value="${esc(t.trace_id)}" ${t.trace_id===state.selTrace?'selected':''}>${esc(t.trace_id)}</option>`).join('')||'<option>—</option>';
- $('traceSelect').onchange=e=>{state.selTrace=e.target.value;loadTrace()};
- loadTrace()}
-async function loadTrace(){const id=state.selTrace;if(!id){$('spanTree').innerHTML='<div class="empty">No traces</div>';return}
- let rows=[];try{rows=await api('/api/traces/'+encodeURIComponent(id))}catch(e){}
+ var opts='';traces.forEach(function(t){opts+='<option value="'+esc(t.trace_id)+'" '+(t.trace_id===state.selTrace?'selected':'')+'>'+esc(t.trace_id)+'</option>';});
+ $('traceSelect').innerHTML=opts||'<option>—</option>';
+ $('traceSelect').onchange=function(e){state.selTrace=e.target.value;loadTrace();};
+ loadTrace();}
+function loadTrace(){var id=state.selTrace;if(!id){$('spanTree').innerHTML='<div class="empty">No traces</div>';return Promise.resolve();}
+ return api('/api/traces/'+encodeURIComponent(id)).then(function(rows){
  state.spans=rows;
- const dur=rows.reduce((a,r)=>a+Number(r.latency_ms||0),0);
+ var dur=rows.reduce(function(a,r){return a+Number(r.latency_ms||0);},0);
  $('trDur').textContent=(dur/1000).toFixed(2)+' s';
- $('trErr').textContent=rows.filter(r=>r.blocked).length;
+ $('trErr').textContent=rows.filter(function(r){return r.blocked;}).length;
  $('trId').textContent=id||'—';
  $('trDate').textContent=rows[0]?('at '+String(rows[0].created_at).slice(0,19)):'';
  $('spanCount').textContent=rows.length+' spans';
- const maxT=Math.max(1,...rows.map(r=>Number(r.latency_ms||0)));
+ var maxT=Math.max.apply(null,[1].concat(rows.map(function(r){return Number(r.latency_ms||0);})));
  $('ax0').textContent='0 ms';$('ax1').textContent=(maxT/2).toFixed(0)+' ms';$('ax2').textContent=maxT.toFixed(0)+' ms';
- const q=($('spanSearch').value||'').toLowerCase();
- $('spanTree').innerHTML=rows.map((r,i)=>{const w=Math.max(2,(Number(r.latency_ms||0)/maxT)*96);const hide=q&&!(r.span_type+' '+(r.model||'')).toLowerCase().includes(q);
-  return `<div class="span-row ${i===state.selSpan?'sel':''}" style="${hide?'display:none':''}" onclick="selectSpan(${i})"><span class="tw"><span style="color:var(--dim)">—</span><span class="dot ${r.span_type==='tool_call'?'client':''}"></span><span style="color:var(--dim);font-size:10.5px">${r.span_type==='llm_call'?'client':'internal'}</span>${esc(r.span_type)}${r.model?'.'+esc(r.model.split('-')[0]):''} ${r.blocked?'<span class="warn">⚠</span>':''}</span><span class="track"><span class="bar ${r.blocked?'blocked':''}" style="left:2%;width:${w}%"></span></span></div>`}).join('')||'<div class="empty">No spans</div>';
- $('excN').textContent=rows.filter(r=>r.blocked).length;
- $('excTable').innerHTML=rows.filter(r=>r.blocked).map((r,i)=>`<tr class="exc-row" onclick="this.nextElementSibling.hidden=!this.nextElementSibling.hidden"><td>▾</td><td class="mono">agentguard.SecurityException</td><td>${esc(r.block_reason||'blocked')}</td></tr><tr hidden><td></td><td colspan="2"><div class="pilltag">Span events: exception id: ${esc(r.span_id)}</div><div class="codeblock"><b>Exception root cause:</b> ${esc(r.block_reason||'')}\n\nTraceback (most recent call last):\n  File "agentguard_sdk.py", in guard_${esc(r.span_type)}\n    raise SecurityException(...)\n${(r.security_checks||[]).filter(c=>!c.passed).map(c=>'  🚨 '+c.check_name+' — '+c.details).join('\n')}</div></td></tr>`).join('')||'<tr><td colspan="3" class="empty">No exceptions 🎉</td></tr>';
- selectSpan(state.selSpan||0)}
-window.selectSpan=i=>{state.selSpan=i;const r=(state.spans||[])[i];if(!r)return;
- document.querySelectorAll('.span-row').forEach((el,j)=>el.classList.toggle('sel',j===i));
- const kv=(k,v,cls='')=>`<div class="attr-row"><span class="k">${k}</span><span class="v ${cls}">${esc(v)}</span></div>`;
- $('spanDetail').innerHTML=`
- <div class="card" style="margin-bottom:10px"><div style="display:flex;gap:10px;align-items:center"><span style="width:30px;height:30px;border-radius:6px;background:#3776ab;color:#fff;display:grid;place-items:center;font-weight:700">🐍</span><div><b>${esc(r.span_type)}</b><div class="dim" style="font-size:11px">Service: <a href="#">agentguard-collector</a></div></div></div>
- <div style="margin:10px 0;color:var(--muted);font-size:12px">⏱ Duration: ${Number(r.latency_ms||0).toFixed(2)} ms</div></div>
- <div class="attr-sec"><h4>gen ai <span>▾</span></h4>
-  ${kv('Gen ai agent name','agentguard-sdk')}
-  ${kv('Gen ai request model',r.model||'unknown')}
-  ${kv('Gen ai prompt 0 role','user')}
-  ${kv('Gen ai prompt 0 content',((r.input_data||{}).prompt||(r.input_data||{}).tool)||'')}
-  ${kv('Gen ai completion 0 role','assistant')}
-  ${kv('Gen ai completion 0 content',((r.output_data||{}).response||'').slice(0,400))}
-  ${kv('Gen ai usage input tokens',r.input_tokens||0,'pink')}
-  ${kv('Gen ai usage output tokens',r.output_tokens||0,'pink')}
- </div>
- <div class="attr-sec"><h4>agentguard <span>▾</span></h4>
-  ${kv('Agentguard detection layer',r.detection_layer||'regex')}
-  ${kv('Agentguard ml score',r.ml_score!=null?(r.ml_score*100).toFixed(1)+'%':'—','blue')}
-  ${kv('Agentguard llm score',r.llm_score!=null?(r.llm_score*100).toFixed(1)+'%':'blue')}
-  ${kv('Agentguard decision',r.blocked?'BLOCK':'ALLOW',r.blocked?'pink':'')}
-  ${kv('Agentguard cost usd',Number(r.cost_usd||0).toFixed(6),'pink')}
- </div>`}
-function renderAudit(){const d=new Date();const from=new Date(d-14*864e5);
+ var q=($('spanSearch').value||'').toLowerCase();
+ var treeHTML='';rows.forEach(function(r,i){var w=Math.max(2,(Number(r.latency_ms||0)/maxT)*96);var hide=q&&!(r.span_type+' '+(r.model||'')).toLowerCase().indexOf(q)===-1;
+  var dotClass=r.span_type==='tool_call'?'client':'';var clientLabel=r.span_type==='llm_call'?'client':'internal';
+  var modelPart=r.model?'.'+esc(r.model.split('-')[0]):'';var warnPart=r.blocked?'<span class="warn">⚠</span>':'';
+  treeHTML+='<div class="span-row '+(i===state.selSpan?'sel':'')+'" style="'+(hide?'display:none':'')+'" onclick="selectSpan('+i+')"><span class="tw"><span style="color:var(--dim)">—</span><span class="dot '+dotClass+'"></span><span style="color:var(--dim);font-size:10.5px">'+clientLabel+'</span>'+esc(r.span_type)+modelPart+' '+warnPart+'</span><span class="track"><span class="bar '+(r.blocked?'blocked':'')+'" style="left:2%;width:'+w+'%"></span></span></div>';});
+ $('spanTree').innerHTML=treeHTML||'<div class="empty">No spans</div>';
+ $('excN').textContent=rows.filter(function(r){return r.blocked;}).length;
+ var excHTML='';rows.filter(function(r){return r.blocked;}).forEach(function(r,i){
+  var checksFailed=(r.security_checks||[]).filter(function(c){return !c.passed;}).map(function(c){return '  🚨 '+c.check_name+' — '+c.details;}).join('\n');
+  excHTML+='<tr class="exc-row" onclick="this.nextElementSibling.hidden=!this.nextElementSibling.hidden"><td>▾</td><td class="mono">agentguard.SecurityException</td><td>'+esc(r.block_reason||'blocked')+'</td></tr><tr hidden><td></td><td colspan="2"><div class="pilltag">Span events: exception id: '+esc(r.span_id)+'</div><div class="codeblock"><b>Exception root cause:</b> '+esc(r.block_reason||'')+'\n\nTraceback (most recent call last):\n  File "agentguard_sdk.py", in guard_'+esc(r.span_type)+'\n    raise SecurityException(...)\n'+checksFailed+'</div></td></tr>';});
+ $('excTable').innerHTML=excHTML||'<tr><td colspan="3" class="empty">No exceptions 🎉</td></tr>';
+ selectSpan(state.selSpan||0);}).catch(function(){$('spanTree').innerHTML='<div class="empty">Error loading trace</div>';});}
+window.selectSpan=function(i){state.selSpan=i;var r=(state.spans||[])[i];if(!r)return;
+ document.querySelectorAll('.span-row').forEach(function(el,j){el.classList.toggle('sel',j===i);});
+ function kv(k,v,cls){cls=cls||'';return '<div class="attr-row"><span class="k">'+esc(k)+'</span><span class="v '+cls+'">'+esc(v)+'</span></div>';}
+ var prompt=((r.input_data||{}).prompt||(r.input_data||{}).tool)||'';
+ var response=((r.output_data||{}).response||'').slice(0,400);
+ var mlScore=r.ml_score!=null?(r.ml_score*100).toFixed(1)+'%':'—';
+ var llmScore=r.llm_score!=null?(r.llm_score*100).toFixed(1)+'%':'—';
+ var decision=r.blocked?'BLOCK':'ALLOW';
+ var decisionClass=r.blocked?'pink':'';
+ $('spanDetail').innerHTML='<div class="card" style="margin-bottom:10px"><div style="display:flex;gap:10px;align-items:center"><span style="width:30px;height:30px;border-radius:6px;background:#3776ab;color:#fff;display:grid;place-items:center;font-weight:700">🐍</span><div><b>'+esc(r.span_type)+'</b><div class="dim" style="font-size:11px">Service: <a href="#">agentguard-collector</a></div></div></div><div style="margin:10px 0;color:var(--muted);font-size:12px">⏱ Duration: '+Number(r.latency_ms||0).toFixed(2)+' ms</div></div><div class="attr-sec"><h4>gen ai <span>▾</span></h4>'+kv('Gen ai agent name','agentguard-sdk')+kv('Gen ai request model',r.model||'unknown')+kv('Gen ai prompt 0 role','user')+kv('Gen ai prompt 0 content',prompt)+kv('Gen ai completion 0 role','assistant')+kv('Gen ai completion 0 content',response)+kv('Gen ai usage input tokens',r.input_tokens||0,'pink')+kv('Gen ai usage output tokens',r.output_tokens||0,'pink')+'</div><div class="attr-sec"><h4>agentguard <span>▾</span></h4>'+kv('Agentguard detection layer',r.detection_layer||'regex')+kv('Agentguard ml score',mlScore,'blue')+kv('Agentguard llm score',llmScore,'blue')+kv('Agentguard decision',decision,decisionClass)+kv('Agentguard cost usd',Number(r.cost_usd||0).toFixed(6),'pink')+'</div>';};
+function renderAudit(){var d=new Date();var from=new Date(d-14*864e5);
  $('auRange').textContent=from.toDateString().slice(4)+' - '+d.toDateString().slice(4);
- $('auModels').innerHTML=(state.models||[]).slice().sort((a,b)=>b.requests-a.requests).map(m=>`<tr><td>${esc(m.name)}</td><td style="text-align:right" class="mono">${fmt(m.requests)}</td></tr>`).join('')||'<tr><td colspan="2" class="empty">No models</td></tr>';
- const days=[...new Set((state.modelsDaily||[]).map(x=>x.day))].sort();
- const names=[...new Set((state.modelsDaily||[]).map(x=>x.model))].slice(0,10);
- const series=names.map((n,i)=>({name:n,color:P[i%P.length],values:days.map(dy=>{const f=(state.modelsDaily||[]).find(x=>x.day===dy&&x.model===n);return f?f.n:0})}));
+ var modelsHTML='';(state.models||[]).slice().sort(function(a,b){return b.requests-a.requests;}).forEach(function(m){modelsHTML+='<tr><td>'+esc(m.name)+'</td><td style="text-align:right" class="mono">'+fmt(m.requests)+'</td></tr>';});
+ $('auModels').innerHTML=modelsHTML||'<tr><td colspan="2" class="empty">No models</td></tr>';
+ var daySet={};(state.modelsDaily||[]).forEach(function(x){daySet[x.day]=1;});var days=Object.keys(daySet).sort();
+ var nameSet={};(state.modelsDaily||[]).forEach(function(x){nameSet[x.model]=1;});var names=Object.keys(nameSet).slice(0,10);
+ var series=names.map(function(n,i){return{name:n,color:P[i%P.length],values:days.map(function(dy){var f=(state.modelsDaily||[]).find(function(x){return x.day===dy&&x.model===n;});return f?f.n:0;});};});
  multiLine($('auTrend'),days,series);
- $('auTrail').innerHTML=(state.audit||[]).map(r=>`<tr><td class="dim">${esc(String(r.timestamp).replace(' ',' , ').slice(0,20))}</td><td class="mono">${esc(r.trace_id)}${esc(r.span_id||'').slice(0,4)}</td><td>agentguard</td><td class="mono">agentguard.security</td><td>${esc(r.model)}</td><td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.prompt)}">${esc(r.prompt)||'—'}</td><td>${esc(r.span_type)}</td><td>${esc(r.layer)}</td><td class="mono">${r.blocked?'PromptType.BLOCKED':'PromptType.INPUT'}</td></tr>`).join('')||'<tr><td colspan="9" class="empty">No audit events</td></tr>'}
-async function refreshAll(){try{
- const [m,t,d,models,checks,heatmap,expensive,costTrend,latencyDist,recentEvents,dailyTrend,audit,checksDaily,modelsDaily]=await Promise.all([
-  api('/api/metrics'),api('/api/traces'),api('/api/detection/stats'),api('/api/models'),api('/api/checks/breakdown'),api('/api/heatmap'),api('/api/spans/expensive'),api('/api/cost/trend'),api('/api/latency/distribution'),api('/api/events/recent'),api('/api/trend/daily'),api('/api/audit/trail'),api('/api/checks/daily'),api('/api/models/daily')]);
- Object.assign(state,{metrics:m,traces:t,detection:d,models,checksBreakdown:checks,heatmap,expensive,costTrend,latencyDist,recentEvents,dailyTrend,audit,checksDaily,modelsDaily});
- const active=document.querySelector('.view.active').id.replace('view-','');
- showView(active);toast('Dashboard refreshed');
-}catch(e){toast('Collector unavailable: '+e.message)}}
+ var trailHTML='';(state.audit||[]).forEach(function(r){trailHTML+='<tr><td class="dim">'+esc(String(r.timestamp).replace(' ',' , ').slice(0,20))+'</td><td class="mono">'+esc(r.trace_id)+esc((r.span_id||'').slice(0,4))+'</td><td>agentguard</td><td class="mono">agentguard.security</td><td>'+esc(r.model)+'</td><td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(r.prompt)+'">'+esc(r.prompt||'—')+'</td><td>'+esc(r.span_type)+'</td><td>'+esc(r.layer)+'</td><td class="mono">'+(r.blocked?'PromptType.BLOCKED':'PromptType.INPUT')+'</td></tr>';});
+ $('auTrail').innerHTML=trailHTML||'<tr><td colspan="9" class="empty">No audit events</td></tr>';}
+function refreshAll(){Promise.all([
+ api('/api/metrics'),api('/api/traces'),api('/api/detection/stats'),api('/api/models'),api('/api/checks/breakdown'),api('/api/heatmap'),api('/api/spans/expensive'),api('/api/cost/trend'),api('/api/latency/distribution'),api('/api/events/recent'),api('/api/trend/daily'),api('/api/audit/trail'),api('/api/checks/daily'),api('/api/models/daily')]).then(function(results){
+ var m=results[0],t=results[1],d=results[2],models=results[3],checks=results[4],heatmap=results[5],expensive=results[6],costTrend=results[7],latencyDist=results[8],recentEvents=results[9],dailyTrend=results[10],audit=results[11],checksDaily=results[12],modelsDaily=results[13];
+ state.metrics=m;state.traces=t;state.detection=d;state.models=models;state.checksBreakdown=checks;state.heatmap=heatmap;state.expensive=expensive;state.costTrend=costTrend;state.latencyDist=latencyDist;state.recentEvents=recentEvents;state.dailyTrend=dailyTrend;state.audit=audit;state.checksDaily=checksDaily;state.modelsDaily=modelsDaily;
+ var active=document.querySelector('.view.active').id.replace('view-','');
+ showView(active);toast('Dashboard refreshed');}).catch(function(e){toast('Collector unavailable: '+e.message);});}
 refreshAll();setInterval(refreshAll,20000);
 </script>
 </body>
