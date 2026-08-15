@@ -189,15 +189,33 @@ class PolicyEngine:
                 self._allowed_tools.update(policy.get("allowed_tools", []))
 
     def _init_presidio(self):
-        """Initialise Presidio pour détection PII robuste."""
+        """Initialise Presidio pour détection PII robuste.
+
+        Le comportement par défaut de Presidio/spaCy est de TÉLÉCHARGER le
+        modèle manquant à l'exécution — un appel réseau bloquant au
+        démarrage, et surtout spacy.cli.download() appelle sys.exit(1) en
+        cas d'échec (pas de ImportError, pas de RuntimeError : un
+        SystemExit, qu'un `except Exception` classique ne rattrape PAS).
+        Résultat mesuré : tout le process (app, tests, CI) plantait au
+        démarrage dès que le modèle n'était pas déjà présent — offline,
+        réseau restreint, ou simplement premier lancement.
+        On vérifie d'abord que le modèle est déjà installé ; sinon on
+        bascule sur le fallback regex plutôt que de tenter le téléchargement.
+        """
         try:
+            import spacy
+            model_name = "en_core_web_lg"
+            if not spacy.util.is_package(model_name):
+                logger.warning("presidio_model_missing_using_regex_fallback", model=model_name)
+                self._pii_analyzer = None
+                return
             from presidio_analyzer import AnalyzerEngine, RecognizerRegistry
             registry = RecognizerRegistry()
             registry.load_predefined_recognizers()
             self._pii_analyzer = AnalyzerEngine(registry=registry)
             logger.info("presidio_initialized")
-        except ImportError:
-            logger.warning("presidio_unavailable_using_regex_fallback")
+        except (ImportError, SystemExit, Exception) as e:
+            logger.warning("presidio_unavailable_using_regex_fallback", error=str(e))
             self._pii_analyzer = None
 
     @staticmethod
@@ -227,7 +245,7 @@ class PolicyEngine:
             r"\bnew\s+instructions?\s*:",
             r"\[(?:system|admin|override)\]",
             r"\breveal\s+(?:your\s+|the\s+)?system\s+prompt\b",
-            r"\brepeat\w{0,20}\babove\b",
+            r"\brepeat\b.{0,25}\babove\b",
             r"\b(?:with|that\s+has|and)\s+no\s+(?:restrictions|limits|filters)\b",
             r"\bdo\s+anything\s+now\b",
             r"\b(?:DAN|developer)\s+mode\b",
@@ -244,6 +262,15 @@ class PolicyEngine:
             r"\brm\s+-rf\b",
             r"\bgrant\s+(?:full|admin|root)\s+access\b",
             r"\bcreate\s+(?:admin|backdoor)\s+user\b",
+            # Équivalents FR — disparus d'un précédent refactor (patterns
+            # "linéaires anti-ReDoS"), alors qu'ils l'étaient déjà : \s+ sur
+            # une longueur bornée par des mots-clés fixes ne backtrack pas.
+            r"\bignore\s+(?:les|ces)\s+instructions\s+(?:précédentes|pr[ée]c[ée]dentes)\b",
+            r"\boublie\s+(?:tes|vos)\s+instructions\b",
+            r"\btu\s+es\s+maintenant\s+en\s+mode\s+(?:développeur|admin|dan)\b",
+            r"\bnouvelles?\s+instructions?\s*:",
+            r"\br[ée]v[èe]le\s+(?:ton|le)\s+(?:prompt|invite)\s+syst[èe]me\b",
+            r"\bignore\s+ce\s+qui\s+pr[ée]c[èe]de\b",
             # Patterns PII sécurisés (longueur fixe = pas de backtracking)
             r"\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,24}\b",
             r"\b\d{3}-\d{2}-\d{4}\b",
@@ -259,6 +286,8 @@ class PolicyEngine:
             r"\bact\s+as\s+if\s+you\s+(?:are|were)\b",
             r"\bimagine\s+that\s+you\s+are\b",
             r"\bwhat\s+if\s+you\s+were\b",
+            r"\bcomme\s+si\s+tu\s+(?:es|étais)\b",
+            r"\bjoue\s+le\s+r[ôo]le\s+de\b",
         ]
 
         PolicyEngine._STRONG_PATTERNS = re.compile(
@@ -537,14 +566,19 @@ class PolicyEngine:
             if not check.passed:
                 return check
 
-        # 4. Mots-clés dangereux génériques
+        # 4. Mots-clés dangereux génériques — s'applique à TOUS les outils,
+        # pas seulement execute_command : un payload de type shell-injection
+        # peut être glissé dans le paramètre de n'importe quel outil (ex:
+        # read_file({"path": "/etc/passwd; rm -rf /"})). Restreindre cette
+        # détection à execute_command laissait passer ce genre de cas.
         try:
             params_string = json.dumps(params, default=str)
         except Exception:
             params_string = str(params)
 
         dangerous_patterns = re.compile(
-            r"\b(?:delete_all|drop\s+table|truncate|drop\s+database)\b",
+            r"\b(?:delete_all|drop\s+table|truncate|drop\s+database|rm\s+-rf|"
+            r"sudo|chmod\s+777|mkfs|dd\s+if=)\b",
             re.IGNORECASE,
         )
 
