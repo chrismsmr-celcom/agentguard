@@ -1,21 +1,23 @@
 services:
   collector:
-    build: .
+    build:
+      context: .
+      args:
+        INSTALL_ML: ${INSTALL_ML:-false}
+        PRELOAD_MODEL: ${PRELOAD_MODEL:-false}
+    image: agentguard:latest
     ports:
       - "8080:8080"
     environment:
       PORT: 8080
       AGENTGUARD_DB_TYPE: postgres
       DATABASE_URL: postgresql://agentguard:${POSTGRES_PASSWORD}@postgres:5432/agentguard
-
       AGENTGUARD_API_KEY: ${AGENTGUARD_API_KEY}
       AGENTGUARD_ADMIN_SECRET: ${AGENTGUARD_ADMIN_SECRET}
       AGENTGUARD_FLASK_SECRET: ${AGENTGUARD_FLASK_SECRET}
-
       AGENTGUARD_MAX_BODY_BYTES: "262144"
       AGENTGUARD_AUTH_SESSION_TTL: "900"
       AGENTGUARD_CORS_ORIGINS: ${AGENTGUARD_CORS_ORIGINS:-http://localhost:8080}
-
       AGENTGUARD_USE_ML: ${AGENTGUARD_USE_ML:-false}
       AGENTGUARD_USE_LLM_JUDGE: ${AGENTGUARD_USE_LLM_JUDGE:-false}
       AGENTGUARD_JUDGE_API_KEY: ${DEEPSEEK_API_KEY:-}
@@ -23,14 +25,12 @@ services:
       AGENTGUARD_ML_THRESHOLD: ${AGENTGUARD_ML_THRESHOLD:-0.85}
       AGENTGUARD_BLOCK_ON_AMBIGUOUS: ${AGENTGUARD_BLOCK_ON_AMBIGUOUS:-false}
       AGENTGUARD_DETECTOR_FAILURE_MODE: ${AGENTGUARD_DETECTOR_FAILURE_MODE:-fail_closed}
-
       AGENTGUARD_RATE_LIMIT: ${AGENTGUARD_RATE_LIMIT:-120 per minute}
       AGENTGUARD_SPAN_RATE_LIMIT: ${AGENTGUARD_SPAN_RATE_LIMIT:-30 per minute}
       AGENTGUARD_LIMITER_STORAGE: redis://redis:6379/0
-
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
       GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
-
+      AGENTGUARD_LOG_LEVEL: ${AGENTGUARD_LOG_LEVEL:-INFO}
     depends_on:
       postgres:
         condition: service_healthy
@@ -38,6 +38,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
     read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     tmpfs:
       - /tmp
     volumes:
@@ -48,6 +52,14 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
     networks:
       - agentguard_network
 
@@ -65,12 +77,20 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     networks:
       - agentguard_network
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     healthcheck:
@@ -79,6 +99,10 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     networks:
       - agentguard_network
 
@@ -90,4 +114,3 @@ volumes:
 networks:
   agentguard_network:
     driver: bridge
-
