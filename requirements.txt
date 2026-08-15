@@ -45,8 +45,8 @@ psycopg2-binary==2.9.9     # PostgreSQL (pour dev/simple deploy)
 # -----------------------------------------------------------------------------
 # VALIDATION & SERIALIZATION
 # -----------------------------------------------------------------------------
-pydantic==2.5.3            # Validation stricte des payloads API
-pydantic-settings==2.1.0   # Configuration via variables d'env
+pydantic>=2.7.0,<3.0.0            # Validation stricte des payloads API
+pydantic-settings>=2.2.0,<3.0.0   # Configuration via variables d'env
 
 # -----------------------------------------------------------------------------
 # OBSERVABILITY - Logging & Tracing (OpenTelemetry)
