@@ -1,31 +1,6 @@
-# =============================================================================
-# AgentGuard - Development Dependencies
-# =============================================================================
-# Installe avec : pip install -r requirements-dev.txt
-# =============================================================================
-
 -r requirements.txt
-
-# Testing
-pytest==8.0.0
-pytest-cov==4.1.0
-pytest-mock==3.12.0
-pytest-asyncio==0.23.3     # Pour tests async
-responses==0.24.1          # Mock HTTP requests
-freezegun==1.3.1           # Mock time pour tests
-
-# Linting & Type Checking
-ruff==0.1.11               # Linter ultra-rapide (remplace flake8+black+isort)
-mypy==1.8.0
-types-requests==2.31.0.20240125
-types-redis==4.6.0.20240106
-
-# Security Scanning
-bandit==1.7.6              # Détection de vulnérabilités Python
-safety==2.4.0b1            # Vérification CVE dans les dépendances
-
-# Database Migrations
-alembic==1.13.1            # Migrations PostgreSQL (recommandé pour prod)
-
-# Load Testing
-locust==2.20.1             # Tests de charge
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.0
+pytest-timeout>=2.1.0
+fakeredis>=2.20.0
