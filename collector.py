@@ -1335,7 +1335,7 @@ tr:hover td{background:#191c29}
 <script>
 const state={modelFilter:new Set(),selTrace:null,selSpan:0,latStat:'avg'};
 const $=id=>document.getElementById(id);
-const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+const esc=v=>String(v||'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const fmt=n=>Number(n||0).toLocaleString('en-US').replace(/,/g,' ');
 const fmtK=n=>{n=Number(n||0);return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':String(Math.round(n))};
 const money=n=>'$'+Number(n||0).toFixed(4);
