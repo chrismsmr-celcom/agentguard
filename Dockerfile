@@ -1,5 +1,5 @@
 # =============================================================================
-# AgentGuard - Production Dockerfile (Multi-stage, Non-root, Air-gapped ready)
+# AgentGuard - Production Dockerfile (Multi-stage, Non-root, Render-ready)
 # =============================================================================
 # Build : docker build -t agentguard:latest .
 # Build avec ML : docker build --build-arg INSTALL_ML=true -t agentguard:ml .
@@ -24,25 +24,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Upgrade pip + install requirements (avec cache Docker pour rebuild rapide)
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip setuptools wheel
 
-# Copie requirements en premier (meilleur cache Docker)
 COPY requirements.txt .
-# requirements-ml.txt optionnel : on crée un fichier vide s'il n'existe pas
 COPY requirements-ml.tx[t] . 2>/dev/null || true
+
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir -r requirements.txt
 
-# Installation conditionnelle des dépendances ML
 ARG INSTALL_ML=false
 RUN --mount=type=cache,target=/root/.cache/pip \
     if [ "$INSTALL_ML" = "true" ] && [ -f requirements-ml.txt ]; then \
         pip install --no-cache-dir -r requirements-ml.txt; \
     fi
 
-# Installation de huggingface_hub pour le preload (léger, ~2MB)
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir huggingface_hub
 
@@ -51,13 +47,11 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # -----------------------------------------------------------------------------
 FROM python:3.11-slim AS runtime
 
-# Labels OCI
 LABEL maintainer="Christopher Dikesa <chris@agentguard.dev>"
 LABEL org.opencontainers.image.title="AgentGuard"
 LABEL org.opencontainers.image.description="Runtime Security for AI Agents"
 LABEL org.opencontainers.image.version="5.0"
 
-# Dépendances runtime minimales + création user non-root
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
@@ -71,14 +65,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copie du venv depuis le builder
 COPY --from=builder --chown=agentguard:agentguard /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copie du code source (utilise .dockerignore pour exclure .git, .env, etc.)
 COPY --chown=agentguard:agentguard . .
 
-# Pré-téléchargement du modèle ML (optionnel, activé par build-arg)
 ARG PRELOAD_MODEL=false
 ARG MODEL_NAME=protectai/deberta-v3-base-prompt-injection-v2
 RUN if [ "$PRELOAD_MODEL" = "true" ]; then \
@@ -88,7 +79,6 @@ RUN if [ "$PRELOAD_MODEL" = "true" ]; then \
         chown -R agentguard:agentguard /app/models; \
     fi
 
-# Variables d'environnement par défaut
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
@@ -99,19 +89,17 @@ ENV PYTHONUNBUFFERED=1 \
     WEB_CONCURRENCY=2 \
     GUNICORN_THREADS=4
 
-# Healthcheck hardcodé (pas de variable shell = toujours fiable)
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8080/healthz || exit 1
+# ✅ CORRECTION CRITIQUE : healthcheck dynamique via shell pour lire $PORT
+# (Render injecte PORT=10000 par défaut, Gunicorn écoutera sur ce port)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS "http://127.0.0.1:${PORT:-8080}/healthz" || exit 1
 
 EXPOSE 8080
 
-# Utilisateur non-root
 USER agentguard
 
-# Tini comme PID 1 (gestion propre de SIGTERM)
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
-# ⚠️ Forme shell pour résoudre les variables d'environnement
 CMD ["sh", "-c", "exec gunicorn \
     --bind 0.0.0.0:${PORT:-8080} \
     --workers ${WEB_CONCURRENCY:-2} \
