@@ -419,6 +419,10 @@ def receive_span():
     data.setdefault("output_data", {})
     data.setdefault("security_checks", [])
     data.setdefault("blocked", False)
+    
+# ✅ AJOUTE CES 2 LIGNES ICI
+    data["input_data"] = redact_pii(data.get("input_data", {}))
+    data["output_data"] = redact_pii(data.get("output_data", {}))
 
     is_pg = DB_TYPE == "postgres" and DATABASE_URL
 
