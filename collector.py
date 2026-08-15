@@ -1397,16 +1397,38 @@ function showView(n){document.querySelectorAll('.view').forEach(v=>v.classList.r
  if(n==='health')renderHealth();if(n==='overview')renderOverview();if(n==='tracing')renderTracing();if(n==='audit')renderAudit()}
 document.querySelectorAll('#topTabs button').forEach(b=>b.addEventListener('click',()=>b.dataset.view&&showView(b.dataset.view)));
 document.querySelectorAll('#latTabs button').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('#latTabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');state.latStat=b.dataset.s;renderLatency()}));
-function buildSidebar(){const models=(state.models||[]).map(m=>m.name);
- const grp=(title,items,checked,cb)=>`<div class="fgroup"><div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none'">▾ ${title}</div><div class="fitems">${items.map(i=>`<label class="fitem"><input type="checkbox" ${checked.has(i)?'checked':''} onchange="${cb}(this,'${esc(i)}')">${esc(i)}</label>`).join('')||'<div class="dim" style="padding:4px 6px;font-size:11px">—</div>'}</div></div>`;
- window.toggleModel=(el,name)=>{el.checked?state.modelFilter.add(name):state.modelFilter.delete(name);renderHealth()};
- window.noop=()=>{};
- if(!state.modelFilter.size)models.forEach(m=>state.modelFilter.add(m));
- $('fside').innerHTML=
-  grp('Provider',['agentguard'],new Set(['agentguard']),'noop')+
-  `<div class="fgroup"><div>▾ Model</div><div class="fitems">${models.map(m=>`<label class="fitem"><input type="checkbox" ${state.modelFilter.has(m)?'checked':''} onchange="toggleModel(this,'${esc(m)}')">${esc(m)}</label>`).join('')||'<div class="dim" style="padding:4px 6px;font-size:11px">no models yet</div>'}</div></div>`+
-  grp('Service',['agentguard-collector'],new Set(['agentguard-collector']),'noop')+
-  grp('Agent',['sdk-agent'],new Set(),'noop')}
+function buildSidebar(){
+  const models=(state.models||[]).map(m=>m.name);
+  if(!state.modelFilter.size)models.forEach(m=>state.modelFilter.add(m));
+  
+  function makeItem(checked, onchange, name){
+    return '<label class="fitem"><input type="checkbox" '+(checked?'checked':'')+' onchange="'+onchange+'(this,\''+esc(name)+'\')">'+esc(name)+'</label>';
+  }
+  
+  function makeGroup(title, items, checked, cb){
+    const content = items.length 
+      ? items.map(i=>makeItem(checked.has(i), cb, i)).join('')
+      : '<div class="dim" style="padding:4px 6px;font-size:11px">—</div>';
+    return '<div class="fgroup"><div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'\':\'none\'">▾ '+esc(title)+'</div><div class="fitems">'+content+'</div></div>';
+  }
+  
+  const noop='noop';
+  window.noop=function(){};
+  window.toggleModel=function(el,name){
+    el.checked?state.modelFilter.add(name):state.modelFilter.delete(name);
+    renderHealth();
+  };
+  
+  const modelItems = models.length
+    ? models.map(m=>makeItem(state.modelFilter.has(m),'toggleModel',m)).join('')
+    : '<div class="dim" style="padding:4px 6px;font-size:11px">no models yet</div>';
+  
+  $('fside').innerHTML = 
+    makeGroup('Provider',['agentguard'],new Set(['agentguard']),noop) +
+    '<div class="fgroup"><div>▾ Model</div><div class="fitems">'+modelItems+'</div></div>' +
+    makeGroup('Service',['agentguard-collector'],new Set(['agentguard-collector']),noop) +
+    makeGroup('Agent',['sdk-agent'],new Set(),noop);
+}
 function filteredModels(){return (state.models||[]).filter(m=>state.modelFilter.has(m.name))}
 function renderHealth(){buildSidebar();renderLatency();
  const m=state.metrics||{};
