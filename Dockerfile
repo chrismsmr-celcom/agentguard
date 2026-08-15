@@ -1,73 +1,91 @@
 # =============================================================================
 # AgentGuard - Production Dockerfile (Multi-stage, Non-root, Air-gapped ready)
 # =============================================================================
+# Build : docker build -t agentguard:latest .
+# Build avec ML : docker build --build-arg INSTALL_ML=true -t agentguard:ml .
+# =============================================================================
 
 # -----------------------------------------------------------------------------
-# Stage 1: Builder - Installation des dépendances
+# Stage 1: Builder — Installation des dépendances Python
 # -----------------------------------------------------------------------------
 FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
-# Dépendances système pour compilation
+# Dépendances système pour compilation (wheel Rust/C)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    g++ \
     libpq-dev \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copie requirements et installation dans venv
-COPY requirements.txt .
+# Création du venv isolé
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir --upgrade pip && \
+
+# Upgrade pip + install requirements (avec cache Docker pour rebuild rapide)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip setuptools wheel
+
+# Copie requirements en premier (meilleur cache Docker)
+COPY requirements.txt .
+# requirements-ml.txt optionnel : on crée un fichier vide s'il n'existe pas
+COPY requirements-ml.tx[t] . 2>/dev/null || true
+RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir -r requirements.txt
 
-# Installation optionnelle des dépendances ML
+# Installation conditionnelle des dépendances ML
 ARG INSTALL_ML=false
-COPY requirements-ml.txt .
-RUN if [ "$INSTALL_ML" = "true" ]; then \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    if [ "$INSTALL_ML" = "true" ] && [ -f requirements-ml.txt ]; then \
         pip install --no-cache-dir -r requirements-ml.txt; \
     fi
 
+# Installation de huggingface_hub pour le preload (léger, ~2MB)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir huggingface_hub
+
 # -----------------------------------------------------------------------------
-# Stage 2: Runtime - Image minimale et sécurisée
+# Stage 2: Runtime — Image minimale et sécurisée
 # -----------------------------------------------------------------------------
 FROM python:3.11-slim AS runtime
 
 # Labels OCI
-LABEL maintainer="Christopher Dikesa"
+LABEL maintainer="Christopher Dikesa <chris@agentguard.dev>"
 LABEL org.opencontainers.image.title="AgentGuard"
 LABEL org.opencontainers.image.description="Runtime Security for AI Agents"
+LABEL org.opencontainers.image.version="5.0"
 
-# Dépendances runtime uniquement
+# Dépendances runtime minimales + création user non-root
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
     tini \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -r agentguard -g 1001 \
-    && useradd -r -u 1001 -g agentguard -d /app -s /sbin/nologin agentguard
+    && useradd -r -u 1001 -g agentguard -d /app -s /sbin/nologin agentguard \
+    && mkdir -p /data /app/models /tmp/agentguard \
+    && chown -R agentguard:agentguard /data /app/models /tmp/agentguard
 
 WORKDIR /app
 
 # Copie du venv depuis le builder
-COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder --chown=agentguard:agentguard /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copie du code source
-COPY . .
+# Copie du code source (utilise .dockerignore pour exclure .git, .env, etc.)
+COPY --chown=agentguard:agentguard . .
 
-# Création des dossiers de données
-RUN mkdir -p /data /app/models /tmp/agentguard \
-    && chown -R agentguard:agentguard /data /app/models /tmp/agentguard
-
-# Pré-téléchargement du modèle ML (optionnel, activé par argument)
+# Pré-téléchargement du modèle ML (optionnel, activé par build-arg)
 ARG PRELOAD_MODEL=false
 ARG MODEL_NAME=protectai/deberta-v3-base-prompt-injection-v2
 RUN if [ "$PRELOAD_MODEL" = "true" ]; then \
+        echo "📥 Preloading ML model: ${MODEL_NAME}" && \
         python -c "from huggingface_hub import snapshot_download; \
-                   snapshot_download('${MODEL_NAME}', local_dir='/app/models/prompt-injection')" || true; \
+                   snapshot_download('${MODEL_NAME}', local_dir='/app/models/prompt-injection')" && \
+        chown -R agentguard:agentguard /app/models; \
     fi
 
 # Variables d'environnement par défaut
@@ -77,32 +95,33 @@ ENV PYTHONUNBUFFERED=1 \
     PORT=8080 \
     AGENTGUARD_DB_TYPE=sqlite \
     AGENTGUARD_DB_PATH=/data/agentguard.db \
-    AGENTGUARD_LOG_LEVEL=INFO
+    AGENTGUARD_LOG_LEVEL=INFO \
+    WEB_CONCURRENCY=2 \
+    GUNICORN_THREADS=4
 
-# Healthcheck optimisé
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:${PORT}/healthz || exit 1
+# Healthcheck hardcodé (pas de variable shell = toujours fiable)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8080/healthz || exit 1
 
-# Exposition du port
-EXPOSE ${PORT}
+EXPOSE 8080
 
 # Utilisateur non-root
 USER agentguard
 
-# Point d'entrée avec tini (gestion propre des signaux)
+# Tini comme PID 1 (gestion propre de SIGTERM)
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
-# Commande Gunicorn optimisée pour production
-CMD ["gunicorn", \
-     "--bind", "0.0.0.0:${PORT}", \
-     "--workers", "${WEB_CONCURRENCY:-2}", \
-     "--threads", "${GUNICORN_THREADS:-4}", \
-     "--timeout", "120", \
-     "--keep-alive", "5", \
-     "--max-requests", "1000", \
-     "--max-requests-jitter", "100", \
-     "--worker-class", "gthread", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-", \
-     "--capture-output", \
-     "wsgi:app"]
+# ⚠️ Forme shell pour résoudre les variables d'environnement
+CMD ["sh", "-c", "exec gunicorn \
+    --bind 0.0.0.0:${PORT:-8080} \
+    --workers ${WEB_CONCURRENCY:-2} \
+    --threads ${GUNICORN_THREADS:-4} \
+    --timeout 120 \
+    --keep-alive 5 \
+    --max-requests 1000 \
+    --max-requests-jitter 100 \
+    --worker-class gthread \
+    --access-logfile - \
+    --error-logfile - \
+    --capture-output \
+    wsgi:app"]
