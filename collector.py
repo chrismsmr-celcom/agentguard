@@ -1500,7 +1500,7 @@ function renderAudit(){var d=new Date();var from=new Date(d-14*864e5);
  $('auModels').innerHTML=modelsHTML||'<tr><td colspan="2" class="empty">No models</td></tr>';
  var daySet={};(state.modelsDaily||[]).forEach(function(x){daySet[x.day]=1;});var days=Object.keys(daySet).sort();
  var nameSet={};(state.modelsDaily||[]).forEach(function(x){nameSet[x.model]=1;});var names=Object.keys(nameSet).slice(0,10);
- var series=names.map(function(n,i){return{name:n,color:P[i%P.length],values:days.map(function(dy){var f=(state.modelsDaily||[]).find(function(x){return x.day===dy&&x.model===n;});return f?f.n:0;});};});
+ var series=names.map(function(n,i){return{name:n,color:P[i%P.length],values:days.map(function(dy){var f=(state.modelsDaily||[]).find(function(x){return x.day===dy&&x.model===n;});return f?f.n:0;});};})
  multiLine($('auTrend'),days,series);
  var trailHTML='';(state.audit||[]).forEach(function(r){trailHTML+='<tr><td class="dim">'+esc(String(r.timestamp).replace(' ',' , ').slice(0,20))+'</td><td class="mono">'+esc(r.trace_id)+esc((r.span_id||'').slice(0,4))+'</td><td>agentguard</td><td class="mono">agentguard.security</td><td>'+esc(r.model)+'</td><td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(r.prompt)+'">'+esc(r.prompt||'—')+'</td><td>'+esc(r.span_type)+'</td><td>'+esc(r.layer)+'</td><td class="mono">'+(r.blocked?'PromptType.BLOCKED':'PromptType.INPUT')+'</td></tr>';});
  $('auTrail').innerHTML=trailHTML||'<tr><td colspan="9" class="empty">No audit events</td></tr>';}
