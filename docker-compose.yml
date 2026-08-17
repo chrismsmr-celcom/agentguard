@@ -6,31 +6,62 @@ services:
         INSTALL_ML: ${INSTALL_ML:-false}
         PRELOAD_MODEL: ${PRELOAD_MODEL:-false}
     image: agentguard:latest
+    container_name: agentguard-collector
     ports:
       - "8080:8080"
     environment:
+      # ── CORE ──────────────────────────────────────────────────
       PORT: 8080
-      AGENTGUARD_DB_TYPE: postgres
+      AGENTGUARD_DB_TYPE: ${AGENTGUARD_DB_TYPE:-postgres}
       DATABASE_URL: postgresql://agentguard:${POSTGRES_PASSWORD}@postgres:5432/agentguard
       AGENTGUARD_API_KEY: ${AGENTGUARD_API_KEY}
       AGENTGUARD_ADMIN_SECRET: ${AGENTGUARD_ADMIN_SECRET}
       AGENTGUARD_FLASK_SECRET: ${AGENTGUARD_FLASK_SECRET}
-      AGENTGUARD_MAX_BODY_BYTES: "262144"
-      AGENTGUARD_AUTH_SESSION_TTL: "900"
+      
+      # ── SECURITY ──────────────────────────────────────────────
+      AGENTGUARD_MAX_BODY_BYTES: ${AGENTGUARD_MAX_BODY_BYTES:-262144}
+      AGENTGUARD_AUTH_SESSION_TTL: ${AGENTGUARD_AUTH_SESSION_TTL:-900}
       AGENTGUARD_CORS_ORIGINS: ${AGENTGUARD_CORS_ORIGINS:-http://localhost:8080}
-      AGENTGUARD_USE_ML: ${AGENTGUARD_USE_ML:-false}
-      AGENTGUARD_USE_LLM_JUDGE: ${AGENTGUARD_USE_LLM_JUDGE:-false}
-      AGENTGUARD_JUDGE_API_KEY: ${DEEPSEEK_API_KEY:-}
-      AGENTGUARD_JUDGE_MODEL: ${AGENTGUARD_JUDGE_MODEL:-deepseek-chat}
-      AGENTGUARD_ML_THRESHOLD: ${AGENTGUARD_ML_THRESHOLD:-0.85}
-      AGENTGUARD_BLOCK_ON_AMBIGUOUS: ${AGENTGUARD_BLOCK_ON_AMBIGUOUS:-false}
-      AGENTGUARD_DETECTOR_FAILURE_MODE: ${AGENTGUARD_DETECTOR_FAILURE_MODE:-fail_closed}
       AGENTGUARD_RATE_LIMIT: ${AGENTGUARD_RATE_LIMIT:-120 per minute}
       AGENTGUARD_SPAN_RATE_LIMIT: ${AGENTGUARD_SPAN_RATE_LIMIT:-30 per minute}
       AGENTGUARD_LIMITER_STORAGE: redis://redis:6379/0
+      
+      # ── DETECTION ─────────────────────────────────────────────
+      AGENTGUARD_USE_ML: ${AGENTGUARD_USE_ML:-false}
+      AGENTGUARD_ML_THRESHOLD: ${AGENTGUARD_ML_THRESHOLD:-0.85}
+      AGENTGUARD_MODEL_PATH: ${AGENTGUARD_MODEL_PATH:-/app/models/prompt-injection}
+      AGENTGUARD_USE_LLM_JUDGE: ${AGENTGUARD_USE_LLM_JUDGE:-false}
+      AGENTGUARD_JUDGE_API_KEY: ${DEEPSEEK_API_KEY:-}
+      AGENTGUARD_JUDGE_URL: ${AGENTGUARD_JUDGE_URL:-https://api.deepseek.com/chat/completions}
+      AGENTGUARD_JUDGE_MODEL: ${AGENTGUARD_JUDGE_MODEL:-deepseek-chat}
+      AGENTGUARD_JUDGE_TIMEOUT: ${AGENTGUARD_JUDGE_TIMEOUT:-15.0}
+      AGENTGUARD_JUDGE_CACHE_SIZE: ${AGENTGUARD_JUDGE_CACHE_SIZE:-2048}
+      AGENTGUARD_BLOCK_ON_AMBIGUOUS: ${AGENTGUARD_BLOCK_ON_AMBIGUOUS:-false}
+      AGENTGUARD_DETECTOR_FAILURE_MODE: ${AGENTGUARD_DETECTOR_FAILURE_MODE:-fail_closed}
+      
+      # ── PERFORMANCE ───────────────────────────────────────────
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
       GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
+      AGENTGUARD_MAX_PENDING: ${AGENTGUARD_MAX_PENDING:-500}
+      AGENTGUARD_COLLECTOR_TIMEOUT: ${AGENTGUARD_COLLECTOR_TIMEOUT:-5.0}
+      
+      # ── LOGGING ───────────────────────────────────────────────
       AGENTGUARD_LOG_LEVEL: ${AGENTGUARD_LOG_LEVEL:-INFO}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-agentguard}
+      
+      # ── ALERTING (optionnel) ──────────────────────────────────
+      AGENTGUARD_ALERT_SLACK_WEBHOOK: ${AGENTGUARD_ALERT_SLACK_WEBHOOK:-}
+      AGENTGUARD_ALERT_WEBHOOK_URL: ${AGENTGUARD_ALERT_WEBHOOK_URL:-}
+      AGENTGUARD_ALERT_EMAIL_TO: ${AGENTGUARD_ALERT_EMAIL_TO:-}
+      AGENTGUARD_SMTP_HOST: ${AGENTGUARD_SMTP_HOST:-}
+      AGENTGUARD_SMTP_PORT: ${AGENTGUARD_SMTP_PORT:-587}
+      AGENTGUARD_SMTP_USER: ${AGENTGUARD_SMTP_USER:-}
+      AGENTGUARD_SMTP_PASS: ${AGENTGUARD_SMTP_PASS:-}
+      AGENTGUARD_ALERT_MIN_RISK: ${AGENTGUARD_ALERT_MIN_RISK:-high}
+      AGENTGUARD_ALERT_COOLDOWN: ${AGENTGUARD_ALERT_COOLDOWN:-300}
+      AGENTGUARD_PUBLIC_URL: ${AGENTGUARD_PUBLIC_URL:-http://localhost:8080}
+      
     depends_on:
       postgres:
         condition: service_healthy
@@ -51,7 +82,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 15s
     deploy:
       resources:
         limits:
@@ -65,6 +96,7 @@ services:
 
   postgres:
     image: postgres:16-alpine
+    container_name: agentguard-postgres
     environment:
       POSTGRES_DB: agentguard
       POSTGRES_USER: agentguard
@@ -86,6 +118,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    container_name: agentguard-redis
     command: >
       redis-server
       --appendonly yes
