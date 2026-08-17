@@ -1104,7 +1104,7 @@ DASHBOARD_HTML = r'''
 a{color:var(--purple2);text-decoration:none}
 button{font:inherit;cursor:pointer}
 .topbar{height:48px;display:flex;align-items:center;gap:18px;padding:0 16px;background:var(--bg);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50}
-.logo-box{width:30px;height:30px;border-radius:8px;background:#fff;display:grid;place-items:center;padding:4px}
+.logo-box{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;padding:4px}
 .logo-box img{width:100%;height:100%;object-fit:contain}
 .logo-card{padding:0;overflow:hidden;display:flex;align-items:center;justify-content:center}
 .logo-card .logo-box{width:100%;height:100%;border-radius:0;padding:0}
