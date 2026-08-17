@@ -22,6 +22,7 @@ from flask_cors import CORS, cross_origin
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from markupsafe import escape as _esc
+import alerting
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("AGENTGUARD_FLASK_SECRET") or secrets.token_urlsafe(32)
@@ -487,8 +488,27 @@ def receive_span():
 
     conn.commit()
     conn.close()
-    return jsonify({"status": "ok"}), 201
 
+    # ── ALERTING : notifier si blocage ────────────────────────────
+    if data["blocked"]:
+        failed = [c for c in data["security_checks"]
+                  if isinstance(c, dict) and not c.get("passed", True)]
+        worst = "high"
+        for c in failed:
+            r = c.get("risk_level", "low")
+            if alerting.RISK_ORDER.get(r, 0) > alerting.RISK_ORDER.get(worst, 0):
+                worst = r
+        alerting.send_alert({
+            "check_name": failed[0].get("check_name", "unknown") if failed else "unknown",
+            "risk_level": worst,
+            "org_id": g.org_id,
+            "trace_id": data["trace_id"],
+            "model": model,
+            "reason": data.get("block_reason") or "",
+            "prompt": str((data.get("input_data") or {}).get("prompt", ""))[:200],
+        })
+
+    return jsonify({"status": "ok"}), 201
 # ── API : QUERIES ────────────────────────────────────────────────────────────
 @app.route("/api/traces")
 def list_traces():
