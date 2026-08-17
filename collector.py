@@ -1240,7 +1240,7 @@ tr:hover td{background:#191c29}
 <section id="view-overview" class="view">
   <div class="sec">Service Health &amp; Performance</div>
   <div class="grid" style="grid-template-columns:170px 1fr 1fr 1fr;gap:12px">
-    <div class="card logo-card" style="background:#fff;border:0;border-radius:18px"><div class="logo-box"><img src="/static/logo.svg" onerror="this.outerHTML='🛡️'" style="width:100%;height:100%;object-fit:cover;border-radius:18px"></div></div>
+    <div class="card logo-card" style="background:#000;border:0;border-radius:18px"><div class="logo-box"><img src="/static/logo.svg" onerror="this.outerHTML='🛡️'" style="width:100%;height:100%;object-fit:cover;border-radius:18px"></div></div>
     <div class="card"><div class="clabel">Open Problems</div><div class="hero mid" id="ovProblems" style="color:var(--red2)">0</div></div>
     <div class="card"><div class="clabel"># of Total Requests</div><div class="hero mid" id="ovRequests">0</div><div class="trend" id="ovRequestsT"></div></div>
     <div class="card"><div class="clabel">Cost</div><div class="hero mid" id="ovCost">$0</div><div class="trend" id="ovCostT"></div></div>
