@@ -1106,6 +1106,8 @@ button{font:inherit;cursor:pointer}
 .topbar{height:48px;display:flex;align-items:center;gap:18px;padding:0 16px;background:var(--bg);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50}
 .logo-box{width:30px;height:30px;border-radius:8px;background:#fff;display:grid;place-items:center;padding:4px}
 .logo-box img{width:100%;height:100%;object-fit:contain}
+.logo-card{padding:0;overflow:hidden;display:flex;align-items:center;justify-content:center}
+.logo-card .logo-box{width:100%;height:100%;border-radius:0;padding:0}
 .prod{font-weight:700;font-size:14px}
 .prod small{color:var(--muted);font-weight:400;margin-left:6px;font-size:12px}
 .tabs{display:flex;gap:2px;height:100%}
@@ -1238,7 +1240,7 @@ tr:hover td{background:#191c29}
 <section id="view-overview" class="view">
   <div class="sec">Service Health &amp; Performance</div>
   <div class="grid" style="grid-template-columns:170px 1fr 1fr 1fr;gap:12px">
-    <div class="card" style="background:#fff;display:grid;place-items:center;border:0;border-radius:18px"><div class="logo-box" style="width:96px;height:96px;border-radius:22px;padding:14px"><img src="/static/logo.svg" onerror="this.outerHTML='🛡️'"></div></div>
+    <div class="card logo-card" style="background:#fff;border:0;border-radius:18px"><div class="logo-box"><img src="/static/logo.svg" onerror="this.outerHTML='🛡️'" style="width:100%;height:100%;object-fit:cover;border-radius:18px"></div></div>
     <div class="card"><div class="clabel">Open Problems</div><div class="hero mid" id="ovProblems" style="color:var(--red2)">0</div></div>
     <div class="card"><div class="clabel"># of Total Requests</div><div class="hero mid" id="ovRequests">0</div><div class="trend" id="ovRequestsT"></div></div>
     <div class="card"><div class="clabel">Cost</div><div class="hero mid" id="ovCost">$0</div><div class="trend" id="ovCostT"></div></div>
