@@ -7,7 +7,6 @@ from policy import PolicyEngine, Policy, PolicyDecision, Decision
 @pytest.fixture
 def engine(tmp_path):
     """Policy Engine avec policies temporaires."""
-    # Crée une policy de test
     policy_content = """
 version: 1
 name: test-policy
@@ -19,6 +18,11 @@ capabilities:
     allow:
       - search_*
       - get_*
+      - read_file
+      - write_file
+      - http_request
+      - send_payment
+      - send_email
     deny:
       - delete_*
   filesystem:
@@ -195,9 +199,8 @@ class TestRules:
             tool_name="send_payment",
             params={"amount": 100},
         )
-        # Devrait être ALLOW (si send_payment dans allow list, sinon DENY tool)
-        # Ici tool pas dans whitelist donc DENY tool
-        assert decision.is_denied()
+        # Petit montant → ALLOW (pas de règle déclenchée)
+        assert decision.is_allowed()
 
 
 class TestNoPolicy:
