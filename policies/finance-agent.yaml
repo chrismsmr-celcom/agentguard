@@ -1,0 +1,59 @@
+version: 1
+name: finance-agent-policy
+description: "Policy for finance agent - read transactions, send reports"
+
+agents:
+  - finance-agent
+  - reporting-agent
+
+capabilities:
+  tools:
+    allow:
+      - search_transactions
+      - get_customer
+      - send_email
+      - generate_report
+      - query_database
+    deny:
+      - delete_*
+      - drop_*
+      - execute_command
+  
+  filesystem:
+    read:
+      - /workspace/data/**
+      - /workspace/reports/**
+    write:
+      - /workspace/output/**
+    deny:
+      - /etc/**
+      - /root/**
+  
+  network:
+    default: deny
+    allow:
+      - api.stripe.com
+      - api.openai.com
+      - "*.googleapis.com"
+
+rules:
+  - name: no-secret-external
+    when:
+      data.classification: SECRET
+    decision: DENY
+    reason: "SECRET data cannot be processed without explicit approval"
+    priority: 10
+  
+  - name: large-payment-approval
+    when:
+      tool: send_payment
+      params.amount: "> 10000"
+    decision: REQUIRE_APPROVAL
+    reason: "Payments over $10k require human approval"
+    priority: 20
+
+budget:
+  max_per_session: 5.0
+  max_per_day: 50.0
+
+failure_mode: fail_closed
