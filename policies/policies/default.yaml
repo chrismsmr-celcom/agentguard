@@ -1,0 +1,40 @@
+version: 1
+name: default
+description: "Default policy - restrictive baseline"
+
+agents: []  # Applies to all agents without specific policy
+
+capabilities:
+  tools:
+    # Par défaut : aucun outil autorisé explicitement
+    # L'agent doit avoir une policy spécifique pour plus de permissions
+    allow: []
+    deny:
+      - "delete_*"
+      - "drop_*"
+      - "sudo"
+  
+  filesystem:
+    read: []
+    write: []
+    deny:
+      - "/etc/**"
+      - "/root/**"
+      - "/proc/**"
+      - "/sys/**"
+  
+  network:
+    default: deny
+    allow: []
+    deny:
+      - "127.0.0.1"
+      - "localhost"
+      - "169.254.169.254"
+
+rules: []
+
+budget:
+  max_per_session: 2.0
+  max_per_day: 20.0
+
+failure_mode: fail_closed
