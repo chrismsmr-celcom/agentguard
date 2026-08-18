@@ -4,7 +4,7 @@
 # Installe avec : pip install --no-cache-dir -r requirements.txt
 # Pour ML       : pip install -r requirements-ml.txt (séparé pour réduire l'image Docker)
 # =============================================================================
-
+PyYAML>=6.0
 # -----------------------------------------------------------------------------
 # CORE - Framework Web & API
 # -----------------------------------------------------------------------------
