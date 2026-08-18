@@ -29,7 +29,7 @@ class ToolCapabilities(BaseModel):
     """Capacités d'outils : whitelist + blacklist."""
     allow: List[str] = Field(default_factory=list)
     deny: List[str] = Field(default_factory=list)
-    
+
     def is_allowed(self, tool_name: str) -> bool:
         """Vérifie si un outil est autorisé."""
         # DENY gagne toujours sur ALLOW (principe de sécurité)
@@ -37,17 +37,17 @@ class ToolCapabilities(BaseModel):
             for pattern in self.deny:
                 if self._matches(tool_name, pattern):
                     return False
-        
+
         # Si une whitelist est définie, l'outil doit y être
         if self.allow:
             for pattern in self.allow:
                 if self._matches(tool_name, pattern):
                     return True
             return False
-        
+
         # Par défaut : autorisé si pas de whitelist
         return True
-    
+
     @staticmethod
     def _matches(name: str, pattern: str) -> bool:
         """Match simple avec support de * (wildcard)."""
@@ -63,42 +63,41 @@ class FilesystemCapabilities(BaseModel):
     read: List[str] = Field(default_factory=list)
     write: List[str] = Field(default_factory=list)
     deny: List[str] = Field(default_factory=list)
-    
+
     def can_read(self, path: str) -> bool:
         return self._check_access(path, self.read)
-    
+
     def can_write(self, path: str) -> bool:
         return self._check_access(path, self.write)
-    
+
     def _check_access(self, path: str, allowed: List[str]) -> bool:
         # DENY gagne toujours
         for pattern in self.deny:
             if self._matches_path(path, pattern):
                 return False
-        
+
         # Si liste définie, doit matcher
         if allowed:
             for pattern in allowed:
                 if self._matches_path(path, pattern):
                     return True
             return False
-        
+
         return True
-    
-      @staticmethod
+
+    @staticmethod
     def _matches_path(path: str, pattern: str) -> bool:
         """Match de paths avec support de ** (recursive) et *."""
         import fnmatch
         import re
-        
+
         # Normalise
         path = path.replace("\\", "/").rstrip("/")
         pattern = pattern.replace("\\", "/").rstrip("/")
-        
+
         # ** = récursif
         if "**" in pattern:
             # Protège ** avant de transformer les * simples
-            # Utilise des placeholders uniques
             regex = pattern
             regex = regex.replace("**/", "\x00DOUBLESTARSLASH\x00")
             regex = regex.replace("**", "\x00DOUBLESTAR\x00")
@@ -108,7 +107,7 @@ class FilesystemCapabilities(BaseModel):
             regex = regex.replace("\x00DOUBLESTARSLASH\x00", "(.*/)?")
             regex = regex.replace("\x00DOUBLESTAR\x00", ".*")
             return bool(re.match(f"^{regex}$", path))
-        
+
         return fnmatch.fnmatch(path, pattern)
 
 
@@ -117,7 +116,7 @@ class NetworkCapabilities(BaseModel):
     allow: List[str] = Field(default_factory=list)
     deny: List[str] = Field(default_factory=list)
     default: str = "deny"  # deny par défaut
-    
+
     def is_allowed(self, destination: str) -> bool:
         # Blocages SSRF par défaut (toujours appliqués)
         ssrf_blocklist = [
@@ -131,21 +130,21 @@ class NetworkCapabilities(BaseModel):
         for blocked in ssrf_blocklist:
             if destination.startswith(blocked) or blocked in destination:
                 return False
-        
+
         # DENY explicite
         for pattern in self.deny:
             if self._matches(destination, pattern):
                 return False
-        
+
         # Si whitelist définie
         if self.allow:
             for pattern in self.allow:
                 if self._matches(destination, pattern):
                     return True
             return False
-        
+
         return self.default == "allow"
-    
+
     @staticmethod
     def _matches(dest: str, pattern: str) -> bool:
         """Match de domaines/IPs."""
@@ -153,7 +152,7 @@ class NetworkCapabilities(BaseModel):
         # Normalise (retire protocole)
         dest = dest.replace("https://", "").replace("http://", "").split("/")[0]
         pattern = pattern.replace("https://", "").replace("http://", "").split("/")[0]
-        
+
         return fnmatch.fnmatch(dest, pattern) or dest == pattern
 
 
@@ -200,19 +199,19 @@ class Policy(BaseModel):
     version: int = 1
     name: str
     description: str = ""
-    
+
     agents: List[str] = Field(default_factory=list)
-    
+
     capabilities: Capabilities = Field(default_factory=Capabilities)
     rules: List[Rule] = Field(default_factory=list)
     budget: BudgetLimits = Field(default_factory=BudgetLimits)
-    
+
     failure_mode: FailureMode = FailureMode.FAIL_CLOSED
-    
+
     # Metadata
     created_at: Optional[str] = None
     created_by: Optional[str] = None
-    
+
     def applies_to(self, agent_id: str) -> bool:
         """Vérifie si cette policy s'applique à un agent."""
         if not self.agents:
@@ -232,16 +231,16 @@ class PolicyDecision:
     policy_version: int = 0
     matched_rules: List[str] = field(default_factory=list)
     risk_score: int = 0  # 0-100
-    
+
     def is_allowed(self) -> bool:
         return self.action == Decision.ALLOW
-    
+
     def is_denied(self) -> bool:
         return self.action == Decision.DENY
-    
+
     def requires_approval(self) -> bool:
         return self.action == Decision.REQUIRE_APPROVAL
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "action": self.action.value,
