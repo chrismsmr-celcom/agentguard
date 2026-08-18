@@ -1,0 +1,44 @@
+version: 1
+name: support-agent-policy
+description: "Policy for customer support agent"
+
+agents:
+  - support-agent
+
+capabilities:
+  tools:
+    allow:
+      - search_tickets
+      - update_ticket
+      - send_email
+      - get_customer
+    deny:
+      - delete_*
+      - export_database
+  
+  filesystem:
+    read:
+      - /workspace/knowledge_base/**
+    write: []
+    deny:
+      - /etc/**
+  
+  network:
+    default: deny
+    allow:
+      - api.zendesk.com
+      - api.intercom.com
+
+rules:
+  - name: no-pii-in-emails
+    when:
+      tool: send_email
+      params.contains_pii: true
+    decision: REQUIRE_APPROVAL
+    reason: "Emails containing PII require review"
+
+budget:
+  max_per_session: 2.0
+  max_per_day: 20.0
+
+failure_mode: fail_closed
