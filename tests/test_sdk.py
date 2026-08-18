@@ -104,16 +104,66 @@ class TestGuardToolCall:
 
 
 class TestCostEstimation:
-    """Estimation des coûts."""
+    """Estimation des coûts et comptage des tokens."""
     
     def test_cost_calculation(self, guard):
-        """Le coût est calculé correctement."""
-        result = Mock(choices=[Mock(message=Mock(content="short"))])
+        """Le coût est calculé correctement et les tokens sont comptés."""
+        result = Mock(choices=[Mock(message=Mock(content="short response"))])
         kwargs = {"model": "gpt-4o", "messages": [{"content": "hi"}]}
         
-        cost = guard._estimate_cost(kwargs, result)
+        # ✅ FIX: _estimate_cost retourne maintenant un tuple (cost, input_tokens, output_tokens)
+        result_tuple = guard._estimate_cost(kwargs, result)
+        
+        # Vérifier la structure du tuple
+        assert isinstance(result_tuple, tuple)
+        assert len(result_tuple) == 3
+        
+        cost, input_tokens, output_tokens = result_tuple
+        
+        # Vérifier les valeurs
         assert isinstance(cost, float)
         assert cost >= 0
+        assert isinstance(input_tokens, int)
+        assert isinstance(output_tokens, int)
+        assert input_tokens >= 0
+        assert output_tokens >= 0
+    
+    def test_tokens_counted_for_gpt4o(self, guard):
+        """Les tokens sont correctement comptés pour gpt-4o."""
+        result = Mock(choices=[Mock(message=Mock(content="This is a response"))])
+        kwargs = {"model": "gpt-4o", "messages": [{"content": "Hello there"}]}
+        
+        cost, in_tok, out_tok = guard._estimate_cost(kwargs, result)
+        
+        # Les tokens doivent être > 0 pour des textes non vides
+        assert in_tok > 0
+        assert out_tok > 0
+        # "Hello there" ≈ 2 tokens, "This is a response" ≈ 5 tokens
+        assert in_tok < 10
+        assert out_tok < 20
+    
+    def test_tokens_counted_for_unknown_model(self, guard):
+        """Fallback sur cl100k_base pour modèles inconnus."""
+        result = Mock(choices=[Mock(message=Mock(content="test"))])
+        kwargs = {"model": "unknown-model-xyz", "messages": [{"content": "test"}]}
+        
+        # Ne doit pas lever d'exception
+        cost, in_tok, out_tok = guard._estimate_cost(kwargs, result)
+        
+        assert cost >= 0
+        assert in_tok >= 0
+        assert out_tok >= 0
+    
+    def test_empty_messages_handled(self, guard):
+        """Messages vides ne doivent pas crasher."""
+        result = Mock(choices=[Mock(message=Mock(content=""))])
+        kwargs = {"model": "gpt-4o", "messages": []}
+        
+        cost, in_tok, out_tok = guard._estimate_cost(kwargs, result)
+        
+        assert cost >= 0
+        assert in_tok == 0
+        assert out_tok == 0
 
 
 class TestGetReport:
