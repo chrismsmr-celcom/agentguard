@@ -69,7 +69,6 @@ class SpanPayload(BaseModel):
     blocked: bool = False
     block_reason: Optional[str] = None
     cost_usd: float = Field(..., ge=0)
-    # ✅ FIX: Ajout des champs tokens pour le dashboard
     input_tokens: int = Field(0, ge=0)
     output_tokens: int = Field(0, ge=0)
 
@@ -610,7 +609,6 @@ class GuardSpan:
     blocked: bool = False
     block_reason: Optional[str] = None
     cost_usd: float = 0.0
-    # ✅ FIX: Ajout des champs tokens pour tracking et dashboard
     input_tokens: int = 0
     output_tokens: int = 0
 
@@ -690,7 +688,6 @@ class AgentGuard:
             blocked=span.blocked,
             block_reason=span.block_reason,
             cost_usd=span.cost_usd,
-            # ✅ FIX: Envoi des tokens au collector
             input_tokens=span.input_tokens,
             output_tokens=span.output_tokens,
         ).model_dump()
@@ -739,11 +736,7 @@ class AgentGuard:
         return ""
 
     def _count_tokens(self, kwargs, result) -> Tuple[int, int]:
-        """✅ FIX: Compte les tokens input/output via tiktoken.
-        
-        Returns:
-            Tuple[input_tokens, output_tokens]
-        """
+        """Compte les tokens input/output via tiktoken."""
         model = str(kwargs.get("model", "gpt-4o"))
         input_text = self._extract_input([], kwargs) or ""
         output_text = self._extract_output(result) or ""
@@ -766,11 +759,7 @@ class AgentGuard:
         return input_tokens, output_tokens
 
     def _estimate_cost(self, kwargs, result) -> Tuple[float, int, int]:
-        """✅ FIX: Calcul précis du coût + comptage tokens via tiktoken.
-        
-        Returns:
-            Tuple[cost_usd, input_tokens, output_tokens]
-        """
+        """Calcul précis du coût + comptage tokens via tiktoken."""
         model = str(kwargs.get("model", "gpt-4o"))
         input_tokens, output_tokens = self._count_tokens(kwargs, result)
 
@@ -812,7 +801,6 @@ class AgentGuard:
                     security_checks=checks,
                     blocked=True,
                     block_reason=f"HIGH RISK: {[c.check_name for c in high_risk]}",
-                    # ✅ FIX: Tokens = 0 car bloqué avant exécution
                     input_tokens=0,
                     output_tokens=0,
                 )
@@ -839,7 +827,6 @@ class AgentGuard:
 
             # Check OUTPUT
             latency = (time.time() - start) * 1000
-            # ✅ FIX: Récupérer coût ET tokens
             cost, input_tokens, output_tokens = self._estimate_cost(kwargs, result)
             output_text = self._extract_output(result)
             self.total_spent += cost
@@ -860,7 +847,6 @@ class AgentGuard:
                 blocked=blocked,
                 block_reason=f"Output risk: {[c.check_name for c in blocking_output]}" if blocked else None,
                 cost_usd=cost,
-                # ✅ FIX: Stockage des tokens dans la span
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
             )
@@ -901,7 +887,6 @@ class AgentGuard:
                 security_checks=[check],
                 blocked=True,
                 block_reason=check.details,
-                # ✅ FIX: Tool calls n'ont pas de tokens LLM
                 input_tokens=0,
                 output_tokens=0,
             )
@@ -931,7 +916,6 @@ class AgentGuard:
             input_data={"tool": tool_name, "params": params},
             output_data={"result": str(result)[:500]},
             security_checks=[check],
-            # ✅ FIX: Tool calls n'ont pas de tokens LLM
             input_tokens=0,
             output_tokens=0,
         )
@@ -940,7 +924,7 @@ class AgentGuard:
         return result
 
     def get_report(self):
-        # ✅ FIX: Ajouter les tokens totaux au rapport
+        """Génère un rapport de session."""
         total_input_tokens = sum(s.input_tokens for s in self.spans)
         total_output_tokens = sum(s.output_tokens for s in self.spans)
         
