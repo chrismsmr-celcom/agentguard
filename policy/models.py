@@ -85,20 +85,28 @@ class FilesystemCapabilities(BaseModel):
         
         return True
     
-    @staticmethod
+      @staticmethod
     def _matches_path(path: str, pattern: str) -> bool:
         """Match de paths avec support de ** (recursive) et *."""
         import fnmatch
+        import re
+        
         # Normalise
         path = path.replace("\\", "/").rstrip("/")
         pattern = pattern.replace("\\", "/").rstrip("/")
         
         # ** = récursif
         if "**" in pattern:
-            # Transforme **/ en regex-like
-            regex = pattern.replace("**/", "(.*/)?").replace("**", ".*")
+            # Protège ** avant de transformer les * simples
+            # Utilise des placeholders uniques
+            regex = pattern
+            regex = regex.replace("**/", "\x00DOUBLESTARSLASH\x00")
+            regex = regex.replace("**", "\x00DOUBLESTAR\x00")
+            # Maintenant on peut transformer les * simples en [^/]*
             regex = regex.replace("*", "[^/]*")
-            import re
+            # Restaure les placeholders avec les vrais regex
+            regex = regex.replace("\x00DOUBLESTARSLASH\x00", "(.*/)?")
+            regex = regex.replace("\x00DOUBLESTAR\x00", ".*")
             return bool(re.match(f"^{regex}$", path))
         
         return fnmatch.fnmatch(path, pattern)
