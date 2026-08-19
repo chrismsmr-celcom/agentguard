@@ -5,58 +5,61 @@
 # Pour ML       : pip install -r requirements-ml.txt (séparé pour réduire l'image Docker)
 # =============================================================================
 PyYAML>=6.0
+
 # -----------------------------------------------------------------------------
 # CORE - Framework Web & API
 # -----------------------------------------------------------------------------
-flask==3.0.0
-werkzeug==3.0.1            # generate_password_hash, safe_str_cmp
-itsdangerous==2.1.2        # Signature des cookies/session
-flask-cors==4.0.0          # CORS pour le dashboard
-gunicorn==21.2.0           # WSGI server (prod only)
-python-dotenv==1.0.0       # Chargement propre de .env
+flask>=3.0.0,<4.0.0
+werkzeug>=3.0.0,<4.0.0         # generate_password_hash, safe_str_cmp
+itsdangerous>=2.1.2,<3.0.0     # Signature des cookies/session
+flask-cors>=4.0.0,<5.0.0       # CORS pour le dashboard
+gunicorn>=21.2.0,<23.0.0       # WSGI server (prod only)
+python-dotenv>=1.0.0,<2.0.0    # Chargement propre de .env
+markupsafe>=3.0.0              # HTML escaping (utilisé par collector)
 
 # -----------------------------------------------------------------------------
 # NETWORKING & HTTP
 # -----------------------------------------------------------------------------
-requests==2.31.0
-urllib3==2.1.0             # Fix CVE-2023-45803
-certifi==2023.11.17        # CA bundle à jour
+requests>=2.31.0,<3.0.0
+urllib3>=2.1.0,<3.0.0          # Fix CVE-2023-45803
+certifi>=2024.0.0              # CA bundle à jour
 
 # -----------------------------------------------------------------------------
 # SECURITY - Rate Limiting & Auth
 # -----------------------------------------------------------------------------
-flask-limiter==3.5.0
-redis==5.0.1               # Backend pour rate-limit distribué + cache LLM Judge
-cryptography==41.0.7       # Chiffrement (si besoin)
+flask-limiter>=3.5.0,<4.0.0
+redis>=5.0.0,<6.0.0            # Backend pour rate-limit distribué + cache LLM Judge
+cryptography>=41.0.0,<45.0.0   # Chiffrement (si besoin)
 
 # -----------------------------------------------------------------------------
 # SECURITY - Détection (Budget + PII)
 # -----------------------------------------------------------------------------
-tiktoken>=0.7.0,<1.0.0            # Tokenisation précise pour le calcul de coût
-presidio-analyzer==2.2.355 # Détection PII (standard Microsoft)
-presidio-anonymizer==2.2.355
+tiktoken>=0.7.0,<1.0.0              # Tokenisation précise pour le calcul de coût
+presidio-analyzer>=2.2.350,<3.0.0   # Détection PII (standard Microsoft)
+presidio-anonymizer>=2.2.350,<3.0.0
 
 # -----------------------------------------------------------------------------
-# DATABASE
+# DATABASE - PostgreSQL via psycopg3
 # -----------------------------------------------------------------------------
-psycopg2-binary==2.9.9     # PostgreSQL (pour dev/simple deploy)
-# psycopg[binary]==3.1.18  # Alternative moderne (décommente si migration vers psycopg3)
+# psycopg3 est requis pour Python 3.14+ (psycopg2-binary incompatible)
+# Compatible avec les requêtes SQL utilisant %s comme placeholders
+psycopg[binary]>=3.1.0,<4.0.0
 
 # -----------------------------------------------------------------------------
 # VALIDATION & SERIALIZATION
 # -----------------------------------------------------------------------------
-pydantic>=2.7.0,<3.0.0            # Validation stricte des payloads API
-pydantic-settings>=2.2.0,<3.0.0   # Configuration via variables d'env
+pydantic>=2.7.0,<3.0.0              # Validation stricte des payloads API
+pydantic-settings>=2.2.0,<3.0.0     # Configuration via variables d'env
 
 # -----------------------------------------------------------------------------
 # OBSERVABILITY - Logging & Tracing (OpenTelemetry)
 # -----------------------------------------------------------------------------
-structlog==23.2.0          # Logs JSON structurés
-opentelemetry-api==1.22.0
-opentelemetry-sdk==1.22.0
-opentelemetry-exporter-otlp-proto-http==1.22.0
-opentelemetry-instrumentation-flask==0.43b0
-opentelemetry-instrumentation-requests==0.43b0
+structlog>=23.2.0,<25.0.0           # Logs JSON structurés
+opentelemetry-api>=1.22.0,<2.0.0
+opentelemetry-sdk>=1.22.0,<2.0.0
+opentelemetry-exporter-otlp-proto-http>=1.22.0,<2.0.0
+opentelemetry-instrumentation-flask>=0.43b0,<1.0.0
+opentelemetry-instrumentation-requests>=0.43b0,<1.0.0
 
 # -----------------------------------------------------------------------------
 # ML - Optionnel (dédié à requirements-ml.txt pour Docker léger)
