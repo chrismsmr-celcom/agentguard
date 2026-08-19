@@ -15,19 +15,16 @@ try:
     import psycopg.rows
 
     # Wrapper compat psycopg2-style pour minimiser les changements
-    class _PsycopgCompat:
+        class _PsycopgCompat:
         class extras:
             RealDictCursor = psycopg.rows.dict_row
 
         @staticmethod
         def connect(dsn=None, **kwargs):
+            # psycopg3 prend sslmode comme kwarg séparé, pas dans conninfo
             if dsn:
                 kwargs["conninfo"] = dsn
-            kwargs.pop("sslmode", None)
-            if dsn and "sslmode=require" not in dsn:
-                kwargs["conninfo"] = dsn + " sslmode=require"
-            elif dsn:
-                kwargs["conninfo"] = dsn
+            kwargs.setdefault("sslmode", "require")
             conn = psycopg.connect(**kwargs)
             conn.autocommit = True
             return conn
