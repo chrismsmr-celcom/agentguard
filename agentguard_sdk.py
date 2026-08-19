@@ -1,13 +1,14 @@
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║  🛡️ AGENTGUARD SDK v3.3.0 - PRODUCTION READY                   ║
+║  🛡️ AGENTGUARD SDK v3.4.0 - PRODUCTION READY                   ║
 ║                                                                ║
-║  Changements majeurs v3.3 :                                    ║
-║  ✅ Taint Tracking — data flow security                         ║
-║  ✅ Auto-classification (SECRET, PII, UNTRUSTED, MALICIOUS)     ║
-║  ✅ Détection d'exfiltration multi-step                         ║
-║  ✅ Règles DENY/REVIEW configurables                            ║
+║  Changements majeurs v3.4 :                                    ║
+║  ✅ Atomic Budgets (Redis transactions) — anti race-condition   ║
+║  ✅ Reservation avant exécution + réconciliation après          ║
+║  ✅ Budget session + daily séparés                              ║
+║  ✅ Rollback automatique si échec                               ║
 ║                                                                ║
+║  + v3.3 (Taint Tracking, data flow security)                   ║
 ║  + v3.2 (Signed Decisions Ed25519, zero-trust)                 ║
 ║  + v3.1 (tokens, Presidio, Redis cache)                        ║
 ╚══════════════════════════════════════════════════════════════════╝
@@ -32,6 +33,14 @@ except ImportError:
     TaintLevel = None
     SinkType = None
     _TAINT_AVAILABLE = False
+
+try:
+    from budget import AtomicBudgetManager, BudgetExceededException
+    _BUDGET_MANAGER_AVAILABLE = True
+except ImportError:
+    AtomicBudgetManager = None
+    BudgetExceededException = None
+    _BUDGET_MANAGER_AVAILABLE = False
 
 import requests
 import structlog
@@ -679,6 +688,30 @@ class AgentGuard:
         self._taint_tracker = TaintTracker() if _TAINT_AVAILABLE and TaintTracker else None
         self._taint_counter = 0
 
+        # ✅ v3.4 : Atomic Budget Manager
+        self._budget_manager = None
+        if _BUDGET_MANAGER_AVAILABLE and AtomicBudgetManager:
+            redis_url_for_budget = self._redis_url or os.getenv("AGENTGUARD_LIMITER_STORAGE")
+            if redis_url_for_budget and redis_url_for_budget != "memory://":
+                self._budget_manager = AtomicBudgetManager(
+                    redis_url=redis_url_for_budget,
+                    max_budget_per_session=self.max_budget,
+                    max_budget_per_day=float(os.getenv("AGENTGUARD_DAILY_BUDGET", "100.0")),
+                )
+                logger.info(
+                    "atomic_budget_manager_enabled",
+                    max_session=self.max_budget,
+                    redis=True,
+                )
+            else:
+                # Mode mémoire (dev ou pas de Redis)
+                self._budget_manager = AtomicBudgetManager(
+                    redis_url=None,
+                    max_budget_per_session=self.max_budget,
+                    max_budget_per_day=float(os.getenv("AGENTGUARD_DAILY_BUDGET", "100.0")),
+                )
+                logger.info("atomic_budget_manager_enabled", mode="memory")
+
         logger.info(
             "agentguard_initialized",
             collector=self.collector_url,
@@ -686,6 +719,7 @@ class AgentGuard:
             llm_judge=self.policy_engine.use_llm_judge,
             signed_decisions=self._verifier is not None,
             taint_tracking=self._taint_tracker is not None,
+            atomic_budget=self._budget_manager is not None,
         )
 
     def _init_signed_decisions(self):
@@ -747,6 +781,16 @@ class AgentGuard:
         report = self._taint_tracker.get_report()
         report["enabled"] = True
         return report
+
+    # ✅ v3.4 : API budget status
+    def get_budget_status(self) -> Dict[str, Any]:
+        """Retourne le statut atomique du budget."""
+        if not self._budget_manager:
+            return {"enabled": False}
+        return {
+            "enabled": True,
+            **self._budget_manager.get_status(self.agent_id),
+        }
 
     @staticmethod
     def _timeout_env(name, default):
@@ -951,10 +995,45 @@ class AgentGuard:
                 self._send_to_collector(span)
                 raise SecurityException(f"🛡️ AgentGuard BLOCKED: {span.block_reason}")
 
+            # ✅ v3.4 : Reservation atomique du budget AVANT l'exécution
+            reservation = None
+            if self._budget_manager:
+                # Estime le coût (coût moyen par token × estimation tokens input)
+                estimated_tokens = max(1, len(input_text) / 4)  # ~4 chars/token
+                estimated_cost = estimated_tokens * 5e-6  # ~$5/M tokens (GPT-4o avg)
+                estimated_cost = max(0.001, min(estimated_cost, 0.10))  # clamp
+                
+                reservation = self._budget_manager.reserve(
+                    org_id=self.agent_id,
+                    estimated_cost=estimated_cost,
+                    trace_id=self.trace_id,
+                )
+                
+                if reservation is None:
+                    # Budget épuisé
+                    span = GuardSpan(
+                        span_id=span_id, trace_id=self.trace_id, span_type="llm_call",
+                        timestamp=start, latency_ms=(time.time() - start) * 1000,
+                        input_data={"prompt": input_text[:500], "model": kwargs.get("model", "unknown")},
+                        output_data={"blocked": True, "reason": "budget_exhausted"},
+                        security_checks=checks,
+                        blocked=True,
+                        block_reason="[BUDGET] No remaining budget (atomic check)",
+                        input_tokens=0,
+                        output_tokens=0,
+                    )
+                    self.spans.append(span)
+                    self._send_to_collector(span)
+                    raise SecurityException("🛡️ Budget exhausted — call rejected")
+
             # Exécution
             try:
                 result = func(*args, **kwargs)
             except Exception as exc:
+                # ✅ v3.4 : Rollback reservation si l'appel échoue
+                if reservation and self._budget_manager:
+                    self._budget_manager.rollback(reservation)
+                
                 span = GuardSpan(
                     span_id=span_id, trace_id=self.trace_id, span_type="llm_call",
                     timestamp=start, latency_ms=(time.time() - start) * 1000,
@@ -971,6 +1050,11 @@ class AgentGuard:
             # Check OUTPUT
             latency = (time.time() - start) * 1000
             cost, input_tokens, output_tokens = self._estimate_cost(kwargs, result)
+            
+            # ✅ v3.4 : Réconciliation avec le coût réel
+            if reservation and self._budget_manager:
+                self._budget_manager.reconcile(reservation, cost)
+            
             output_text = self._extract_output(result)
             self.total_spent += cost
 
@@ -1157,16 +1241,21 @@ class AgentGuard:
             "total_tokens": total_input_tokens + total_output_tokens,
             "signed_decisions_enabled": self._verifier is not None,
             "taint_tracking_enabled": self._taint_tracker is not None,
+            "atomic_budget_enabled": self._budget_manager is not None,
         }
         
         # ✅ v3.3 : Ajouter le rapport taint
         if self._taint_tracker:
             report["taint"] = self._taint_tracker.get_report()
         
+        # ✅ v3.4 : Ajouter le statut budget
+        if self._budget_manager:
+            report["budget"] = self._budget_manager.get_status(self.agent_id)
+        
         return report
 
 
-__version__ = "3.3.0"
+__version__ = "3.4.0"
 
 __all__ = [
     "AgentGuard", "SecurityException", "RiskLevel", "SecurityAction",
