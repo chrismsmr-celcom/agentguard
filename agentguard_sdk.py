@@ -1,18 +1,14 @@
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║  🛡️ AGENTGUARD SDK v3.1.0 - PRODUCTION READY                   ║
+║  🛡️ AGENTGUARD SDK v3.2.0 - PRODUCTION READY                   ║
 ║                                                                ║
-║  Changements majeurs v3.1 :                                    ║
-║  ✅ Token tracking via tiktoken (input + output)                ║
-║  ✅ Envoi tokens au collector pour dashboard                    ║
-║  ✅ Budget via tiktoken (précis)                                 ║
-║  ✅ PII via Presidio (standard industriel)                       ║
-║  ✅ Cache LLM Judge via Redis (distribué)                        ║
-║  ✅ Regex durcis (anti-ReDoS)                                    ║
-║  ✅ Logs structurés (structlog)                                  ║
-║  ✅ Fail-open/fail-closed configurable                           ║
-║  ✅ Validation Pydantic des payloads                             ║
-║  ✅ Retry + circuit breaker sur collector                        ║
+║  Changements majeurs v3.2 :                                    ║
+║  ✅ Signed Security Decisions (Ed25519) — zero-trust            ║
+║  ✅ Vérification côté client avant exécution outil              ║
+║  ✅ Expiration automatique (5 min)                              ║
+║  ✅ Fallback gracieux si collector indisponible                 ║
+║                                                                ║
+║  + toutes les features v3.1 (tokens, Presidio, Redis, etc.)    ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
@@ -135,7 +131,19 @@ except ImportError:
 
 
 # -----------------------------------------------------------------------------
-# MOTEUR DE POLITIQUES
+# SIGNED DECISIONS (Ed25519) — ✅ NEW v3.2
+# -----------------------------------------------------------------------------
+try:
+    from signing import DecisionVerifier
+    _SIGNING_AVAILABLE = True
+except ImportError:
+    DecisionVerifier = None
+    _SIGNING_AVAILABLE = False
+    logger.warning("signing_module_unavailable_signed_decisions_disabled")
+
+
+# -----------------------------------------------------------------------------
+# MOTEUR DE POLITIQUES (inchangé depuis v3.1)
 # -----------------------------------------------------------------------------
 class PolicyEngine:
     """
@@ -628,6 +636,7 @@ class AgentGuard:
         use_llm_judge: Optional[bool] = None,
         redis_url: Optional[str] = None,
         fail_open: bool = False,
+        agent_id: Optional[str] = None,  # ✅ NEW v3.2
     ):
         self.collector_url = collector_url.rstrip("/")
         self.api_key = api_key or os.getenv("AGENTGUARD_API_KEY")
@@ -635,6 +644,7 @@ class AgentGuard:
         self.block_on_high = block_on_high
         self.debug = debug
         self.fail_open = fail_open
+        self.agent_id = agent_id or os.getenv("AGENTGUARD_AGENT_ID", "default")  # ✅ NEW v3.2
         self.total_spent = 0.0
         self.trace_id = self._generate_id()
         self.spans: List[GuardSpan] = []
@@ -651,12 +661,43 @@ class AgentGuard:
 
         self.policy_engine = PolicyEngine(policies or [], self._redis_url)
 
+        # ✅ NEW v3.2 : Initialisation du vérificateur de décisions signées
+        self._verifier = None
+        self._init_signed_decisions()
+
         logger.info(
             "agentguard_initialized",
             collector=self.collector_url,
             ml=self.policy_engine.ml_detector.enabled,
             llm_judge=self.policy_engine.use_llm_judge,
+            signed_decisions=self._verifier is not None,
         )
+
+    def _init_signed_decisions(self):
+        """✅ NEW v3.2 : Récupère la clé publique du collector pour vérifier les décisions."""
+        if not _SIGNING_AVAILABLE:
+            return
+
+        try:
+            r = requests.get(
+                f"{self.collector_url}/api/public-key",
+                headers=self._headers(),
+                timeout=self.collector_timeout,
+            )
+            if r.status_code == 200:
+                public_key_pem = r.json().get("public_key_pem")
+                if public_key_pem:
+                    self._verifier = DecisionVerifier(public_key_pem)
+                    logger.info("signed_decisions_enabled")
+                else:
+                    logger.warning("public_key_missing_in_response")
+            elif r.status_code == 404:
+                # Collector v3.1 ou antérieur → pas de signed decisions
+                logger.info("signed_decisions_unavailable_collector_outdated")
+            else:
+                logger.warning("public_key_fetch_failed", status=r.status_code)
+        except Exception as e:
+            logger.warning("signed_decisions_init_failed", error=str(e))
 
     @staticmethod
     def _timeout_env(name, default):
@@ -776,6 +817,44 @@ class AgentGuard:
         
         return cost, input_tokens, output_tokens
 
+    # ✅ NEW v3.2 : Demande une décision signée au collector
+    def _request_signed_decision(self, tool_name: str, params: Dict[str, Any]) -> Optional[Dict]:
+        """
+        Demande au collector une décision signée pour une tool call.
+        Retourne None si le collector est indisponible (fallback sur check local).
+        """
+        if not self._verifier:
+            return None
+
+        try:
+            r = requests.post(
+                f"{self.collector_url}/api/decide",
+                json={
+                    "tool_name": tool_name,
+                    "params": params or {},
+                    "agent_id": self.agent_id,
+                },
+                headers=self._headers(),
+                timeout=self.collector_timeout,
+            )
+
+            if r.status_code != 200:
+                logger.warning("decide_endpoint_failed", status=r.status_code)
+                return None
+
+            signed = r.json()
+
+            # Vérifie la signature Ed25519
+            if not self._verifier.verify(dict(signed)):
+                logger.error("signed_decision_invalid_signature")
+                return None
+
+            return signed
+
+        except requests.RequestException as e:
+            logger.warning("signed_decision_request_failed", error=str(e))
+            return None
+
     def guard_llm_call(self, func: Callable) -> Callable:
         """Décorateur de protection d'appel LLM."""
         @wraps(func)
@@ -876,8 +955,32 @@ class AgentGuard:
         start = time.time()
         budget_remaining = self.max_budget - self.total_spent
 
+        # Check local (rapide)
         check = self.policy_engine.check_tool_policy(tool_name, params, budget_remaining)
 
+        # ✅ NEW v3.2 : Autorité serveur — une décision signée DENY gagne toujours
+        signed_decision = None
+        if self._verifier:
+            signed_decision = self._request_signed_decision(tool_name, params or {})
+            if signed_decision and signed_decision.get("action") == "DENY":
+                span = GuardSpan(
+                    span_id=span_id, trace_id=self.trace_id, span_type="tool_call",
+                    timestamp=start, latency_ms=(time.time() - start) * 1000,
+                    input_data={"tool": tool_name, "params": params},
+                    output_data={"blocked": True, "signed_decision": signed_decision},
+                    security_checks=[check],
+                    blocked=True,
+                    block_reason=f"[SIGNED DENY] {signed_decision.get('reason', 'policy violation')}",
+                    input_tokens=0,
+                    output_tokens=0,
+                )
+                self.spans.append(span)
+                self._send_to_collector(span)
+                raise SecurityException(
+                    f"🛡️ Signed DENY: {signed_decision.get('reason', 'policy violation')}"
+                )
+
+        # Check local (si pas de signed decision ou ALLOW signé)
         if not check.passed and check.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL) and self.block_on_high:
             span = GuardSpan(
                 span_id=span_id, trace_id=self.trace_id, span_type="tool_call",
@@ -937,10 +1040,11 @@ class AgentGuard:
             "total_input_tokens": total_input_tokens,
             "total_output_tokens": total_output_tokens,
             "total_tokens": total_input_tokens + total_output_tokens,
+            "signed_decisions_enabled": self._verifier is not None,  # ✅ NEW v3.2
         }
 
 
-__version__ = "3.1.0"
+__version__ = "3.2.0"
 
 __all__ = [
     "AgentGuard", "SecurityException", "RiskLevel", "SecurityAction",
