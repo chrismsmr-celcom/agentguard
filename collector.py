@@ -82,13 +82,21 @@ if _sqlite_dir and not os.path.isdir(_sqlite_dir):
     os.makedirs(_sqlite_dir, exist_ok=True)
 
 def get_pg_conn():
-    """Connexion PostgreSQL (production)."""
     if psycopg2 is None:
-        raise RuntimeError(
-            "psycopg2 n'est pas installé — requis pour AGENTGUARD_DB_TYPE=postgres. "
-            "pip install psycopg2-binary"
-        )
-    return psycopg2.connect(DATABASE_URL, sslmode="require")
+        raise RuntimeError("psycopg2 non installé")
+    conn = psycopg2.connect(DATABASE_URL, sslmode="require")
+    # ✅ RLS : lie la connexion à l'org de la requête en cours
+    try:
+        from flask import has_request_context, g
+        if has_request_context() and getattr(g, "org_id", None):
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT set_config('app.current_org_id', %s, false)",
+                    (g.org_id,),
+                )
+    except Exception:
+        pass
+    return conn
 
 def get_sqlite_conn():
     """Connexion SQLite (local dev) — WAL pour concurrence multi-workers."""
