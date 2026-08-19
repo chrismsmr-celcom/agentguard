@@ -1,14 +1,15 @@
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║  🛡️ AGENTGUARD SDK v3.2.0 - PRODUCTION READY                   ║
+║  🛡️ AGENTGUARD SDK v3.3.0 - PRODUCTION READY                   ║
 ║                                                                ║
-║  Changements majeurs v3.2 :                                    ║
-║  ✅ Signed Security Decisions (Ed25519) — zero-trust            ║
-║  ✅ Vérification côté client avant exécution outil              ║
-║  ✅ Expiration automatique (5 min)                              ║
-║  ✅ Fallback gracieux si collector indisponible                 ║
+║  Changements majeurs v3.3 :                                    ║
+║  ✅ Taint Tracking — data flow security                         ║
+║  ✅ Auto-classification (SECRET, PII, UNTRUSTED, MALICIOUS)     ║
+║  ✅ Détection d'exfiltration multi-step                         ║
+║  ✅ Règles DENY/REVIEW configurables                            ║
 ║                                                                ║
-║  + toutes les features v3.1 (tokens, Presidio, Redis, etc.)    ║
+║  + v3.2 (Signed Decisions Ed25519, zero-trust)                 ║
+║  + v3.1 (tokens, Presidio, Redis cache)                        ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
@@ -22,6 +23,15 @@ from dataclasses import dataclass, field
 from enum import Enum
 from functools import wraps
 from typing import Optional, Dict, Any, List, Callable, Tuple
+
+try:
+    from taint import TaintTracker, TaintLevel, SinkType
+    _TAINT_AVAILABLE = True
+except ImportError:
+    TaintTracker = None
+    TaintLevel = None
+    SinkType = None
+    _TAINT_AVAILABLE = False
 
 import requests
 import structlog
@@ -131,7 +141,7 @@ except ImportError:
 
 
 # -----------------------------------------------------------------------------
-# SIGNED DECISIONS (Ed25519) — ✅ NEW v3.2
+# SIGNED DECISIONS (Ed25519) — v3.2
 # -----------------------------------------------------------------------------
 try:
     from signing import DecisionVerifier
@@ -143,7 +153,7 @@ except ImportError:
 
 
 # -----------------------------------------------------------------------------
-# MOTEUR DE POLITIQUES (inchangé depuis v3.1)
+# MOTEUR DE POLITIQUES
 # -----------------------------------------------------------------------------
 class PolicyEngine:
     """
@@ -636,7 +646,7 @@ class AgentGuard:
         use_llm_judge: Optional[bool] = None,
         redis_url: Optional[str] = None,
         fail_open: bool = False,
-        agent_id: Optional[str] = None,  # ✅ NEW v3.2
+        agent_id: Optional[str] = None,
     ):
         self.collector_url = collector_url.rstrip("/")
         self.api_key = api_key or os.getenv("AGENTGUARD_API_KEY")
@@ -644,7 +654,7 @@ class AgentGuard:
         self.block_on_high = block_on_high
         self.debug = debug
         self.fail_open = fail_open
-        self.agent_id = agent_id or os.getenv("AGENTGUARD_AGENT_ID", "default")  # ✅ NEW v3.2
+        self.agent_id = agent_id or os.getenv("AGENTGUARD_AGENT_ID", "default")
         self.total_spent = 0.0
         self.trace_id = self._generate_id()
         self.spans: List[GuardSpan] = []
@@ -661,9 +671,13 @@ class AgentGuard:
 
         self.policy_engine = PolicyEngine(policies or [], self._redis_url)
 
-        # ✅ NEW v3.2 : Initialisation du vérificateur de décisions signées
+        # v3.2 : Initialisation du vérificateur de décisions signées
         self._verifier = None
         self._init_signed_decisions()
+
+        # ✅ v3.3 : Taint tracker (data flow security)
+        self._taint_tracker = TaintTracker() if _TAINT_AVAILABLE and TaintTracker else None
+        self._taint_counter = 0
 
         logger.info(
             "agentguard_initialized",
@@ -671,10 +685,11 @@ class AgentGuard:
             ml=self.policy_engine.ml_detector.enabled,
             llm_judge=self.policy_engine.use_llm_judge,
             signed_decisions=self._verifier is not None,
+            taint_tracking=self._taint_tracker is not None,
         )
 
     def _init_signed_decisions(self):
-        """✅ NEW v3.2 : Récupère la clé publique du collector pour vérifier les décisions."""
+        """v3.2 : Récupère la clé publique du collector pour vérifier les décisions."""
         if not _SIGNING_AVAILABLE:
             return
 
@@ -692,12 +707,46 @@ class AgentGuard:
                 else:
                     logger.warning("public_key_missing_in_response")
             elif r.status_code == 404:
-                # Collector v3.1 ou antérieur → pas de signed decisions
                 logger.info("signed_decisions_unavailable_collector_outdated")
             else:
                 logger.warning("public_key_fetch_failed", status=r.status_code)
         except Exception as e:
             logger.warning("signed_decisions_init_failed", error=str(e))
+
+    # ✅ v3.3 : Helpers pour taint tracking
+    def _next_taint_id(self, prefix: str = "data") -> str:
+        """Génère un ID unique pour le taint tracking."""
+        self._taint_counter += 1
+        return f"{prefix}_{self._taint_counter}"
+
+    def _check_taint_flow(self, label, sink) -> Optional[str]:
+        """Vérifie un flux de données, retourne la raison si violation."""
+        if not self._taint_tracker or label is None:
+            return None
+        return self._taint_tracker.check_sink(label, sink)
+
+    def track_input(self, value: Any, source: str = "user") -> Any:
+        """
+        API publique : marque une donnée entrante pour taint tracking.
+        Retourne la valeur inchangée (pass-through).
+        
+        Usage :
+            user_text = guard.track_input(request.body, "web_form")
+            api_key = guard.track_input(os.getenv("API_KEY"), "env_var")
+        """
+        if not self._taint_tracker:
+            return value
+        data_id = self._next_taint_id("input")
+        self._taint_tracker.label(data_id, value, source=source)
+        return value
+
+    def get_taint_report(self) -> Dict[str, Any]:
+        """Retourne le rapport de taint tracking de la session."""
+        if not self._taint_tracker:
+            return {"enabled": False}
+        report = self._taint_tracker.get_report()
+        report["enabled"] = True
+        return report
 
     @staticmethod
     def _timeout_env(name, default):
@@ -817,10 +866,9 @@ class AgentGuard:
         
         return cost, input_tokens, output_tokens
 
-    # ✅ NEW v3.2 : Demande une décision signée au collector
     def _request_signed_decision(self, tool_name: str, params: Dict[str, Any]) -> Optional[Dict]:
         """
-        Demande au collector une décision signée pour une tool call.
+        v3.2 : Demande au collector une décision signée pour une tool call.
         Retourne None si le collector est indisponible (fallback sur check local).
         """
         if not self._verifier:
@@ -844,7 +892,6 @@ class AgentGuard:
 
             signed = r.json()
 
-            # Vérifie la signature Ed25519
             if not self._verifier.verify(dict(signed)):
                 logger.error("signed_decision_invalid_signature")
                 return None
@@ -862,6 +909,23 @@ class AgentGuard:
             span_id = self._generate_id()
             start = time.time()
             input_text = self._extract_input(args, kwargs)
+
+            # ✅ v3.3 : Marque l'input utilisateur comme UNTRUSTED
+            if self._taint_tracker and input_text:
+                input_id = self._next_taint_id("llm_input")
+                self._taint_tracker.label(
+                    input_id, input_text,
+                    level=TaintLevel.UNTRUSTED if TaintLevel else None,
+                    source="user_prompt",
+                )
+                # Si l'input contient des patterns SECRET, re-label
+                if TaintLevel:
+                    secret_label = self._taint_tracker._auto_classify(input_text)
+                    if secret_label == TaintLevel.SECRET:
+                        lbl = self._taint_tracker.get_label(input_id)
+                        if lbl:
+                            lbl.level = TaintLevel.SECRET
+                            lbl.tags.add("secret_in_prompt")
 
             # Check INPUT
             checks = [
@@ -958,7 +1022,52 @@ class AgentGuard:
         # Check local (rapide)
         check = self.policy_engine.check_tool_policy(tool_name, params, budget_remaining)
 
-        # ✅ NEW v3.2 : Autorité serveur — une décision signée DENY gagne toujours
+        # ✅ v3.3 : Taint flow check
+        taint_violation = None
+        taint_combined_dict = None
+        if self._taint_tracker and params and TaintLevel and SinkType:
+            # Combine tous les paramètres en un seul label
+            param_ids = []
+            for k, v in (params or {}).items():
+                did = self._next_taint_id(f"param_{k}")
+                self._taint_tracker.label(did, v, source=f"param:{k}")
+                param_ids.append(did)
+            
+            if param_ids:
+                combined = self._taint_tracker.combine(param_ids, new_id=self._next_taint_id("combined"))
+                taint_combined_dict = combined.to_dict()
+                
+                # Détermine le type de sink selon l'outil
+                if tool_name in ("execute_command", "run_shell", "subprocess"):
+                    sink = SinkType.DANGEROUS_TOOL
+                elif tool_name in ("http_request", "fetch", "send_email", "webhook"):
+                    sink = SinkType.NETWORK_EXTERNAL
+                elif tool_name in ("write_file", "append_file"):
+                    sink = SinkType.FILESYSTEM
+                elif tool_name in ("query_database", "db_execute"):
+                    sink = SinkType.DATABASE
+                else:
+                    sink = SinkType.INTERNAL
+                
+                taint_violation = self._check_taint_flow(combined, sink)
+                
+                if taint_violation and taint_violation.startswith("DENY:"):
+                    span = GuardSpan(
+                        span_id=span_id, trace_id=self.trace_id, span_type="tool_call",
+                        timestamp=start, latency_ms=(time.time() - start) * 1000,
+                        input_data={"tool": tool_name, "params": params, "taint": taint_combined_dict},
+                        output_data={"blocked": True, "taint_violation": taint_violation},
+                        security_checks=[check],
+                        blocked=True,
+                        block_reason=f"[TAINT] {taint_violation}",
+                        input_tokens=0,
+                        output_tokens=0,
+                    )
+                    self.spans.append(span)
+                    self._send_to_collector(span)
+                    raise SecurityException(f"🛡️ Taint DENY: {taint_violation}")
+
+        # v3.2 : Autorité serveur — une décision signée DENY gagne toujours
         signed_decision = None
         if self._verifier:
             signed_decision = self._request_signed_decision(tool_name, params or {})
@@ -1013,11 +1122,17 @@ class AgentGuard:
             self._send_to_collector(span)
             raise
 
+        output_data = {"result": str(result)[:500]}
+        if taint_combined_dict:
+            output_data["taint"] = taint_combined_dict
+        if taint_violation and taint_violation.startswith("REVIEW:"):
+            output_data["taint_review"] = taint_violation
+
         span = GuardSpan(
             span_id=span_id, trace_id=self.trace_id, span_type="tool_call",
             timestamp=start, latency_ms=(time.time() - start) * 1000,
             input_data={"tool": tool_name, "params": params},
-            output_data={"result": str(result)[:500]},
+            output_data=output_data,
             security_checks=[check],
             input_tokens=0,
             output_tokens=0,
@@ -1031,7 +1146,7 @@ class AgentGuard:
         total_input_tokens = sum(s.input_tokens for s in self.spans)
         total_output_tokens = sum(s.output_tokens for s in self.spans)
         
-        return {
+        report = {
             "trace_id": self.trace_id,
             "total_spans": len(self.spans),
             "blocked_operations": sum(1 for s in self.spans if s.blocked),
@@ -1040,11 +1155,18 @@ class AgentGuard:
             "total_input_tokens": total_input_tokens,
             "total_output_tokens": total_output_tokens,
             "total_tokens": total_input_tokens + total_output_tokens,
-            "signed_decisions_enabled": self._verifier is not None,  # ✅ NEW v3.2
+            "signed_decisions_enabled": self._verifier is not None,
+            "taint_tracking_enabled": self._taint_tracker is not None,
         }
+        
+        # ✅ v3.3 : Ajouter le rapport taint
+        if self._taint_tracker:
+            report["taint"] = self._taint_tracker.get_report()
+        
+        return report
 
 
-__version__ = "3.2.0"
+__version__ = "3.3.0"
 
 __all__ = [
     "AgentGuard", "SecurityException", "RiskLevel", "SecurityAction",
