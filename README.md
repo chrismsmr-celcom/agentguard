@@ -1,16 +1,17 @@
-🛡️ AgentGuard
+# 🐕‍🦺 Cerbere — The Three-Headed Guardian of AI Agents
 
 Runtime Security & Observability for AI Agents
+> **No agent passes unseen.**
 
-AgentGuard is a source-available security and observability layer for agentic AI systems.
+Cerbere is a runtime security control plane for autonomous AI agents. It intercepts every LLM call and tool invocation, applies multi-layered security policies, and blocks threats in real-time.
 
-It sits between your AI agents, LLMs, and tools to observe execution, detect threats, enforce policies, and block risky actions at runtime.
+## 🏛️ The Three Heads
 
 One SDK. One Collector. Three detection layers.
 
 ⸻
 
-Why AgentGuard?
+Why Cerbere -- AgentGuard?
 
 AI agents can call LLMs, APIs, databases, browsers, email systems, code interpreters, and other tools.
 
@@ -85,7 +86,7 @@ AgentGuard provides a runtime security layer designed specifically for agentic w
 
 🧠 Multi-Layer Detection
 
-AgentGuard combines three detection mechanisms:
+Cerbere -- AgentGuard combines three detection mechanisms:
 
 1. Rules / Regex — fast deterministic checks
 2. ML Classifier — semantic threat detection
@@ -130,7 +131,7 @@ Budget Overflow	✅	—	—	Block
 Suspicious Input	✅	✅	✅	Alert
 Ambiguous Behavior	—	⚠️	✅	Review
 
-AgentGuard is intended to provide defense in depth, not a guarantee that every attack will be detected.
+Cerbere -- AgentGuard is intended to provide defense in depth, not a guarantee that every attack will be detected.
 
 ⸻
 
