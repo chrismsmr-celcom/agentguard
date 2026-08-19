@@ -13,7 +13,6 @@ import hashlib
 try:
     import psycopg
     import psycopg.rows
-    import psycopg_pool
 
     # Wrapper compat psycopg2-style pour minimiser les changements
     class _PsycopgCompat:
@@ -22,10 +21,8 @@ try:
 
         @staticmethod
         def connect(dsn=None, **kwargs):
-            # psycopg3 utilise 'conninfo' ou premier arg positional
             if dsn:
                 kwargs["conninfo"] = dsn
-            # Retire les kwargs psycopg2 non supportés
             kwargs.pop("sslmode", None)
             if dsn and "sslmode=require" not in dsn:
                 kwargs["conninfo"] = dsn + " sslmode=require"
@@ -37,8 +34,7 @@ try:
     psycopg2 = _PsycopgCompat()
 except ImportError:
     psycopg2 = None
-except ImportError:
-    psycopg2 = None
+
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template_string, make_response, redirect, url_for, g
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
@@ -115,10 +111,9 @@ def get_pg_conn():
     try:
         conn = psycopg2.connect(DATABASE_URL)
     except TypeError:
-        # Fallback si dsn posarg ne passe pas
         import psycopg
         conn = psycopg.connect(DATABASE_URL)
-    conn.autocommit = False  # on gère les commits manuellement
+    conn.autocommit = False
     return conn
 
 def get_sqlite_conn():
@@ -540,6 +535,7 @@ def receive_span():
         })
 
     return jsonify({"status": "ok"}), 201
+
 # ── API : QUERIES ────────────────────────────────────────────────────────────
 @app.route("/api/traces")
 def list_traces():
@@ -547,7 +543,8 @@ def list_traces():
     conn = get_db()
 
     if is_pg:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        # ✅ FIX: row_factory pour psycopg3
+        cur = conn.cursor(row_factory=psycopg2.extras.RealDictCursor)
         org_filter = "%s"
         concat_fn = "STRING_AGG(DISTINCT detection_layer, ',')"
     else:
@@ -578,7 +575,7 @@ def get_trace(trace_id):
     conn = get_db()
 
     if is_pg:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur = conn.cursor(row_factory=psycopg2.extras.RealDictCursor)
         cur.execute("SELECT * FROM spans WHERE trace_id = %s AND org_id = %s ORDER BY timestamp", (trace_id, g.org_id))
     else:
         cur = conn.cursor()
@@ -805,7 +802,7 @@ def api_models():
     is_pg = DB_TYPE == "postgres" and DATABASE_URL
     conn = get_db()
     if is_pg:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur = conn.cursor(row_factory=psycopg2.extras.RealDictCursor)
         p = "%s"
     else:
         cur = conn.cursor()
@@ -1971,7 +1968,7 @@ def trace_detail(trace_id):
     is_pg = DB_TYPE == "postgres" and DATABASE_URL
     conn = get_db()
     if is_pg:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur = conn.cursor(row_factory=psycopg2.extras.RealDictCursor)
         cur.execute("SELECT * FROM spans WHERE trace_id = %s AND org_id = %s ORDER BY timestamp", (trace_id, g.org_id))
     else:
         cur = conn.cursor()
