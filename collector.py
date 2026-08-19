@@ -2107,7 +2107,51 @@ if _API_KEY_WAS_GENERATED and DB_TYPE == "postgres":
     print("[AG] 🚨 PostgreSQL actif (config prod) mais AGENTGUARD_API_KEY n'est "
           "pas fixée — chaque redémarrage invalidera les intégrations SDK "
           "existantes. Configure AGENTGUARD_API_KEY dans les variables d'env Render.")
+# ── SIGNED DECISIONS (Ed25519) ───────────────────────────────────
+from signing import DecisionSigner
 
+SIGNING_KEY_PEM = os.environ.get("CERBERE_SIGNING_KEY", "")
+_decision_signer = DecisionSigner(SIGNING_KEY_PEM or None)
+
+@app.get("/api/public-key")
+def public_key():
+    """Le SDK récupère la clé publique pour vérifier les décisions."""
+    return jsonify({"public_key_pem": _decision_signer.public_key_pem()})
+
+@app.post("/api/decide")
+@limiter.limit("120 per minute")
+def decide():
+    """Décision de sécurité signée côté serveur (autorité zero-trust)."""
+    data = request.get_json(silent=True) or {}
+    tool_name = str(data.get("tool_name", ""))
+    params = data.get("params", {}) or {}
+    agent_id = str(data.get("agent_id", g.org_id))
+
+    # Évaluation via le Policy Engine (capabilities + rules)
+    try:
+        from policy import PolicyEngine
+        engine = PolicyEngine(policies_dir=os.environ.get("CERBERE_POLICIES_DIR", "./policies"))
+        pd = engine.evaluate_tool_call(agent_id, tool_name, params)
+        action = pd.action.value
+        reason = pd.reason
+        policy_name = pd.policy_name
+        policy_version = pd.policy_version
+    except Exception as e:
+        # Fail-closed : si le policy engine plante, on refuse
+        action = "DENY"
+        reason = f"policy_engine_error: {e}"
+        policy_name = "fail_closed"
+        policy_version = 0
+
+    signed = _decision_signer.sign_decision({
+        "request_id": secrets.token_hex(8),
+        "action": action,
+        "policy_name": policy_name,
+        "policy_version": policy_version,
+        "reason": reason,
+    })
+    return jsonify(signed)
+    
 if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("PORT", 8080))
