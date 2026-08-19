@@ -11,8 +11,32 @@ import time
 import secrets
 import hashlib
 try:
-    import psycopg2
-    import psycopg2.extras
+    import psycopg
+    import psycopg.rows
+    import psycopg_pool
+
+    # Wrapper compat psycopg2-style pour minimiser les changements
+    class _PsycopgCompat:
+        class extras:
+            RealDictCursor = psycopg.rows.dict_row
+
+        @staticmethod
+        def connect(dsn=None, **kwargs):
+            # psycopg3 utilise 'conninfo' ou premier arg positional
+            if dsn:
+                kwargs["conninfo"] = dsn
+            # Retire les kwargs psycopg2 non supportés
+            kwargs.pop("sslmode", None)
+            if dsn and "sslmode=require" not in dsn:
+                kwargs["conninfo"] = dsn + " sslmode=require"
+            elif dsn:
+                kwargs["conninfo"] = dsn
+            conn = psycopg.connect(**kwargs)
+            conn.autocommit = True
+            return conn
+    psycopg2 = _PsycopgCompat()
+except ImportError:
+    psycopg2 = None
 except ImportError:
     psycopg2 = None
 from datetime import datetime, timedelta
