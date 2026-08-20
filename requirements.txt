@@ -66,3 +66,6 @@ opentelemetry-instrumentation-requests>=0.43b0,<1.0.0
 # -----------------------------------------------------------------------------
 # Voir requirements-ml.txt pour torch + transformers
 # Installés via : pip install -r requirements-ml.txt
+# Optionnel : Prompt Guard en local (sinon utilise HF Inference API)
+transformers>=4.40.0
+torch>=2.0.0
