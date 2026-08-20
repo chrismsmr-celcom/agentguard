@@ -1,13 +1,15 @@
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║  🛡️ AGENTGUARD SDK v3.4.0 - PRODUCTION READY                   ║
+║  🛡️ AGENTGUARD SDK v3.5.0 - PRODUCTION READY                   ║
 ║                                                                ║
-║  Changements majeurs v3.4 :                                    ║
-║  ✅ Atomic Budgets (Redis transactions) — anti race-condition   ║
-║  ✅ Reservation avant exécution + réconciliation après          ║
-║  ✅ Budget session + daily séparés                              ║
-║  ✅ Rollback automatique si échec                               ║
+║  Changements majeurs v3.5 :                                    ║
+║  ✅ Triple Judge System (defense in depth)                      ║
+║  ✅ Prompt Guard (Meta) — injection specialist, ~10ms           ║
+║  ✅ Llama Guard 3 (Meta) — content safety, OWASP taxonomy       ║
+║  ✅ DeepSeek — contextual tie-breaker                           ║
+║  ✅ Vote logic: ANY attack → DENY, ALL safe → ALLOW             ║
 ║                                                                ║
+║  + v3.4 (Atomic Budgets, Redis transactions)                   ║
 ║  + v3.3 (Taint Tracking, data flow security)                   ║
 ║  + v3.2 (Signed Decisions Ed25519, zero-trust)                 ║
 ║  + v3.1 (tokens, Presidio, Redis cache)                        ║
@@ -41,6 +43,15 @@ except ImportError:
     AtomicBudgetManager = None
     BudgetExceededException = None
     _BUDGET_MANAGER_AVAILABLE = False
+
+try:
+    from judges import TripleJudge, JudgeResult, JudgeVerdict
+    _JUDGES_AVAILABLE = True
+except ImportError:
+    TripleJudge = None
+    JudgeResult = None
+    JudgeVerdict = None
+    _JUDGES_AVAILABLE = False
 
 import requests
 import structlog
@@ -167,10 +178,11 @@ except ImportError:
 class PolicyEngine:
     """
     Moteur de détection multi-couches sécurisé :
-    1. ML (prioritaire, si activé)
-    2. Regex forte (patterns déterministes)
-    3. LLM Judge (cas ambigus, via API externe)
-    4. Regex faible (fallback)
+    1. Triple Judge (v3.5) — Prompt Guard + Llama Guard + DeepSeek
+    2. ML (prioritaire, si activé)
+    3. Regex forte (patterns déterministes)
+    4. LLM Judge (cas ambigus, via API externe)
+    5. Regex faible (fallback)
     """
 
     _STRONG_PATTERNS = None
@@ -213,6 +225,9 @@ class PolicyEngine:
         for policy in self.policies:
             if policy.get("type") == "tool_whitelist":
                 self._allowed_tools.update(policy.get("allowed_tools", []))
+        
+        # ✅ v3.5 : Triple Judge (injecté par AgentGuard après init)
+        self._triple_judge = None
 
     def _init_presidio(self):
         """Initialise Presidio pour détection PII robuste."""
@@ -304,12 +319,56 @@ class PolicyEngine:
         logger.info("regex_patterns_compiled", strong=len(strong), weak=len(weak))
 
     def check_injection(self, text: str) -> SecurityCheck:
-        """Détection multi-couches avec priorité ML > Regex > LLM Judge."""
+        """
+        Détection multi-couches avec priorité :
+        1. Triple Judge (v3.5) — Prompt Guard + Llama Guard + DeepSeek
+        2. ML detector (fallback)
+        3. Regex forte (patterns déterministes)
+        4. LLM Judge seul (cas ambigus)
+        5. Regex faible (fallback ultime)
+        """
         text = str(text or "")
 
         if not text.strip():
             return SecurityCheck("prompt_injection", True, RiskLevel.LOW, "Empty prompt")
 
+        # ✅ v3.5 : Triple Judge en priorité (defense in depth)
+        if self._triple_judge is not None:
+            try:
+                tj_result = self._triple_judge.evaluate(text)
+                verdict = tj_result.get("final_verdict")
+                
+                if verdict == "DENY":
+                    return SecurityCheck(
+                        "prompt_injection", False, RiskLevel.HIGH,
+                        f"[TRIPLE JUDGE] {tj_result.get('reason', 'attack detected')}",
+                        {
+                            "judges": tj_result.get("judges", {}),
+                            "confidence": tj_result.get("confidence", "high"),
+                            "latency_ms": tj_result.get("total_latency_ms", 0),
+                            "layer": "triple_judge",
+                        },
+                        SecurityAction.BLOCK,
+                    )
+                elif verdict == "REVIEW":
+                    return SecurityCheck(
+                        "prompt_injection", not self.block_on_ambiguous,
+                        RiskLevel.MEDIUM,
+                        f"[TRIPLE JUDGE] {tj_result.get('reason', 'judges disagree')}",
+                        {
+                            "judges": tj_result.get("judges", {}),
+                            "confidence": tj_result.get("confidence", "low"),
+                            "latency_ms": tj_result.get("total_latency_ms", 0),
+                            "layer": "triple_judge",
+                        },
+                        SecurityAction.BLOCK if self.block_on_ambiguous else SecurityAction.REVIEW,
+                    )
+                # verdict == "ALLOW" → on continue avec les checks de backup (regex)
+                # pour défense en profondeur supplémentaire
+            except Exception as e:
+                logger.warning("triple_judge_failed_falling_back", error=str(e))
+
+        # Fallback : détection traditionnelle (ML + Regex + LLM Judge)
         if self.ml_detector.enabled:
             ml_result = self.ml_detector.predict(text)
             score = ml_result["score"]
@@ -704,13 +763,45 @@ class AgentGuard:
                     redis=True,
                 )
             else:
-                # Mode mémoire (dev ou pas de Redis)
                 self._budget_manager = AtomicBudgetManager(
                     redis_url=None,
                     max_budget_per_session=self.max_budget,
                     max_budget_per_day=float(os.getenv("AGENTGUARD_DAILY_BUDGET", "100.0")),
                 )
                 logger.info("atomic_budget_manager_enabled", mode="memory")
+
+        # ✅ v3.5 : Triple Judge System (Prompt Guard + Llama Guard + DeepSeek)
+        self._triple_judge = None
+        if _JUDGES_AVAILABLE and TripleJudge and JudgeResult and JudgeVerdict:
+            def deepseek_callback(text: str):
+                """Callback DeepSeek qui réutilise le LLM Judge existant."""
+                check = self.policy_engine._call_llm_judge(text)
+                if check is None:
+                    return JudgeResult("deepseek", JudgeVerdict.UNAVAILABLE, 0.0)
+                if check.passed:
+                    score = check.metadata.get("llm_score", 0)
+                    return JudgeResult(
+                        "deepseek", JudgeVerdict.SAFE,
+                        1.0 - (score / 100.0),
+                        reason=check.details[:200],
+                    )
+                score = check.metadata.get("llm_score", 80)
+                return JudgeResult(
+                    "deepseek", JudgeVerdict.ATTACK,
+                    score / 100.0,
+                    reason=check.details[:200],
+                )
+            
+            try:
+                self._triple_judge = TripleJudge(deepseek_fn=deepseek_callback)
+                # Injection dans le PolicyEngine pour check_injection
+                self.policy_engine._triple_judge = self._triple_judge
+                logger.info(
+                    "triple_judge_enabled",
+                    status=self._triple_judge.get_status(),
+                )
+            except Exception as e:
+                logger.warning("triple_judge_init_failed", error=str(e))
 
         logger.info(
             "agentguard_initialized",
@@ -720,6 +811,7 @@ class AgentGuard:
             signed_decisions=self._verifier is not None,
             taint_tracking=self._taint_tracker is not None,
             atomic_budget=self._budget_manager is not None,
+            triple_judge=self._triple_judge is not None,
         )
 
     def _init_signed_decisions(self):
@@ -790,6 +882,16 @@ class AgentGuard:
         return {
             "enabled": True,
             **self._budget_manager.get_status(self.agent_id),
+        }
+
+    # ✅ v3.5 : API triple judge status
+    def get_judges_status(self) -> Dict[str, Any]:
+        """Retourne le statut des 3 juges (Prompt Guard, Llama Guard, DeepSeek)."""
+        if not self._triple_judge:
+            return {"enabled": False}
+        return {
+            "enabled": True,
+            **self._triple_judge.get_status(),
         }
 
     @staticmethod
@@ -962,7 +1064,6 @@ class AgentGuard:
                     level=TaintLevel.UNTRUSTED if TaintLevel else None,
                     source="user_prompt",
                 )
-                # Si l'input contient des patterns SECRET, re-label
                 if TaintLevel:
                     secret_label = self._taint_tracker._auto_classify(input_text)
                     if secret_label == TaintLevel.SECRET:
@@ -998,10 +1099,9 @@ class AgentGuard:
             # ✅ v3.4 : Reservation atomique du budget AVANT l'exécution
             reservation = None
             if self._budget_manager:
-                # Estime le coût (coût moyen par token × estimation tokens input)
-                estimated_tokens = max(1, len(input_text) / 4)  # ~4 chars/token
-                estimated_cost = estimated_tokens * 5e-6  # ~$5/M tokens (GPT-4o avg)
-                estimated_cost = max(0.001, min(estimated_cost, 0.10))  # clamp
+                estimated_tokens = max(1, len(input_text) / 4)
+                estimated_cost = estimated_tokens * 5e-6
+                estimated_cost = max(0.001, min(estimated_cost, 0.10))
                 
                 reservation = self._budget_manager.reserve(
                     org_id=self.agent_id,
@@ -1010,7 +1110,6 @@ class AgentGuard:
                 )
                 
                 if reservation is None:
-                    # Budget épuisé
                     span = GuardSpan(
                         span_id=span_id, trace_id=self.trace_id, span_type="llm_call",
                         timestamp=start, latency_ms=(time.time() - start) * 1000,
@@ -1030,7 +1129,6 @@ class AgentGuard:
             try:
                 result = func(*args, **kwargs)
             except Exception as exc:
-                # ✅ v3.4 : Rollback reservation si l'appel échoue
                 if reservation and self._budget_manager:
                     self._budget_manager.rollback(reservation)
                 
@@ -1051,7 +1149,6 @@ class AgentGuard:
             latency = (time.time() - start) * 1000
             cost, input_tokens, output_tokens = self._estimate_cost(kwargs, result)
             
-            # ✅ v3.4 : Réconciliation avec le coût réel
             if reservation and self._budget_manager:
                 self._budget_manager.reconcile(reservation, cost)
             
@@ -1103,14 +1200,12 @@ class AgentGuard:
         start = time.time()
         budget_remaining = self.max_budget - self.total_spent
 
-        # Check local (rapide)
         check = self.policy_engine.check_tool_policy(tool_name, params, budget_remaining)
 
         # ✅ v3.3 : Taint flow check
         taint_violation = None
         taint_combined_dict = None
         if self._taint_tracker and params and TaintLevel and SinkType:
-            # Combine tous les paramètres en un seul label
             param_ids = []
             for k, v in (params or {}).items():
                 did = self._next_taint_id(f"param_{k}")
@@ -1121,7 +1216,6 @@ class AgentGuard:
                 combined = self._taint_tracker.combine(param_ids, new_id=self._next_taint_id("combined"))
                 taint_combined_dict = combined.to_dict()
                 
-                # Détermine le type de sink selon l'outil
                 if tool_name in ("execute_command", "run_shell", "subprocess"):
                     sink = SinkType.DANGEROUS_TOOL
                 elif tool_name in ("http_request", "fetch", "send_email", "webhook"):
@@ -1242,20 +1336,23 @@ class AgentGuard:
             "signed_decisions_enabled": self._verifier is not None,
             "taint_tracking_enabled": self._taint_tracker is not None,
             "atomic_budget_enabled": self._budget_manager is not None,
+            "triple_judge_enabled": self._triple_judge is not None,
         }
         
-        # ✅ v3.3 : Ajouter le rapport taint
         if self._taint_tracker:
             report["taint"] = self._taint_tracker.get_report()
         
-        # ✅ v3.4 : Ajouter le statut budget
         if self._budget_manager:
             report["budget"] = self._budget_manager.get_status(self.agent_id)
+        
+        # ✅ v3.5 : Statut des juges
+        if self._triple_judge:
+            report["judges"] = self._triple_judge.get_status()
         
         return report
 
 
-__version__ = "3.4.0"
+__version__ = "3.5.0"
 
 __all__ = [
     "AgentGuard", "SecurityException", "RiskLevel", "SecurityAction",
