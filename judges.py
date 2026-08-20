@@ -381,31 +381,39 @@ class TripleJudge:
             "judges": {...},
             "total_latency_ms": float,
             "reason": str,
+            "all_unavailable": bool,  # ✅ NEW : tous les juges indisponibles
         }
         """
         start = time.time()
         judges_results = {}
+        available_count = 0
         
         # Judge 1 : Prompt Guard (rapide)
         pg_result = self.prompt_guard.evaluate(text)
         judges_results["prompt_guard"] = pg_result.to_dict()
+        if pg_result.verdict != JudgeVerdict.UNAVAILABLE:
+            available_count += 1
         
         # Si ATTACK clair → early return
         if pg_result.is_attack() and pg_result.score >= 0.8:
             return self._build_result(
                 "DENY", "high", judges_results, start,
                 f"Prompt Guard: {pg_result.reason}",
+                all_unavailable=False,
             )
         
         # Judge 2 : Llama Guard (modération)
         lg_result = self.llama_guard.evaluate(text)
         judges_results["llama_guard"] = lg_result.to_dict()
+        if lg_result.verdict != JudgeVerdict.UNAVAILABLE:
+            available_count += 1
         
         # Si ATTACK clair → early return
         if lg_result.is_attack():
             return self._build_result(
                 "DENY", "high", judges_results, start,
                 f"Llama Guard: {lg_result.reason}",
+                all_unavailable=False,
             )
         
         # Si les deux sont SAFE → ALLOW (rapide, pas besoin de DeepSeek)
@@ -413,6 +421,7 @@ class TripleJudge:
             return self._build_result(
                 "ALLOW", "high", judges_results, start,
                 "All specialized judges agree: safe",
+                all_unavailable=False,
             )
         
         # Sinon : cas ambigu → DeepSeek en tie-breaker
@@ -421,16 +430,21 @@ class TripleJudge:
                 ds_result = self._deepseek_fn(text)
                 judges_results["deepseek"] = ds_result.to_dict() if hasattr(ds_result, "to_dict") else ds_result
                 
+                if ds_result.verdict != JudgeVerdict.UNAVAILABLE:
+                    available_count += 1
+                
                 if isinstance(ds_result, JudgeResult):
                     if ds_result.is_attack():
                         return self._build_result(
                             "DENY", "medium", judges_results, start,
                             f"DeepSeek tie-breaker: {ds_result.reason}",
+                            all_unavailable=False,
                         )
                     elif ds_result.is_safe():
                         return self._build_result(
                             "ALLOW", "medium", judges_results, start,
                             "DeepSeek confirmed safe after judge disagreement",
+                            all_unavailable=False,
                         )
             except Exception as e:
                 judges_results["deepseek"] = {
@@ -438,19 +452,29 @@ class TripleJudge:
                     "reason": str(e)[:100],
                 }
         
+        # ✅ NEW : Si AUCUN juge n'est disponible → ALLOW (fallback sur regex)
+        if available_count == 0:
+            return self._build_result(
+                "ALLOW", "low", judges_results, start,
+                "All judges unavailable — falling back to regex/ML detection",
+                all_unavailable=True,
+            )
+        
         # Désaccord persistant → REVIEW
         return self._build_result(
             "REVIEW", "low", judges_results, start,
             "Judges disagree — human review recommended",
+            all_unavailable=False,
         )
     
-    def _build_result(self, verdict, confidence, judges, start, reason) -> Dict:
+    def _build_result(self, verdict, confidence, judges, start, reason, all_unavailable=False) -> Dict:
         return {
             "final_verdict": verdict,
             "confidence": confidence,
             "judges": judges,
             "total_latency_ms": round((time.time() - start) * 1000, 1),
             "reason": reason,
+            "all_unavailable": all_unavailable,
         }
     
     def get_status(self) -> Dict[str, Any]:
