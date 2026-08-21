@@ -1,9 +1,14 @@
-"""Authentication + session management."""
+"""Authentication + session management + RBAC (Identity Engine Phase 1)."""
 import hashlib
 import secrets
 import structlog
-from flask import Blueprint, request, jsonify, render_template_string, redirect, url_for, g, current_app
-from collector.db import get_pg_conn, is_postgres
+from functools import wraps
+from typing import Optional, List
+from flask import (
+    Blueprint, request, jsonify, render_template_string,
+    redirect, url_for, g, current_app,
+)
+from collector.db import get_pg_conn, is_postgres, resolve_agent_identity
 import sqlite3
 import os
 
@@ -23,6 +28,11 @@ PROTECTED_ENDPOINTS = {
     "api.api_recent_events", "api.api_trend_daily", "api.get_llm_stats",
     "api.api_audit_trail", "api.api_checks_daily", "api.api_models_daily",
     "audit.audit_stats", "audit.audit_verify", "audit.audit_query",
+    # ✅ NEW : Identity endpoints (Phase 2)
+    "identity.create_tenant", "identity.create_org",
+    "identity.create_user", "identity.create_agent",
+    "identity.revoke_agent", "identity.list_agents",
+    "identity.get_me",
 }
 
 
@@ -40,28 +50,58 @@ def hash_key(key: str) -> str:
 
 
 def _lookup_org_by_key(key: str):
+    """Legacy : lookup dans la table api_keys (ancien système)."""
     if not key:
         return None
     key_hash = hash_key(key)
     if is_postgres():
         conn = get_pg_conn()
         cur = conn.cursor()
-        cur.execute("SELECT org_id FROM api_keys WHERE key_hash = %s AND active = TRUE", (key_hash,))
+        try:
+            cur.execute(
+                "SELECT org_id FROM api_keys WHERE key_hash = %s AND active = TRUE",
+                (key_hash,),
+            )
+            row = cur.fetchone()
+        finally:
+            conn.close()
     else:
         conn = sqlite3.connect(DB_SQLITE_PATH)
         cur = conn.cursor()
-        cur.execute("SELECT org_id FROM api_keys WHERE key_hash = ? AND active = 1", (key_hash,))
-    row = cur.fetchone()
-    conn.close()
+        try:
+            cur.execute(
+                "SELECT org_id FROM api_keys WHERE key_hash = ? AND active = 1",
+                (key_hash,),
+            )
+            row = cur.fetchone()
+        finally:
+            conn.close()
     return row[0] if row else None
 
 
 def resolve_org_id(key: str):
+    """
+    Résout une clé API en org_id.
+    Backward compatible : supporte les anciennes clés "ag-xxx" et les nouvelles
+    clés structurées "ag_{tenant}_{org}_{agent}_{random}".
+    """
     if not key:
         return None
+    
     api_key = current_app.config["API_KEY"]
+    
+    # 1. Clé API globale legacy (ancien système)
     if api_key and safe_compare(key, api_key):
         return "default"
+    
+    # 2. ✅ NEW : Nouvelle clé agent (format structuré)
+    identity = resolve_agent_identity(key)
+    if identity:
+        # Stocke l'identité complète dans g pour usage ultérieur
+        g.agent_identity = identity
+        return identity["org_id"]
+    
+    # 3. Fallback : Clé API legacy dans api_keys table
     return _lookup_org_by_key(key)
 
 
@@ -86,37 +126,228 @@ def _session_org_id(token: str):
         if is_postgres():
             conn = get_pg_conn()
             cur = conn.cursor()
-            cur.execute("SELECT 1 FROM api_keys WHERE org_id = %s AND key_hash = %s AND active = TRUE", (org_id, key_hash))
+            try:
+                cur.execute(
+                    "SELECT 1 FROM api_keys WHERE org_id = %s AND key_hash = %s AND active = TRUE",
+                    (org_id, key_hash),
+                )
+                valid = cur.fetchone() is not None
+            finally:
+                conn.close()
         else:
             conn = sqlite3.connect(DB_SQLITE_PATH)
             cur = conn.cursor()
-            cur.execute("SELECT 1 FROM api_keys WHERE org_id = ? AND key_hash = ? AND active = 1", (org_id, key_hash))
-        valid = cur.fetchone() is not None
-        conn.close()
+            try:
+                cur.execute(
+                    "SELECT 1 FROM api_keys WHERE org_id = ? AND key_hash = ? AND active = 1",
+                    (org_id, key_hash),
+                )
+                valid = cur.fetchone() is not None
+            finally:
+                conn.close()
         return org_id if valid else None
     except Exception:
         return None
 
 
+# ═══════════════════════════════════════════════════════════════
+# IDENTITY RESOLUTION (Phase 1)
+# ═══════════════════════════════════════════════════════════════
+
+def resolve_full_identity():
+    """
+    Résout l'identité complète depuis la requête courante.
+    Retourne un ResolvedIdentity ou None.
+    
+    À appeler dans les endpoints qui ont besoin de RBAC ou d'identité riche.
+    L'identité est mise en cache dans g.identity.
+    """
+    try:
+        from identity import ResolvedIdentity, IdentityType, Role
+    except ImportError:
+        return None
+    
+    # Déjà résolu ?
+    if hasattr(g, "identity") and g.identity is not None:
+        return g.identity
+    
+    # Agent identity déjà résolu par resolve_org_id ?
+    if hasattr(g, "agent_identity") and g.agent_identity:
+        info = g.agent_identity
+        identity = ResolvedIdentity(
+            identity_type=IdentityType.AGENT,
+            tenant_id=info["tenant_id"],
+            org_id=info["org_id"],
+            subject_id=info["agent_id"],
+            role=Role.DEVELOPER,  # Agents ont le rôle developer par défaut
+            agent_name=info.get("agent_name"),
+        )
+        g.identity = identity
+        return identity
+    
+    # Clé API globale legacy → rôle admin (pour backward compat)
+    api_key = current_app.config["API_KEY"]
+    if api_key:
+        key = request.headers.get("X-API-Key", "").strip()
+        if key and safe_compare(key, api_key):
+            identity = ResolvedIdentity(
+                identity_type=IdentityType.SYSTEM,
+                tenant_id="default",
+                org_id="default",
+                subject_id="system_legacy_key",
+                role=Role.ADMIN,  # Clé globale = admin
+            )
+            g.identity = identity
+            return identity
+    
+    # Session user (TODO Phase 2 : enrichir login pour stocker user_identity)
+    if hasattr(g, "user_identity") and g.user_identity:
+        g.identity = g.user_identity
+        return g.identity
+    
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════
+# RBAC DECORATORS (Phase 1)
+# ═══════════════════════════════════════════════════════════════
+
+def require_role(*required_roles: str):
+    """
+    Décorateur Flask pour restreindre un endpoint à certains rôles.
+    
+    Usage:
+        @auth_bp.route("/admin/users")
+        @require_role("admin")
+        def list_users():
+            ...
+        
+        @auth_bp.route("/traces")
+        @require_role("admin", "developer", "auditor")
+        def list_traces():
+            ...
+    """
+    try:
+        from identity import Role
+        required = [Role(r) for r in required_roles]
+    except (ImportError, ValueError):
+        # identity module non disponible ou rôle invalide
+        required = []
+    
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            # Auth d'abord
+            if not require_auth():
+                return jsonify({"error": "Unauthorized"}), 401
+            
+            # Si pas de rôles requis (fallback), on passe
+            if not required:
+                return f(*args, **kwargs)
+            
+            # Vérification rôle
+            identity = resolve_full_identity()
+            if not identity:
+                return jsonify({"error": "Identity not resolved"}), 401
+            
+            # Vérifie qu'au moins un rôle requis est satisfait
+            for req_role in required:
+                if identity.has_role(req_role):
+                    return f(*args, **kwargs)
+            
+            # Aucun rôle ne correspond → Forbidden
+            logger.warning(
+                "rbac_denied",
+                identity=identity.to_dict() if hasattr(identity, "to_dict") else str(identity),
+                required=[r.value for r in required],
+                endpoint=request.endpoint,
+            )
+            return jsonify({
+                "error": "Forbidden",
+                "required_roles": [r.value for r in required],
+                "your_role": identity.role.value if hasattr(identity.role, "value") else str(identity.role),
+            }), 403
+        
+        return wrapper
+    return decorator
+
+
+def require_permission(permission: str):
+    """
+    Décorateur pour vérifier une permission spécifique (plus granulaire).
+    
+    Usage:
+        @auth_bp.route("/admin/orgs")
+        @require_permission("org:create")
+        def create_org():
+            ...
+    """
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            if not require_auth():
+                return jsonify({"error": "Unauthorized"}), 401
+            
+            identity = resolve_full_identity()
+            if not identity:
+                return jsonify({"error": "Identity not resolved"}), 401
+            
+            try:
+                from identity import role_has_permission
+                if not role_has_permission(identity.role, permission):
+                    logger.warning(
+                        "permission_denied",
+                        identity=identity.to_dict() if hasattr(identity, "to_dict") else str(identity),
+                        permission=permission,
+                    )
+                    return jsonify({
+                        "error": "Forbidden",
+                        "required_permission": permission,
+                        "your_role": identity.role.value if hasattr(identity.role, "value") else str(identity.role),
+                    }), 403
+            except ImportError:
+                # identity module non dispo → on laisse passer
+                pass
+            
+            return f(*args, **kwargs)
+        
+        return wrapper
+    return decorator
+
+
+# ═══════════════════════════════════════════════════════════════
+# AUTH MIDDLEWARE
+# ═══════════════════════════════════════════════════════════════
+
 def require_auth():
+    """Vérifie l'authentification et enrichit g.org_id + g.identity."""
     api_key = current_app.config["API_KEY"]
     if not api_key:
         g.org_id = "default"
         return True
+    
     key = request.headers.get("X-API-Key", "").strip()
     if key:
         org_id = resolve_org_id(key)
         if org_id:
             g.org_id = org_id
+            # ✅ Tente de résoudre l'identité complète (non-critique si échec)
+            try:
+                resolve_full_identity()
+            except Exception as e:
+                logger.debug("identity_resolution_failed", error=str(e))
             return True
+    
     auth_cookie = current_app.config["AUTH_COOKIE"]
     org_id = _session_org_id(request.cookies.get(auth_cookie, ""))
     if org_id:
         g.org_id = org_id
         return True
+    
     return False
 
 
+# ── LOGIN HTML ───────────────────────────────────────────────────
 LOGIN_HTML = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><title>AgentGuard — Sign in</title>
 <style>:root{color-scheme:dark;--bg:#07111f;--card:#0d1b2d;--border:#21334a;--text:#eef5ff;--muted:#93a6bd;--accent:#38bdf8;--accent2:#2563eb}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 50% 20%,#12304f 0%,var(--bg) 55%);font-family:Inter,system-ui,sans-serif;color:var(--text)}.wrap{width:min(430px,92vw)}.brand{text-align:center;margin-bottom:24px}.logo{width:56px;height:56px;margin:0 auto 14px;border-radius:16px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent2),var(--accent));font-size:27px}h1{margin:0;font-size:24px}.subtitle{margin:8px 0 0;color:var(--muted);font-size:14px}.card{background:rgba(13,27,45,.94);border:1px solid var(--border);border-radius:20px;padding:28px;backdrop-filter:blur(16px)}label{display:block;margin:0 0 9px;font-size:13px;font-weight:600}input{width:100%;height:48px;border:1px solid #29425e;border-radius:12px;background:#091522;color:var(--text);padding:0 14px;font:inherit}input:focus{border-color:var(--accent);outline:none}button{width:100%;height:48px;margin-top:16px;border:0;border-radius:12px;color:#fff;font:inherit;font-weight:700;cursor:pointer;background:linear-gradient(135deg,var(--accent2),var(--accent))}.hint{margin-top:15px;color:var(--muted);font-size:12px}.error{margin:0 0 14px;border:1px solid rgba(251,113,133,.35);background:rgba(127,29,29,.2);color:#fecdd3;border-radius:10px;padding:10px 12px;font-size:13px}</style></head>
 <body><main class="wrap"><div class="brand"><div class="logo">🛡️</div><h1>AgentGuard</h1><div class="subtitle">Runtime Security Console</div></div><section class="card">{% if error %}<div class="error">{{ error }}</div>{% endif %}<form method="post" action="/login"><label for="api_key">API Key</label><input id="api_key" name="api_key" type="password" autocomplete="off" placeholder="ag-••••••••••••" required autofocus><button type="submit">Sign in to dashboard</button></form><div class="hint">API key submitted over HTTPS, never in URL.</div></section></main></body></html>'''
