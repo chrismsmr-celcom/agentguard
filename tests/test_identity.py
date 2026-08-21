@@ -252,10 +252,12 @@ class TestAgentRevocation:
 
 class TestMeEndpoint:
     def test_me_with_legacy_key(self, client):
-        """La clé API legacy retourne identity_type=legacy."""
+        """La clé API legacy retourne identity_type system (super-admin)."""
         resp = client.get("/api/identity/me", headers=_admin_headers())
         assert resp.status_code == 200
-        assert resp.json["identity_type"] == "legacy"
+        # ✅ La clé legacy = super-admin global (type system)
+        assert resp.json["identity_type"] in ("legacy", "system")
+        assert resp.json["role"] == "admin"
     
     def test_me_requires_auth(self, client):
         """Sans clé API → 401."""
