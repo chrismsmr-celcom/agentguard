@@ -376,6 +376,17 @@ def require_auth():
     
     key = request.headers.get("X-API-Key", "").strip()
     if key:
+        # ✅ Security hardening : rejet explicite de la clé legacy en production
+        if safe_compare(key, api_key):
+            environment = current_app.config.get("ENVIRONMENT", "development")
+            allow_legacy = current_app.config.get("ALLOW_LEGACY_SYSTEM_KEY", False)
+            if environment == "production" and not allow_legacy:
+                logger.error(
+                    "legacy_system_key_rejected_in_production",
+                    ip=request.remote_addr,
+                )
+                return False  # ← Refuser l'auth
+        
         org_id = resolve_org_id(key)
         if org_id:
             g.org_id = org_id
