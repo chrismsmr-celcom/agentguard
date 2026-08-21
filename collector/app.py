@@ -124,11 +124,11 @@ def create_app() -> Flask:
         return jsonify({"error": "Internal server error"}), 500
     
     logger.info(
-        "app_created",
-        environment=app.config["ENVIRONMENT"],
-        db_type=app.config["DB_TYPE"],
-        legacy_key_allowed=app.config["ALLOW_LEGACY_SYSTEM_KEY"],
-    )
+    "app_created",
+    environment=app.config.get("ENVIRONMENT", "development"),
+    db_type=app.config.get("DB_TYPE", "sqlite"),
+    legacy_key_allowed=app.config.get("ALLOW_LEGACY_SYSTEM_KEY", False),  # ✅ Safe
+)
     
     return app
 
