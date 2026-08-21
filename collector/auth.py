@@ -186,10 +186,30 @@ def resolve_full_identity():
         return identity
     
     # Clé API globale legacy → rôle admin (pour backward compat)
-    api_key = current_app.config["API_KEY"]
+ api_key = current_app.config["API_KEY"]
     if api_key:
         key = request.headers.get("X-API-Key", "").strip()
         if key and safe_compare(key, api_key):
+            # ✅ Security hardening : vérifier si legacy key est autorisée
+            allow_legacy = current_app.config.get("ALLOW_LEGACY_SYSTEM_KEY", False)
+            environment = current_app.config.get("ENVIRONMENT", "development")
+            
+            if not allow_legacy and environment == "production":
+                # ✅ FAIL CLOSED en production si legacy key non autorisée
+                logger.error(
+                    "legacy_system_key_rejected_in_production",
+                    ip=request.remote_addr,
+                )
+                return None
+            
+            # Log chaque utilisation de SYSTEM (surveillance)
+            logger.warning(
+                "legacy_system_key_used",
+                ip=request.remote_addr,
+                endpoint=request.endpoint,
+                note="Consider migrating to tenant-scoped admin keys",
+            )
+            
             identity = ResolvedIdentity(
                 identity_type=IdentityType.SYSTEM,
                 tenant_id="default",
