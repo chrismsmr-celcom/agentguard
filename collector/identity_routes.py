@@ -13,7 +13,7 @@ Endpoints:
 import secrets
 import structlog
 from collector.schemas import AgentCreateRequest, UserCreateRequest, OrgCreateRequest
-from pydantic import ValidationEr
+from pydantic import ValidationError
 from typing import Optional
 from flask import Blueprint, request, jsonify, g
 from collector.db import get_pg_conn, is_postgres, get_sqlite_conn
@@ -401,15 +401,15 @@ def create_agent():
     
     # ✅ Validation Pydantic stricte (rejette NaN, Infinity, out-of-range)
     try:
-        req = AgentCreateRequest(**(request.get_json(silent=True) or {}))
-    except ValidationError as e:
-        return jsonify({
-            "error": "validation failed",
-            "details": [
-                {"field": err["loc"][-1] if err["loc"] else "root", "message": err["msg"]}
-                for err in e.errors()
-            ]
-        }), 400
+    req = AgentCreateRequest(**(request.get_json(silent=True) or {}))
+except ValidationError as e:  # ✅ Pas ValidationEr
+    return jsonify({
+        "error": "validation failed",
+        "details": [
+            {"field": err["loc"][-1] if err["loc"] else "root", "message": err["msg"]}
+            for err in e.errors()
+        ]
+    }), 400
     
     name = req.name
     description = req.description or ""
