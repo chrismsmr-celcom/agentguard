@@ -377,19 +377,14 @@ class TestLegacySystemKey:
     def _make_production_app(self, allow_legacy: bool, api_key_suffix: str):
         """Helper : crée une app en mode production avec toutes les vars requises."""
         import os
-        # Reset les variables critiques AVANT le setenv
+        # Reset toutes les variables critiques
         os.environ["AGENTGUARD_ENVIRONMENT"] = "production"
         os.environ["AGENTGUARD_ALLOW_LEGACY_SYSTEM_KEY"] = "true" if allow_legacy else "false"
-        os.environ["AGENTGUARD_CORS_ORIGINS"] = "https://test.local"  # ✅ OBLIGATOIRE
+        os.environ["AGENTGUARD_CORS_ORIGINS"] = "https://test.local"
         os.environ["AGENTGUARD_API_KEY"] = f"ag-legacy-test-{api_key_suffix}"
         os.environ["AGENTGUARD_ADMIN_SECRET"] = f"admin-{api_key_suffix}"
         os.environ["AGENTGUARD_FLASK_SECRET"] = f"flask-{api_key_suffix}-32chars-long-enough"
         os.environ["AGENTGUARD_DB_TYPE"] = "sqlite"
-        
-        # Reload modules to pick up new env vars
-        import importlib
-        import collector.app
-        importlib.reload(collector.app)
         
         from collector.app import create_app
         from collector.db import init_db
@@ -397,7 +392,31 @@ class TestLegacySystemKey:
         init_db()
         app = create_app()
         app.config["TESTING"] = True
+        
+        # ✅ ROBUSTE : forcer la config directement (évite les résidus env vars)
+        app.config["ALLOW_LEGACY_SYSTEM_KEY"] = allow_legacy
+        app.config["ENVIRONMENT"] = "production"
+        
         return app, os.environ["AGENTGUARD_API_KEY"]
+    
+    def test_legacy_key_rejected_in_production_without_flag(self):
+        """En production sans flag, la clé legacy est rejetée (401)."""
+        app, api_key = self._make_production_app(allow_legacy=False, api_key_suffix="rejected")
+        
+        with app.test_client() as c:
+            resp = c.get("/api/identity/me", headers={"X-API-Key": api_key})
+            assert resp.status_code == 401, \
+                f"Legacy key must be REJECTED in production without flag, got {resp.status_code}"
+    
+    def test_legacy_key_allowed_with_flag(self):
+        """Avec le flag activé, la clé legacy fonctionne (200)."""
+        app, api_key = self._make_production_app(allow_legacy=True, api_key_suffix="allowed")
+        
+        with app.test_client() as c:
+            resp = c.get("/api/identity/me", headers={"X-API-Key": api_key})
+            assert resp.status_code == 200, \
+                f"Legacy key must be ALLOWED with flag, got {resp.status_code}: {resp.get_json()}"
+            assert resp.json.get("identity_type") in ("system", "legacy")
     
     def test_legacy_key_rejected_in_production_without_flag(self):
         """En production sans flag, la clé legacy est rejetée (401)."""
