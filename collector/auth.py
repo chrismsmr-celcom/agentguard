@@ -464,3 +464,88 @@ def dashboard():
     from collector.dashboard import DASHBOARD_HTML
     from flask import make_response
     return make_response(render_template_string(DASHBOARD_HTML))
+# ═══════════════════════════════════════════════════════════════
+# RESOURCE AUTHORIZATION (BOLA prevention - CWE-639)
+# ═══════════════════════════════════════════════════════════════
+
+def authorize_resource_access(
+    target_tenant_id: str,
+    target_org_id: Optional[str] = None,
+    allow_cross_org: bool = False,
+) -> bool:
+    """
+    Vérifie que l'identité courante a accès à la ressource ciblée.
+    
+    Règles :
+      - SYSTEM (clé legacy admin global) → accès total (à migrer vers scoping strict)
+      - Tenant admin → accès à toutes les orgs de SON tenant
+      - Developer/Auditor/Viewer → accès UNIQUEMENT à son org
+    
+    Returns True si autorisé, False sinon.
+    Log chaque denial pour audit.
+    """
+    try:
+        from identity import IdentityType, Role
+    except ImportError:
+        return False  # Fail closed
+    
+    identity = resolve_full_identity()
+    if not identity:
+        logger.warning("authz_denied_no_identity", target_tenant=target_tenant_id)
+        return False
+    
+    # SYSTEM identity (legacy global admin) — accès total
+    # ⚠️ À terme : remplacer par un scoping strict ou supprimer legacy
+    if identity.identity_type == IdentityType.SYSTEM:
+        return True
+    
+    # Vérification tenant : TOUJOURS requise
+    if identity.tenant_id != target_tenant_id:
+        logger.warning(
+            "authz_denied_cross_tenant",
+            actor_tenant=identity.tenant_id,
+            target_tenant=target_tenant_id,
+            actor_role=identity.role.value if hasattr(identity.role, "value") else str(identity.role),
+        )
+        return False
+    
+    # Si pas d'org_id cible (opération tenant-level), OK pour tenant admin
+    if target_org_id is None:
+        return True
+    
+    # Tenant admin peut accéder à toutes les orgs du tenant
+    if identity.role == Role.ADMIN:
+        return True
+    
+    # Developer/Auditor/Viewer : uniquement son org
+    if not allow_cross_org and identity.org_id != target_org_id:
+        logger.warning(
+            "authz_denied_cross_org",
+            actor_org=identity.org_id,
+            target_org=target_org_id,
+            actor_role=identity.role.value if hasattr(identity.role, "value") else str(identity.role),
+        )
+        return False
+    
+    return True
+
+
+def require_resource_access(target_tenant_id: str, target_org_id: Optional[str] = None):
+    """
+    Decorator pour endpoints qui manipulent des ressources cross-tenant/org.
+    
+    Usage:
+        @identity_bp.route("/agents", methods=["POST"])
+        @require_role("admin", "developer")
+        def create_agent():
+            data = request.get_json()
+            target_org_id = data.get("org_id")
+            target_tenant_id = _resolve_tenant_for_org(target_org_id)
+            
+            if not authorize_resource_access(target_tenant_id, target_org_id):
+                return jsonify({"error": "access denied"}), 403
+            # ... suite
+    """
+    # Pas un decorator mais un helper à appeler explicitement
+    # (pour forcer le développeur à réfléchir au scope)
+    pass
