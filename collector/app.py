@@ -49,9 +49,36 @@ def create_app() -> Flask:
     app.config["ADMIN_SECRET"] = os.environ.get("AGENTGUARD_ADMIN_SECRET")
     app.config["AUTH_COOKIE"] = "ag_auth"
     app.config["SPAN_RATE_LIMIT"] = os.environ.get("AGENTGUARD_SPAN_RATE_LIMIT", "30 per minute")
+    
+    # ✅ Security hardening : contrôle de l'environnement
+    app.config["ENVIRONMENT"] = os.environ.get("AGENTGUARD_ENVIRONMENT", "development")
     app.config["ALLOW_LEGACY_SYSTEM_KEY"] = (
-    os.environ.get("AGENTGUARD_ALLOW_LEGACY_SYSTEM_KEY", "false").lower() == "true"
-)
+        os.environ.get("AGENTGUARD_ALLOW_LEGACY_SYSTEM_KEY", "false").lower() == "true"
+    )
+    
+    # ✅ FAIL CLOSED en production si secrets manquants
+    if app.config["ENVIRONMENT"] == "production":
+        if not app.config["API_KEY"]:
+            raise RuntimeError(
+                "AGENTGUARD_API_KEY must be configured in production. "
+                "Set it via environment variable. Refusing to start without it."
+            )
+        if not app.config["ADMIN_SECRET"]:
+            raise RuntimeError(
+                "AGENTGUARD_ADMIN_SECRET must be configured in production. "
+                "Admin endpoints will be disabled without it."
+            )
+    
+    # Génération auto uniquement en développement
+    if not app.config["API_KEY"]:
+        if app.config["ENVIRONMENT"] == "development":
+            app.config["API_KEY"] = "ag-" + secrets.token_urlsafe(32)
+            app.config["_API_KEY_WAS_GENERATED"] = True
+            logger.warning("api_key_generated_in_memory_dev_only")
+        else:
+            raise RuntimeError("AGENTGUARD_API_KEY required in non-dev environments")
+    else:
+        app.config["_API_KEY_WAS_GENERATED"] = False
 app.config["ENVIRONMENT"] = os.environ.get("AGENTGUARD_ENVIRONMENT", "development")
     # Génération auto de la clé API si absente
     if not app.config["API_KEY"]:
