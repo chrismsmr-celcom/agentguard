@@ -376,9 +376,12 @@ class TestLegacySystemKey:
     
     def test_legacy_key_rejected_in_production_without_flag(self, client, monkeypatch):
         """En production sans flag, la clé legacy est rejetée."""
-        import os
+        # ✅ Config complète pour production
         monkeypatch.setenv("AGENTGUARD_ENVIRONMENT", "production")
         monkeypatch.setenv("AGENTGUARD_ALLOW_LEGACY_SYSTEM_KEY", "false")
+        monkeypatch.setenv("AGENTGUARD_CORS_ORIGINS", "https://test.local")  # ✅ Requis
+        monkeypatch.setenv("AGENTGUARD_API_KEY", "ag-test-legacy-key")
+        monkeypatch.setenv("AGENTGUARD_ADMIN_SECRET", "test-admin")
         
         # Recrée l'app avec la nouvelle config
         from collector.app import create_app
@@ -391,10 +394,31 @@ class TestLegacySystemKey:
         with app.test_client() as c:
             resp = c.get("/api/identity/me",
                 headers={"X-API-Key": os.environ["AGENTGUARD_API_KEY"]})
-            # Doit être rejeté (401) ou retourner identity_type != system
-            assert resp.status_code in (401, 200)
-            if resp.status_code == 200:
-                assert resp.json.get("identity_type") != "system"
+            # Legacy key rejetée en production sans flag → 401
+            assert resp.status_code == 401
+    
+    def test_legacy_key_allowed_with_flag(self, client, monkeypatch):
+        """Avec le flag, la clé legacy fonctionne mais est loguée."""
+        # ✅ Config complète pour production
+        monkeypatch.setenv("AGENTGUARD_ENVIRONMENT", "production")
+        monkeypatch.setenv("AGENTGUARD_ALLOW_LEGACY_SYSTEM_KEY", "true")
+        monkeypatch.setenv("AGENTGUARD_CORS_ORIGINS", "https://test.local")  # ✅ Requis
+        monkeypatch.setenv("AGENTGUARD_API_KEY", "ag-test-legacy-key")
+        monkeypatch.setenv("AGENTGUARD_ADMIN_SECRET", "test-admin")
+        
+        from collector.app import create_app
+        from collector.db import init_db
+        
+        init_db()
+        app = create_app()
+        app.config["TESTING"] = True
+        
+        with app.test_client() as c:
+            resp = c.get("/api/identity/me",
+                headers={"X-API-Key": os.environ["AGENTGUARD_API_KEY"]})
+            assert resp.status_code == 200
+            # Peut être "system" si flag activé
+            assert resp.json.get("identity_type") in ("system", "legacy")
     
     def test_legacy_key_allowed_with_flag(self, client, monkeypatch):
         """Avec le flag, la clé legacy fonctionne mais est loguée."""
