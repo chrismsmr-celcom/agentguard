@@ -58,17 +58,27 @@ def create_app() -> Flask:
     else:
         CORS(app, origins=cors_origins or "*", supports_credentials=True)
     
-    # ✅ Rate limiter : Redis obligatoire en production
+       # ✅ Rate limiter : Redis recommandé, memory:// accepté si 1 worker
     limiter_storage = os.environ.get("AGENTGUARD_LIMITER_STORAGE", "memory://")
+    web_concurrency = int(os.environ.get("WEB_CONCURRENCY", "1"))
     
     if is_production:
-        if limiter_storage == "memory://" or not limiter_storage.startswith("redis://"):
+        if limiter_storage == "memory://" and web_concurrency > 1:
+            # Multiple workers + memory = rate limit bypass possible
             raise RuntimeError(
-                "AGENTGUARD_LIMITER_STORAGE must be 'redis://...' in production. "
-                "memory:// allows rate-limit bypass via replica hopping in distributed deployments. "
+                "AGENTGUARD_LIMITER_STORAGE must be 'redis://...' in production "
+                f"when WEB_CONCURRENCY={web_concurrency} > 1. "
+                "memory:// allows rate-limit bypass via replica hopping. "
                 "Example: AGENTGUARD_LIMITER_STORAGE=redis://your-redis:6379/0"
             )
-        logger.info("rate_limiter_redis_mode", storage=limiter_storage)
+        elif limiter_storage == "memory://":
+            logger.warning(
+                "rate_limiter_memory_single_worker",
+                note="Safe with WEB_CONCURRENCY=1, but switch to Redis for multi-replica deployments",
+                web_concurrency=web_concurrency,
+            )
+        else:
+            logger.info("rate_limiter_redis_mode", storage=limiter_storage)
     else:
         logger.info("rate_limiter_mode", storage=limiter_storage)
     
