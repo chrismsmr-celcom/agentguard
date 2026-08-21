@@ -1,26 +1,24 @@
 """
-Identity Engine — CRUD endpoints (Phase 2).
+Identity Engine — CRUD endpoints (Phase 2) with Authorization Kernel.
 
 Endpoints:
-  POST /api/identity/tenants         — Créer un tenant (admin)
-  POST /api/identity/orgs            — Créer une org (admin)
-  POST /api/identity/users           — Créer un user (admin)
-  POST /api/identity/agents          — Créer un agent (admin/developer)
-  DELETE /api/identity/agents/<id>   — Révoquer un agent
-  GET  /api/identity/agents          — Lister agents de l'org
-  GET  /api/identity/me              — Identité courante
+  POST /api/identity/tenants         — Create tenant (admin)
+  POST /api/identity/orgs            — Create org (admin)
+  POST /api/identity/users           — Create user (admin)
+  POST /api/identity/agents          — Create agent (admin/developer)
+  DELETE /api/identity/agents/<id>   — Revoke agent
+  GET  /api/identity/agents          — List agents of current org
+  GET  /api/identity/me              — Current identity
 """
 import secrets
 import structlog
-from collector.schemas import AgentCreateRequest, UserCreateRequest, OrgCreateRequest
-from pydantic import ValidationError
 from typing import Optional
 from flask import Blueprint, request, jsonify, g
 from collector.db import get_pg_conn, is_postgres, get_sqlite_conn
-from collector.auth import require_auth, require_role, resolve_full_identity
+from collector.auth import require_auth, require_role, resolve_full_identity, authorize_resource_access
+from collector.authz import authorize, Action
 from identity import (
     Role,
-    IdentityType,  # ✅ AJOUT
     generate_agent_api_key,
     hash_key,
     short_id,
@@ -37,7 +35,7 @@ identity_bp = Blueprint("identity", __name__, url_prefix="/api/identity")
 # ═══════════════════════════════════════════════════════════════
 
 def _get_conn():
-    """Retourne une connexion DB selon le type."""
+    """Get DB connection based on type."""
     if is_postgres():
         return get_pg_conn()
     return get_sqlite_conn()
@@ -62,7 +60,7 @@ def _audit_identity_event(
     action: str,
     details: dict,
 ):
-    """Log un événement identity dans la table identity_events."""
+    """Log an identity event to identity_events table."""
     identity = resolve_full_identity()
     if not identity:
         return
@@ -70,6 +68,16 @@ def _audit_identity_event(
     try:
         import json
         event_id = secrets.token_hex(16)
+        tenant_id = identity.tenant_id
+        org_id = identity.org_id
+        
+        try:
+            from identity import IdentityType
+            actor_user_id = identity.subject_id if identity.identity_type == IdentityType.USER else None
+            actor_agent_id = identity.subject_id if identity.identity_type == IdentityType.AGENT else None
+        except ImportError:
+            actor_user_id = None
+            actor_agent_id = None
         
         if is_postgres():
             conn = get_pg_conn()
@@ -81,9 +89,8 @@ def _audit_identity_event(
                      event_type, resource_type, resource_id, action, details, ip_address)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
-                    event_id, identity.tenant_id, identity.org_id,
-                    identity.subject_id if identity.identity_type.value == "user" else None,
-                    identity.subject_id if identity.identity_type.value == "agent" else None,
+                    event_id, tenant_id, org_id,
+                    actor_user_id, actor_agent_id,
                     event_type, resource_type, resource_id, action,
                     json.dumps(details),
                     request.remote_addr,
@@ -92,8 +99,6 @@ def _audit_identity_event(
             finally:
                 conn.close()
         else:
-            conn = sqlite3.connect(get_sqlite_conn().execute("PRAGMA database_list").fetchone()[-1] if False else "/tmp/agentguard.db")
-            # Simplified : use get_sqlite_conn
             conn = get_sqlite_conn()
             cur = conn.cursor()
             try:
@@ -103,9 +108,8 @@ def _audit_identity_event(
                      event_type, resource_type, resource_id, action, details, ip_address)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    event_id, identity.tenant_id, identity.org_id,
-                    identity.subject_id if identity.identity_type.value == "user" else None,
-                    identity.subject_id if identity.identity_type.value == "agent" else None,
+                    event_id, tenant_id, org_id,
+                    actor_user_id, actor_agent_id,
                     event_type, resource_type, resource_id, action,
                     json.dumps(details),
                     request.remote_addr,
@@ -114,7 +118,13 @@ def _audit_identity_event(
             finally:
                 conn.close()
     except Exception as e:
-        logger.warning("identity_audit_failed", error=str(e))
+        logger.error(
+            "critical_audit_log_failed",
+            event_type=event_type,
+            resource_type=resource_type,
+            error=str(e),
+            severity="CRITICAL",
+        )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -124,13 +134,29 @@ def _audit_identity_event(
 @identity_bp.route("/tenants", methods=["POST"])
 @require_role("admin")
 def create_tenant():
-    """Crée un nouveau tenant (entreprise cliente)."""
+    """Create a new tenant (enterprise customer)."""
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     
     err = _validate_tenant_name(name)
     if err:
         return jsonify({"error": err}), 400
+    
+    # Authorization: only system or high-privileged can create tenants
+    identity = resolve_full_identity()
+    if not identity:
+        return jsonify({"error": "identity required"}), 401
+    
+    # System can create tenants, regular tenant admins cannot (they ARE a tenant)
+    try:
+        from identity import IdentityType
+        if identity.identity_type != IdentityType.SYSTEM:
+            return jsonify({
+                "error": "only system administrators can create tenants",
+                "hint": "Contact your platform admin",
+            }), 403
+    except ImportError:
+        pass
     
     tenant_id = f"tenant_{short_id(length=12)}"
     
@@ -160,7 +186,7 @@ def create_tenant():
         resource_type="tenant",
         resource_id=tenant_id,
         action="create",
-        details={"name": name},
+        details={"name": name, "actor_tenant": identity.tenant_id},
     )
     
     logger.info("tenant_created", tenant_id=tenant_id, name=name)
@@ -174,7 +200,7 @@ def create_tenant():
 @identity_bp.route("/orgs", methods=["POST"])
 @require_role("admin")
 def create_org():
-    """Crée une nouvelle org dans le tenant courant."""
+    """Create a new org in current tenant."""
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     tenant_id = (data.get("tenant_id") or "").strip()
@@ -183,18 +209,18 @@ def create_org():
     if err:
         return jsonify({"error": err}), 400
     
-    # ✅ BOLA FIX : Résoudre l'identité AVANT toute opération
     identity = resolve_full_identity()
     if not identity:
         return jsonify({"error": "identity required"}), 401
     
-    # Si tenant_id non fourni, utiliser celui de l'acteur (scope-safe)
     if not tenant_id:
         tenant_id = identity.tenant_id
     
-    # ✅ BOLA FIX : Vérification d'appartenance STRICTE
-    from collector.auth import authorize_resource_access
-    if not authorize_resource_access(tenant_id, target_org_id=None):
+    if not tenant_id:
+        return jsonify({"error": "tenant_id required"}), 400
+    
+    # ✅ Authorization Kernel
+    if not authorize(actor=identity, action=Action.ORG_CREATE, resource={"tenant_id": tenant_id}):
         return jsonify({
             "error": "access denied: cannot create org in this tenant",
             "your_tenant": identity.tenant_id,
@@ -204,7 +230,6 @@ def create_org():
     conn = _get_conn()
     cur = conn.cursor()
     try:
-        # Vérifie que le tenant existe ET est actif
         if is_postgres():
             cur.execute(
                 "SELECT tenant_id FROM tenants WHERE tenant_id = %s AND active = TRUE",
@@ -257,7 +282,7 @@ def create_org():
 @identity_bp.route("/users", methods=["POST"])
 @require_role("admin")
 def create_user():
-    """Crée un utilisateur humain — avec vérification BOLA stricte."""
+    """Create a human user in the current org."""
     data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
     display_name = (data.get("display_name") or "").strip()
@@ -276,12 +301,10 @@ def create_user():
             "valid_roles": [r.value for r in Role],
         }), 400
     
-    # ✅ BOLA FIX : Résoudre l'identité AVANT toute opération
     identity = resolve_full_identity()
     if not identity:
         return jsonify({"error": "identity required"}), 401
     
-    # Si org_id non fourni, utiliser celui de l'acteur (scope-safe)
     if not org_id:
         org_id = identity.org_id
     
@@ -291,7 +314,6 @@ def create_user():
     conn = _get_conn()
     cur = conn.cursor()
     try:
-        # Récupère l'org cible AVEC son tenant_id
         if is_postgres():
             cur.execute(
                 "SELECT tenant_id FROM orgs WHERE org_id = %s AND active = TRUE",
@@ -307,9 +329,12 @@ def create_user():
             return jsonify({"error": "org not found"}), 404
         target_tenant_id = row[0]
         
-        # ✅ BOLA FIX : Vérification STRICTE d'appartenance
-        from collector.auth import authorize_resource_access
-        if not authorize_resource_access(target_tenant_id, target_org_id=org_id):
+        # ✅ Authorization Kernel
+        if not authorize(
+            actor=identity,
+            action=Action.USER_CREATE,
+            resource={"tenant_id": target_tenant_id, "org_id": org_id},
+        ):
             return jsonify({
                 "error": "access denied: cannot create user in this org",
                 "your_tenant": identity.tenant_id,
@@ -318,7 +343,7 @@ def create_user():
                 "target_org": org_id,
             }), 403
         
-        # Vérifie unicité email dans l'org
+        # Uniqueness check
         if is_postgres():
             cur.execute(
                 "SELECT 1 FROM users WHERE org_id = %s AND email = %s",
@@ -358,11 +383,8 @@ def create_user():
         resource_id=user_id,
         action="create",
         details={
-            "email": email,
-            "role": role.value,
-            "org_id": org_id,
-            "actor_tenant": identity.tenant_id,
-            "actor_org": identity.org_id,
+            "email": email, "role": role.value, "org_id": org_id,
+            "actor_tenant": identity.tenant_id, "actor_org": identity.org_id,
         },
     )
     
@@ -375,6 +397,7 @@ def create_user():
         "display_name": display_name,
     }), 201
 
+
 # ═══════════════════════════════════════════════════════════════
 # AGENTS (CRUD)
 # ═══════════════════════════════════════════════════════════════
@@ -382,11 +405,11 @@ def create_user():
 @identity_bp.route("/agents", methods=["POST"])
 @require_role("admin", "developer")
 def create_agent():
-    """Crée un agent IA — validation Pydantic stricte + BOLA enforcement."""
+    """Create an AI agent and return its API key (shown ONCE only)."""
     from collector.schemas import AgentCreateRequest
     from pydantic import ValidationError
     
-    # ✅ Validation Pydantic stricte (rejette NaN, Infinity, out-of-range)
+    # ✅ Strict Pydantic validation
     try:
         req = AgentCreateRequest(**(request.get_json(silent=True) or {}))
     except ValidationError as e:
@@ -403,12 +426,10 @@ def create_agent():
     max_budget = req.max_budget_per_day
     org_id = req.org_id or ""
     
-    # ✅ BOLA FIX : Résoudre l'identité AVANT toute opération
     identity = resolve_full_identity()
     if not identity:
         return jsonify({"error": "identity required"}), 401
     
-    # Si org_id non fourni, utiliser celui de l'acteur (scope-safe)
     if not org_id:
         org_id = identity.org_id
     
@@ -418,7 +439,6 @@ def create_agent():
     conn = _get_conn()
     cur = conn.cursor()
     try:
-        # Récupère l'org cible AVEC son tenant_id
         if is_postgres():
             cur.execute(
                 "SELECT tenant_id FROM orgs WHERE org_id = %s AND active = TRUE",
@@ -434,9 +454,12 @@ def create_agent():
             return jsonify({"error": "org not found"}), 404
         target_tenant_id = row[0]
         
-        # ✅ BOLA FIX : Vérification STRICTE d'appartenance
-        from collector.auth import authorize_resource_access
-        if not authorize_resource_access(target_tenant_id, target_org_id=org_id):
+        # ✅ Authorization Kernel
+        if not authorize(
+            actor=identity,
+            action=Action.AGENT_CREATE,
+            resource={"tenant_id": target_tenant_id, "org_id": org_id},
+        ):
             return jsonify({
                 "error": "access denied: cannot create agent in this org",
                 "your_tenant": identity.tenant_id,
@@ -495,13 +518,17 @@ def create_agent():
 @identity_bp.route("/agents", methods=["GET"])
 @require_role("admin", "developer", "auditor")
 def list_agents():
-    """Liste les agents de l'org courante (isolation multi-tenant)."""
+    """List agents of current org (multi-tenant isolated)."""
     identity = resolve_full_identity()
     if not identity:
         return jsonify({"error": "identity required"}), 401
     
     org_id = identity.org_id
     include_revoked = request.args.get("include_revoked", "false").lower() == "true"
+    
+    # ✅ Authorization Kernel
+    if not authorize(actor=identity, action=Action.AGENT_LIST, resource={"org_id": org_id, "tenant_id": identity.tenant_id}):
+        return jsonify({"error": "access denied"}), 403
     
     conn = _get_conn()
     cur = conn.cursor()
@@ -565,40 +592,51 @@ def list_agents():
 @identity_bp.route("/agents/<agent_id>", methods=["DELETE"])
 @require_role("admin", "developer")
 def revoke_agent(agent_id: str):
-    """Révoque un agent (désactive sa clé API)."""
+    """Revoke an agent (disable its API key)."""
     identity = resolve_full_identity()
     if not identity:
         return jsonify({"error": "identity required"}), 401
     
-    # ✅ Admin SYSTEM (clé legacy) peut révoquer n'importe quel agent
-    # (super-admin global, pas restreint à une org)
-    is_system_admin = (identity.identity_type == IdentityType.SYSTEM)
-    
     conn = _get_conn()
     cur = conn.cursor()
     try:
+        # ✅ Authorization Kernel — check on the agent's org
+        # First find the agent
         if is_postgres():
-            if is_system_admin:
-                cur.execute(
-                    "UPDATE agents SET active = FALSE WHERE agent_id = %s",
-                    (agent_id,),
-                )
-            else:
-                cur.execute(
-                    "UPDATE agents SET active = FALSE WHERE agent_id = %s AND org_id = %s",
-                    (agent_id, identity.org_id),
-                )
+            cur.execute(
+                "SELECT org_id, tenant_id FROM agents WHERE agent_id = %s",
+                (agent_id,),
+            )
         else:
-            if is_system_admin:
-                cur.execute(
-                    "UPDATE agents SET active = 0 WHERE agent_id = ?",
-                    (agent_id,),
-                )
-            else:
-                cur.execute(
-                    "UPDATE agents SET active = 0 WHERE agent_id = ? AND org_id = ?",
-                    (agent_id, identity.org_id),
-                )
+            cur.execute(
+                "SELECT org_id, tenant_id FROM agents WHERE agent_id = ?",
+                (agent_id,),
+            )
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "agent not found"}), 404
+        agent_org_id, agent_tenant_id = row[0], row[1]
+        
+        if not authorize(
+            actor=identity,
+            action=Action.AGENT_REVOKE,
+            resource={"tenant_id": agent_tenant_id, "org_id": agent_org_id},
+        ):
+            return jsonify({
+                "error": "access denied: cannot revoke agent in this org",
+            }), 403
+        
+        # Actually revoke
+        if is_postgres():
+            cur.execute(
+                "UPDATE agents SET active = FALSE WHERE agent_id = %s AND org_id = %s",
+                (agent_id, agent_org_id),
+            )
+        else:
+            cur.execute(
+                "UPDATE agents SET active = 0 WHERE agent_id = ? AND org_id = ?",
+                (agent_id, agent_org_id),
+            )
         affected = cur.rowcount
         conn.commit()
     except Exception as e:
@@ -616,10 +654,10 @@ def revoke_agent(agent_id: str):
         resource_type="agent",
         resource_id=agent_id,
         action="revoke",
-        details={"org_id": identity.org_id, "system_admin": is_system_admin},
+        details={"org_id": agent_org_id, "actor_tenant": identity.tenant_id},
     )
     
-    logger.info("agent_revoked", agent_id=agent_id, org_id=identity.org_id)
+    logger.info("agent_revoked", agent_id=agent_id, org_id=agent_org_id)
     return jsonify({"agent_id": agent_id, "status": "revoked"})
 
 
@@ -629,7 +667,7 @@ def revoke_agent(agent_id: str):
 
 @identity_bp.route("/me", methods=["GET"])
 def get_me():
-    """Retourne l'identité courante (nécessite auth mais pas de rôle spécifique)."""
+    """Return current identity (requires auth but no specific role)."""
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
     
