@@ -12,6 +12,8 @@ Endpoints:
 """
 import secrets
 import structlog
+from collector.schemas import AgentCreateRequest, UserCreateRequest, OrgCreateRequest
+from pydantic import ValidationEr
 from typing import Optional
 from flask import Blueprint, request, jsonify, g
 from collector.db import get_pg_conn, is_postgres, get_sqlite_conn
@@ -390,14 +392,36 @@ def create_agent():
     if not name or len(name) < 2:
         return jsonify({"error": "name must be at least 2 characters"}), 400
     if max_budget < 0 or max_budget > 10000:
-        return jsonify({"error": "max_budget_per_day must be between 0 and 10000"}), 400
+        return jsonify({"error": "max_budget_per_day must be between 0 and 10000"}), 400@identity_bp.route("/agents", methods=["POST"])
+@require_role("admin", "developer")
+def create_agent():
+    """Crée un agent IA — validation Pydantic stricte + BOLA enforcement."""
+    from collector.schemas import AgentCreateRequest
+    from pydantic import ValidationError
     
-    # ✅ BOLA FIX : Résoudre l'identité AVANT
+    # ✅ Validation Pydantic stricte (rejette NaN, Infinity, out-of-range)
+    try:
+        req = AgentCreateRequest(**(request.get_json(silent=True) or {}))
+    except ValidationError as e:
+        return jsonify({
+            "error": "validation failed",
+            "details": [
+                {"field": err["loc"][-1] if err["loc"] else "root", "message": err["msg"]}
+                for err in e.errors()
+            ]
+        }), 400
+    
+    name = req.name
+    description = req.description or ""
+    max_budget = req.max_budget_per_day
+    org_id = req.org_id or ""
+    
+    # ✅ BOLA FIX : Résoudre l'identité AVANT toute opération
     identity = resolve_full_identity()
     if not identity:
         return jsonify({"error": "identity required"}), 401
     
-    # Si org_id non fourni, utiliser celui de l'acteur
+    # Si org_id non fourni, utiliser celui de l'acteur (scope-safe)
     if not org_id:
         org_id = identity.org_id
     
@@ -437,7 +461,7 @@ def create_agent():
         agent_id = f"agent_{short_id(length=12)}"
         api_key = generate_agent_api_key(target_tenant_id, org_id, agent_id)
         key_hash = hash_key(api_key)
-        key_prefix = "_".join(api_key.split("_")[:4])
+        key_prefix = "_".join(api_key.split("_")[:4])  # ag_{t}_{o}_{a}
         
         if is_postgres():
             cur.execute("""
@@ -467,6 +491,7 @@ def create_agent():
         details={
             "name": name, "org_id": org_id,
             "actor_tenant": identity.tenant_id, "actor_org": identity.org_id,
+            "max_budget": max_budget,
         },
     )
     
