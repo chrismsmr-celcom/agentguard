@@ -172,29 +172,44 @@ class TestMultiTenantIsolation:
         assert count_b == 0  # Org B n'en voit aucun
     
     def test_cannot_create_agent_in_other_tenant_org(self, client_with_identity):
-        """Un admin ne peut pas créer un agent dans une org d'un autre tenant."""
-        client, ctx = client_with_identity
-        
-        # Crée un tenant B
-        resp = client.post("/api/identity/tenants",
-            json={"name": "Evil Corp"},
-            headers=_admin_headers())
-        tenant_b = resp.json["tenant_id"]
-        
-        # Crée une org dans tenant B
-        resp = client.post("/api/identity/orgs",
-            json={"name": "Spy Org", "tenant_id": tenant_b},
-            headers=_admin_headers())
-        spy_org = resp.json["org_id"]
-        
-        # Tente de créer un agent dans spy_org via clé admin
-        # (avec legacy key = pas de tenant réel, mais l'org doit exister)
-        resp = client.post("/api/identity/agents",
-            json={"name": "Spy Agent", "org_id": spy_org},
-            headers=_admin_headers())
-        # Devrait réussir car la clé legacy = admin global (pour compat)
-        # MAIS l'audit log doit tracer l'action
-        assert resp.status_code in (201, 403)  # Accepte les deux selon config
+    """Un admin ne peut PAS créer un agent dans une org d'un autre tenant.
+    
+    ✅ MUST = 403 (jamais 201). Test déterministe.
+    """
+    client, ctx = client_with_identity
+    
+    # Crée un tenant B
+    resp = client.post("/api/identity/tenants",
+        json={"name": "Evil Corp"},
+        headers=_admin_headers())
+    assert resp.status_code == 201
+    tenant_b = resp.json["tenant_id"]
+    
+    # Crée une org dans tenant B
+    resp = client.post("/api/identity/orgs",
+        json={"name": "Spy Org", "tenant_id": tenant_b},
+        headers=_admin_headers())
+    spy_org = resp.json["org_id"]
+    
+    # Tente de créer un agent dans spy_org depuis ctx["org_id"] (tenant A)
+    # L'admin a une clé legacy SYSTEM qui permet cross-tenant (à terme : retirer)
+    # MAIS le test doit vérifier que pour un developer, c'est bloqué.
+    
+    # Crée un agent dans ctx["org_id"] (tenant A)
+    resp = client.post("/api/identity/agents",
+        json={"name": "Legit Agent", "org_id": ctx["org_id"]},
+        headers=_admin_headers())
+    assert resp.status_code == 201
+    dev_agent_key = resp.json["api_key"]
+    
+    # Developer tente de créer un agent dans spy_org (tenant B)
+    resp = client.post("/api/identity/agents",
+        json={"name": "Spy Agent", "org_id": spy_org},
+        headers={"X-API-Key": dev_agent_key, "Content-Type": "application/json"})
+    
+    # ✅ MUST = 403 (BOLA enforced)
+    assert resp.status_code == 403
+    assert "access denied" in resp.json.get("error", "").lower()
 
 
 # ═══════════════════════════════════════════════════════════════
