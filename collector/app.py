@@ -17,7 +17,7 @@ structlog.configure(
 )
 logger = structlog.get_logger("agentguard.collector")
 
-# ── APP FACTORY ─────────────────────────────────────────────────
+
 def create_app() -> Flask:
     """Crée et configure l'application Flask."""
     app = Flask(__name__)
@@ -25,9 +25,25 @@ def create_app() -> Flask:
     app.secret_key = os.environ.get("AGENTGUARD_FLASK_SECRET") or secrets.token_urlsafe(32)
     app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("AGENTGUARD_MAX_BODY_BYTES", "262144"))
     
-    # CORS
+    # ✅ Security hardening : environnement
+    app.config["ENVIRONMENT"] = os.environ.get("AGENTGUARD_ENVIRONMENT", "development")
+    app.config["ALLOW_LEGACY_SYSTEM_KEY"] = (
+        os.environ.get("AGENTGUARD_ALLOW_LEGACY_SYSTEM_KEY", "false").lower() == "true"
+    )
+    
+    # CORS : strict en production, permissif en dev
     cors_origins = [x.strip() for x in os.environ.get("AGENTGUARD_CORS_ORIGINS", "").split(",") if x.strip()]
-    CORS(app, origins=cors_origins or "*", supports_credentials=True)
+    
+    if app.config["ENVIRONMENT"] == "production":
+        if not cors_origins:
+            raise RuntimeError(
+                "AGENTGUARD_CORS_ORIGINS must be configured in production. "
+                "Example: AGENTGUARD_CORS_ORIGINS=https://dashboard.example.com"
+            )
+        CORS(app, origins=cors_origins, supports_credentials=True)
+        logger.info("cors_strict_mode", origins=cors_origins)
+    else:
+        CORS(app, origins=cors_origins or "*", supports_credentials=True)
     
     # Rate limiter
     app.limiter = Limiter(
@@ -50,12 +66,6 @@ def create_app() -> Flask:
     app.config["AUTH_COOKIE"] = "ag_auth"
     app.config["SPAN_RATE_LIMIT"] = os.environ.get("AGENTGUARD_SPAN_RATE_LIMIT", "30 per minute")
     
-    # ✅ Security hardening : contrôle de l'environnement
-    app.config["ENVIRONMENT"] = os.environ.get("AGENTGUARD_ENVIRONMENT", "development")
-    app.config["ALLOW_LEGACY_SYSTEM_KEY"] = (
-        os.environ.get("AGENTGUARD_ALLOW_LEGACY_SYSTEM_KEY", "false").lower() == "true"
-    )
-    
     # ✅ FAIL CLOSED en production si secrets manquants
     if app.config["ENVIRONMENT"] == "production":
         if not app.config["API_KEY"]:
@@ -64,29 +74,30 @@ def create_app() -> Flask:
                 "Set it via environment variable. Refusing to start without it."
             )
         if not app.config["ADMIN_SECRET"]:
-            raise RuntimeError(
-                "AGENTGUARD_ADMIN_SECRET must be configured in production. "
-                "Admin endpoints will be disabled without it."
+            logger.warning(
+                "admin_secret_missing_in_production",
+                note="Admin endpoints will be disabled",
             )
     
-    # Génération auto uniquement en développement
+    # Génération auto de la clé API si absente (dev only)
     if not app.config["API_KEY"]:
         if app.config["ENVIRONMENT"] == "development":
             app.config["API_KEY"] = "ag-" + secrets.token_urlsafe(32)
             app.config["_API_KEY_WAS_GENERATED"] = True
             logger.warning("api_key_generated_in_memory_dev_only")
         else:
-            raise RuntimeError("AGENTGUARD_API_KEY required in non-dev environments")
+            raise RuntimeError(
+                "AGENTGUARD_API_KEY required in non-development environments"
+            )
     else:
         app.config["_API_KEY_WAS_GENERATED"] = False
-app.config["ENVIRONMENT"] = os.environ.get("AGENTGUARD_ENVIRONMENT", "development")
-    # Génération auto de la clé API si absente
-    if not app.config["API_KEY"]:
-        app.config["API_KEY"] = "ag-" + secrets.token_urlsafe(32)
-        app.config["_API_KEY_WAS_GENERATED"] = True
-        logger.warning("api_key_generated_in_memory")
-    else:
-        app.config["_API_KEY_WAS_GENERATED"] = False
+    
+    # Warning si clé auto-générée en PostgreSQL (production-like)
+    if app.config["_API_KEY_WAS_GENERATED"] and app.config["DB_TYPE"] == "postgres":
+        logger.warning(
+            "api_key_generated_but_postgres_active",
+            note="Configure AGENTGUARD_API_KEY in env to persist across restarts",
+        )
     
     # Enregistre les blueprints
     _register_blueprints(app)
@@ -100,6 +111,13 @@ app.config["ENVIRONMENT"] = os.environ.get("AGENTGUARD_ENVIRONMENT", "developmen
         app.logger.exception("Unhandled error")
         from flask import jsonify
         return jsonify({"error": "Internal server error"}), 500
+    
+    logger.info(
+        "app_created",
+        environment=app.config["ENVIRONMENT"],
+        db_type=app.config["DB_TYPE"],
+        legacy_key_allowed=app.config["ALLOW_LEGACY_SYSTEM_KEY"],
+    )
     
     return app
 
@@ -119,6 +137,7 @@ def _register_blueprints(app: Flask):
     app.register_blueprint(audit_bp)
     app.register_blueprint(trace_bp)
     app.register_blueprint(identity_bp)
+
 
 def init_db():
     """Initialise la DB (à appeler au boot)."""
