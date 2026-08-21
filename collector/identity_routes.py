@@ -382,34 +382,21 @@ def create_user():
 @identity_bp.route("/agents", methods=["POST"])
 @require_role("admin", "developer")
 def create_agent():
-    """Crée un agent IA — avec vérification BOLA stricte."""
-    data = request.get_json(silent=True) or {}
-    name = (data.get("name") or "").strip()
-    description = (data.get("description") or "").strip()
-    max_budget = float(data.get("max_budget_per_day", 100.0))
-    org_id = (data.get("org_id") or "").strip()
-    
-    if not name or len(name) < 2:
-        return jsonify({"error": "name must be at least 2 characters"}), 400
-    if max_budget < 0 or max_budget > 10000:
-        return jsonify({"error": "max_budget_per_day must be between 0 and 10000"}), 400@identity_bp.route("/agents", methods=["POST"])
-@require_role("admin", "developer")
-def create_agent():
     """Crée un agent IA — validation Pydantic stricte + BOLA enforcement."""
     from collector.schemas import AgentCreateRequest
     from pydantic import ValidationError
     
     # ✅ Validation Pydantic stricte (rejette NaN, Infinity, out-of-range)
     try:
-    req = AgentCreateRequest(**(request.get_json(silent=True) or {}))
-except ValidationError as e:  # ✅ Pas ValidationEr
-    return jsonify({
-        "error": "validation failed",
-        "details": [
-            {"field": err["loc"][-1] if err["loc"] else "root", "message": err["msg"]}
-            for err in e.errors()
-        ]
-    }), 400
+        req = AgentCreateRequest(**(request.get_json(silent=True) or {}))
+    except ValidationError as e:
+        return jsonify({
+            "error": "validation failed",
+            "details": [
+                {"field": err["loc"][-1] if err["loc"] else "root", "message": err["msg"]}
+                for err in e.errors()
+            ]
+        }), 400
     
     name = req.name
     description = req.description or ""
@@ -461,7 +448,7 @@ except ValidationError as e:  # ✅ Pas ValidationEr
         agent_id = f"agent_{short_id(length=12)}"
         api_key = generate_agent_api_key(target_tenant_id, org_id, agent_id)
         key_hash = hash_key(api_key)
-        key_prefix = "_".join(api_key.split("_")[:4])  # ag_{t}_{o}_{a}
+        key_prefix = "_".join(api_key.split("_")[:4])
         
         if is_postgres():
             cur.execute("""
