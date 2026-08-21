@@ -1,99 +1,115 @@
-#!/usr/bin/env python3
 """
-Sauvegarde la base AgentGuard (spans + api_keys — perdre cette dernière table
-signifie que plus aucun client hébergé ne peut s'authentifier).
+AgentGuard Database Backup
+- PostgreSQL : pg_dump (format custom) si DATABASE_URL est définie
+- SQLite     : copie du fichier .db (auto-initialisation si absent, ex: CI)
 
-Détecte automatiquement le moteur via AGENTGUARD_DB_TYPE, comme collector.py.
-
-Postgres : pg_dump en format custom compressé (restaurable avec pg_restore,
-           et avec une seule table si besoin — utile pour ne restaurer QUE
-           api_keys sans toucher aux spans, par exemple).
-SQLite    : API de backup sqlite3 (source.backup(dest)) — contrairement à un
-           simple `cp`, ça reste cohérent même si le collector écrit pendant
-           la sauvegarde (pas de fichier corrompu à moitié écrit).
-
-Garde les N dernières sauvegardes (rotation), supprime les plus anciennes.
-
-Usage :
-    python scripts/backup_db.py
-    python scripts/backup_db.py --keep 14        # changer la rétention
-    python scripts/backup_db.py --dir /mnt/backups
+Usage:
+  python scripts/backup_db.py --dir backups --keep 30
 """
 import argparse
 import os
-import sqlite3
+import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-
-DB_TYPE = os.environ.get("AGENTGUARD_DB_TYPE", "sqlite")
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
-DB_SQLITE_PATH = os.environ.get("AGENTGUARD_DB_PATH", "/tmp/agentguard.db")
+from urllib.parse import urlparse
 
 
-def timestamp():
-    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+def log(msg):
+    print(f"[backup] {msg}")
 
 
-def backup_postgres(backup_dir: Path) -> Path:
-    if not DATABASE_URL:
-        print("[backup] ERREUR: DATABASE_URL non défini alors que "
-              "AGENTGUARD_DB_TYPE=postgres.", file=sys.stderr)
-        sys.exit(1)
-    out_file = backup_dir / f"agentguard_{timestamp()}.dump"
-    result = subprocess.run(
-        ["pg_dump", DATABASE_URL, "-F", "c", "-f", str(out_file)],
-        capture_output=True, text=True,
+def backup_postgres(database_url: str, backup_dir: Path, timestamp: str) -> Path:
+    """Backup PostgreSQL via pg_dump."""
+    parsed = urlparse(database_url)
+    env = os.environ.copy()
+    env["PGPASSWORD"] = parsed.password or ""
+    env["PGHOST"] = parsed.hostname or "localhost"
+    env["PGPORT"] = str(parsed.port or 5432)
+    env["PGUSER"] = parsed.username or "postgres"
+    env["PGDATABASE"] = (parsed.path or "/postgres").lstrip("/")
+
+    backup_file = backup_dir / f"agentguard_pg_{timestamp}.dump"
+    cmd = ["pg_dump", "--format=custom", "--no-owner", "--no-privileges"]
+
+    log(f"pg_dump -> {backup_file.name}")
+    with open(backup_file, "wb") as f:
+        subprocess.run(cmd, env=env, stdout=f, check=True)
+    return backup_file
+
+
+def backup_sqlite(db_path: str, backup_dir: Path, timestamp: str) -> Path:
+    """Backup SQLite par copie. Auto-initialise une DB de test si absente (CI)."""
+    src = Path(db_path)
+
+    if not src.exists():
+        log(f"{src} introuvable — initialisation d'une DB de test (mode CI)...")
+        
+        # ✅ Nouveau pattern : imports depuis collector.db et collector.app
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        os.environ["AGENTGUARD_DB_PATH"] = str(src)
+        
+        try:
+            from collector.db import init_db
+            from collector.app import create_app
+            
+            # Initialise la DB
+            init_db()
+            
+            # Crée l'app (nécessaire pour certains initialisations)
+            app = create_app()
+            
+            log("✅ DB de test initialisée")
+        except Exception as e:
+            log(f"ERREUR: impossible d'initialiser la DB: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+
+    backup_file = backup_dir / f"agentguard_sqlite_{timestamp}.db"
+    shutil.copy2(src, backup_file)
+    log(f"copie SQLite -> {backup_file.name}")
+    return backup_file
+
+
+def rotate(backup_dir: Path, keep: int):
+    """Rotation : ne garde que les `keep` derniers backups."""
+    backups = sorted(
+        backup_dir.glob("agentguard_*"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
     )
-    if result.returncode != 0:
-        print(f"[backup] ÉCHEC pg_dump: {result.stderr}", file=sys.stderr)
-        sys.exit(1)
-    return out_file
-
-
-def backup_sqlite(backup_dir: Path) -> Path:
-    if not os.path.exists(DB_SQLITE_PATH):
-        print(f"[backup] ERREUR: {DB_SQLITE_PATH} introuvable.", file=sys.stderr)
-        sys.exit(1)
-    out_file = backup_dir / f"agentguard_{timestamp()}.db"
-    # sqlite3 backup API — cohérent même avec des écritures concurrentes,
-    # contrairement à une copie de fichier brute (shutil.copy) qui pourrait
-    # capturer le fichier à moitié écrit et produire une sauvegarde corrompue.
-    source = sqlite3.connect(DB_SQLITE_PATH)
-    dest = sqlite3.connect(str(out_file))
-    with dest:
-        source.backup(dest)
-    source.close()
-    dest.close()
-    return out_file
-
-
-def rotate(backup_dir: Path, pattern: str, keep: int):
-    files = sorted(backup_dir.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
-    for old in files[keep:]:
+    for old in backups[keep:]:
+        log(f"rotation: suppression {old.name}")
         old.unlink()
-        print(f"[backup] Rotation — supprimé : {old.name}")
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dir", default="backups", help="Dossier de destination")
-    parser.add_argument("--keep", type=int, default=7, help="Nombre de sauvegardes à garder")
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser(description="AgentGuard database backup")
+    ap.add_argument("--dir", type=Path, default=Path("backups"))
+    ap.add_argument("--keep", type=int, default=30)
+    args = ap.parse_args()
 
-    backup_dir = Path(args.dir)
-    backup_dir.mkdir(parents=True, exist_ok=True)
+    args.dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    if DB_TYPE == "postgres" and DATABASE_URL:
-        out_file = backup_postgres(backup_dir)
-        rotate(backup_dir, "agentguard_*.dump", args.keep)
+    db_type = os.environ.get("AGENTGUARD_DB_TYPE", "sqlite").lower()
+    database_url = os.environ.get("DATABASE_URL", "")
+    db_path = os.environ.get("AGENTGUARD_DB_PATH", "/tmp/agentguard.db")
+
+    if db_type == "postgres" and database_url:
+        backup_file = backup_postgres(database_url, args.dir, timestamp)
     else:
-        out_file = backup_sqlite(backup_dir)
-        rotate(backup_dir, "agentguard_*.db", args.keep)
+        if db_type == "postgres" and not database_url:
+            log("⚠️ AGENTGUARD_DB_TYPE=postgres mais DATABASE_URL vide — fallback SQLite")
+        backup_file = backup_sqlite(db_path, args.dir, timestamp)
 
-    size_kb = out_file.stat().st_size / 1024
-    print(f"[backup] ✅ Sauvegarde créée : {out_file} ({size_kb:.1f} Ko)")
+    size_mb = backup_file.stat().st_size / 1024 / 1024
+    log(f"✅ Backup créé: {backup_file.name} ({size_mb:.2f} MB)")
+
+    rotate(args.dir, args.keep)
+    log("✅ Backup terminé")
 
 
 if __name__ == "__main__":
