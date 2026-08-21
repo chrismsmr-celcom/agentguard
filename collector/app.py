@@ -25,6 +25,9 @@ def create_app() -> Flask:
     # ✅ Security hardening : environnement
     app.config["ENVIRONMENT"] = os.environ.get("AGENTGUARD_ENVIRONMENT", "development")
     is_production = app.config["ENVIRONMENT"] == "production"
+    app.config["ALLOW_LEGACY_SYSTEM_KEY"] = (
+        os.environ.get("AGENTGUARD_ALLOW_LEGACY_SYSTEM_KEY", "false").lower() == "true"
+    )
     
     # ✅ FLASK SECRET : fail-closed en production
     flask_secret = os.environ.get("AGENTGUARD_FLASK_SECRET")
@@ -41,11 +44,10 @@ def create_app() -> Flask:
     
     app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("AGENTGUARD_MAX_BODY_BYTES", "262144"))
     
-    
     # CORS : strict en production, permissif en dev
     cors_origins = [x.strip() for x in os.environ.get("AGENTGUARD_CORS_ORIGINS", "").split(",") if x.strip()]
     
-    if app.config["ENVIRONMENT"] == "production":
+    if is_production:
         if not cors_origins:
             raise RuntimeError(
                 "AGENTGUARD_CORS_ORIGINS must be configured in production. "
@@ -56,12 +58,25 @@ def create_app() -> Flask:
     else:
         CORS(app, origins=cors_origins or "*", supports_credentials=True)
     
-    # Rate limiter
+    # ✅ Rate limiter : Redis obligatoire en production
+    limiter_storage = os.environ.get("AGENTGUARD_LIMITER_STORAGE", "memory://")
+    
+    if is_production:
+        if limiter_storage == "memory://" or not limiter_storage.startswith("redis://"):
+            raise RuntimeError(
+                "AGENTGUARD_LIMITER_STORAGE must be 'redis://...' in production. "
+                "memory:// allows rate-limit bypass via replica hopping in distributed deployments. "
+                "Example: AGENTGUARD_LIMITER_STORAGE=redis://your-redis:6379/0"
+            )
+        logger.info("rate_limiter_redis_mode", storage=limiter_storage)
+    else:
+        logger.info("rate_limiter_mode", storage=limiter_storage)
+    
     app.limiter = Limiter(
         get_remote_address,
         app=app,
         default_limits=[os.environ.get("AGENTGUARD_RATE_LIMIT", "120 per minute")],
-        storage_uri=os.environ.get("AGENTGUARD_LIMITER_STORAGE", "memory://"),
+        storage_uri=limiter_storage,
     )
     
     # Auth serializer
@@ -78,7 +93,7 @@ def create_app() -> Flask:
     app.config["SPAN_RATE_LIMIT"] = os.environ.get("AGENTGUARD_SPAN_RATE_LIMIT", "30 per minute")
     
     # ✅ FAIL CLOSED en production si secrets manquants
-    if app.config["ENVIRONMENT"] == "production":
+    if is_production:
         if not app.config["API_KEY"]:
             raise RuntimeError(
                 "AGENTGUARD_API_KEY must be configured in production. "
@@ -123,12 +138,15 @@ def create_app() -> Flask:
         from flask import jsonify
         return jsonify({"error": "Internal server error"}), 500
     
+    # ✅ Log final (indentation corrigée)
     logger.info(
-    "app_created",
-    environment=app.config.get("ENVIRONMENT", "development"),
-    db_type=app.config.get("DB_TYPE", "sqlite"),
-    legacy_key_allowed=app.config.get("ALLOW_LEGACY_SYSTEM_KEY", False),  # ✅ Safe
-)
+        "app_created",
+        environment=app.config.get("ENVIRONMENT", "development"),
+        db_type=app.config.get("DB_TYPE", "sqlite"),
+        legacy_key_allowed=app.config.get("ALLOW_LEGACY_SYSTEM_KEY", False),
+        rate_limiter=limiter_storage.split("://")[0] if "://" in limiter_storage else limiter_storage,
+        cors_origins=cors_origins or ["*"],
+    )
     
     return app
 
