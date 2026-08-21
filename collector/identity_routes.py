@@ -255,7 +255,7 @@ def create_org():
 @identity_bp.route("/users", methods=["POST"])
 @require_role("admin")
 def create_user():
-    """Crée un utilisateur humain dans l'org courante."""
+    """Crée un utilisateur humain — avec vérification BOLA stricte."""
     data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
     display_name = (data.get("display_name") or "").strip()
@@ -274,8 +274,13 @@ def create_user():
             "valid_roles": [r.value for r in Role],
         }), 400
     
+    # ✅ BOLA FIX : Résoudre l'identité AVANT toute opération
     identity = resolve_full_identity()
-    if not org_id and identity:
+    if not identity:
+        return jsonify({"error": "identity required"}), 401
+    
+    # Si org_id non fourni, utiliser celui de l'acteur (scope-safe)
+    if not org_id:
         org_id = identity.org_id
     
     if not org_id:
@@ -284,7 +289,7 @@ def create_user():
     conn = _get_conn()
     cur = conn.cursor()
     try:
-        # Vérifie que l'org existe
+        # Récupère l'org cible AVEC son tenant_id
         if is_postgres():
             cur.execute(
                 "SELECT tenant_id FROM orgs WHERE org_id = %s AND active = TRUE",
@@ -298,7 +303,18 @@ def create_user():
         row = cur.fetchone()
         if not row:
             return jsonify({"error": "org not found"}), 404
-        tenant_id = row[0] if is_postgres() else row[0]
+        target_tenant_id = row[0]
+        
+        # ✅ BOLA FIX : Vérification STRICTE d'appartenance
+        from collector.auth import authorize_resource_access
+        if not authorize_resource_access(target_tenant_id, target_org_id=org_id):
+            return jsonify({
+                "error": "access denied: cannot create user in this org",
+                "your_tenant": identity.tenant_id,
+                "your_org": identity.org_id,
+                "target_tenant": target_tenant_id,
+                "target_org": org_id,
+            }), 403
         
         # Vérifie unicité email dans l'org
         if is_postgres():
@@ -320,12 +336,12 @@ def create_user():
             cur.execute("""
                 INSERT INTO users (user_id, org_id, tenant_id, email, role, display_name)
                 VALUES (%s, %s, %s, %s, %s, %s)
-            """, (user_id, org_id, tenant_id, email, role.value, display_name))
+            """, (user_id, org_id, target_tenant_id, email, role.value, display_name))
         else:
             cur.execute("""
                 INSERT INTO users (user_id, org_id, tenant_id, email, role, display_name)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (user_id, org_id, tenant_id, email, role.value, display_name))
+            """, (user_id, org_id, target_tenant_id, email, role.value, display_name))
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -339,7 +355,13 @@ def create_user():
         resource_type="user",
         resource_id=user_id,
         action="create",
-        details={"email": email, "role": role.value, "org_id": org_id},
+        details={
+            "email": email,
+            "role": role.value,
+            "org_id": org_id,
+            "actor_tenant": identity.tenant_id,
+            "actor_org": identity.org_id,
+        },
     )
     
     logger.info("user_created", user_id=user_id, email=email, role=role.value)
@@ -350,7 +372,6 @@ def create_user():
         "role": role.value,
         "display_name": display_name,
     }), 201
-
 
 # ═══════════════════════════════════════════════════════════════
 # AGENTS (CRUD)
