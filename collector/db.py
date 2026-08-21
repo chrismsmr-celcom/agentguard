@@ -109,6 +109,10 @@ def is_postgres() -> bool:
 # ── INIT DB ─────────────────────────────────────────────────────
 def init_db():
     """Initialise les tables avec support tokens + detection layer."""
+       try:
+        init_identity_tables()
+    except Exception as e:
+        logger.warning("identity_tables_init_failed", error=str(e))
     if is_postgres():
         _, database_url = _get_db_config()
         conn = get_pg_conn()
