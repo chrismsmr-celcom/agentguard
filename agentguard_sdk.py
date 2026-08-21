@@ -255,10 +255,19 @@ class PolicyEngine:
             return default
 
     def _compile_patterns(self):
-        """Compilation unique des regex (anti-ReDoS)."""
+        """Compilation unique des regex étendus (anti-ReDoS)."""
         if PolicyEngine._STRONG_PATTERNS is not None:
             return
 
+        # ✅ NEW: Import extended patterns from detection_patterns module
+        try:
+            from collector.detection_patterns import get_extended_strong_patterns
+            extended_patterns = get_extended_strong_patterns()
+        except ImportError:
+            # Fallback to built-in patterns if module not available
+            extended_patterns = []
+
+        # Original strong patterns (kept for backward compatibility)
         strong = [
             r"\bignore\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions|rules|prompts)\b",
             r"\bdisregard\s+(?:your|the|all)\s+(?:instructions|rules|training)\b",
@@ -297,6 +306,9 @@ class PolicyEngine:
             r"\b\d{16}\b",
         ]
 
+        # ✅ Merge extended patterns
+        all_strong = list(set(strong + extended_patterns))  # dedupe
+
         weak = [
             r"\bpretend\s+you\s+are\b",
             r"\broleplay\s+as\b",
@@ -308,7 +320,7 @@ class PolicyEngine:
         ]
 
         PolicyEngine._STRONG_PATTERNS = re.compile(
-            "|".join(f"(?:{p})" for p in strong),
+            "|".join(f"(?:{p})" for p in all_strong),
             re.IGNORECASE,
         )
         PolicyEngine._WEAK_PATTERNS = re.compile(
@@ -316,7 +328,12 @@ class PolicyEngine:
             re.IGNORECASE,
         )
 
-        logger.info("regex_patterns_compiled", strong=len(strong), weak=len(weak))
+        logger.info(
+            "regex_patterns_compiled",
+            strong=len(all_strong),
+            weak=len(weak),
+            extended_patterns=len(extended_patterns),
+        )
 
     def check_injection(self, text: str) -> SecurityCheck:
         """
