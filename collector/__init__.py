@@ -1,0 +1,1 @@
+"""AgentGuard Collector — modular package."""
