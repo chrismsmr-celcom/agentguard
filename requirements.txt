@@ -69,3 +69,4 @@ opentelemetry-instrumentation-requests>=0.43b0,<1.0.0
 # Optionnel : Prompt Guard en local (sinon utilise HF Inference API)
 #transformers>=4.40.0
 #torch>=2.0.0
+werkzeug>=2.3.0
