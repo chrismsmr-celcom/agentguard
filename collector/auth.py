@@ -28,7 +28,6 @@ PROTECTED_ENDPOINTS = {
     "api.api_recent_events", "api.api_trend_daily", "api.get_llm_stats",
     "api.api_audit_trail", "api.api_checks_daily", "api.api_models_daily",
     "audit.audit_stats", "audit.audit_verify", "audit.audit_query",
-    # ✅ NEW : Identity endpoints (Phase 2)
     "identity.create_tenant", "identity.create_org",
     "identity.create_user", "identity.create_agent",
     "identity.revoke_agent", "identity.list_agents",
@@ -97,7 +96,6 @@ def resolve_org_id(key: str):
     # 2. ✅ NEW : Nouvelle clé agent (format structuré)
     identity = resolve_agent_identity(key)
     if identity:
-        # Stocke l'identité complète dans g pour usage ultérieur
         g.agent_identity = identity
         return identity["org_id"]
     
@@ -158,9 +156,6 @@ def resolve_full_identity():
     """
     Résout l'identité complète depuis la requête courante.
     Retourne un ResolvedIdentity ou None.
-    
-    À appeler dans les endpoints qui ont besoin de RBAC ou d'identité riche.
-    L'identité est mise en cache dans g.identity.
     """
     try:
         from identity import ResolvedIdentity, IdentityType, Role
@@ -179,14 +174,14 @@ def resolve_full_identity():
             tenant_id=info["tenant_id"],
             org_id=info["org_id"],
             subject_id=info["agent_id"],
-            role=Role.DEVELOPER,  # Agents ont le rôle developer par défaut
+            role=Role.DEVELOPER,
             agent_name=info.get("agent_name"),
         )
         g.identity = identity
         return identity
     
-    # Clé API globale legacy → rôle admin (pour backward compat)
- api_key = current_app.config["API_KEY"]
+    # Clé API globale legacy → rôle admin (contrôlé)
+    api_key = current_app.config["API_KEY"]
     if api_key:
         key = request.headers.get("X-API-Key", "").strip()
         if key and safe_compare(key, api_key):
@@ -195,7 +190,6 @@ def resolve_full_identity():
             environment = current_app.config.get("ENVIRONMENT", "development")
             
             if not allow_legacy and environment == "production":
-                # ✅ FAIL CLOSED en production si legacy key non autorisée
                 logger.error(
                     "legacy_system_key_rejected_in_production",
                     ip=request.remote_addr,
@@ -215,67 +209,110 @@ def resolve_full_identity():
                 tenant_id="default",
                 org_id="default",
                 subject_id="system_legacy_key",
-                role=Role.ADMIN,  # Clé globale = admin
+                role=Role.ADMIN,
             )
             g.identity = identity
             return identity
     
-    # Session user (TODO Phase 2 : enrichir login pour stocker user_identity)
+    # Session user
     if hasattr(g, "user_identity") and g.user_identity:
         g.identity = g.user_identity
-        return g.identity
+        return g.user_identity
     
     return None
 
 
 # ═══════════════════════════════════════════════════════════════
-# RBAC DECORATORS (Phase 1)
+# BOLA AUTHORIZATION (CWE-639 prevention)
+# ═══════════════════════════════════════════════════════════════
+
+def authorize_resource_access(
+    target_tenant_id: str,
+    target_org_id: Optional[str] = None,
+    allow_cross_org: bool = False,
+) -> bool:
+    """
+    Vérifie que l'identité courante a accès à la ressource ciblée.
+    
+    Règles :
+      - SYSTEM → accès total (legacy, à déprécier)
+      - ADMIN → accès à toutes les orgs de SON tenant
+      - DEVELOPER/AUDITOR/VIEWER → uniquement leur org
+    """
+    try:
+        from identity import IdentityType, Role
+    except ImportError:
+        return False
+    
+    identity = resolve_full_identity()
+    if not identity:
+        logger.warning("authz_denied_no_identity", target_tenant=target_tenant_id)
+        return False
+    
+    # SYSTEM identity (legacy global admin)
+    if identity.identity_type == IdentityType.SYSTEM:
+        return True
+    
+    # Vérification tenant : TOUJOURS requise
+    if identity.tenant_id != target_tenant_id:
+        logger.warning(
+            "authz_denied_cross_tenant",
+            actor_tenant=identity.tenant_id,
+            target_tenant=target_tenant_id,
+            actor_role=identity.role.value if hasattr(identity.role, "value") else str(identity.role),
+        )
+        return False
+    
+    # Pas d'org_id cible → OK pour tenant admin
+    if target_org_id is None:
+        return True
+    
+    # Tenant admin peut accéder à toutes les orgs du tenant
+    if identity.role == Role.ADMIN:
+        return True
+    
+    # Developer/Auditor/Viewer : uniquement son org
+    if not allow_cross_org and identity.org_id != target_org_id:
+        logger.warning(
+            "authz_denied_cross_org",
+            actor_org=identity.org_id,
+            target_org=target_org_id,
+            actor_role=identity.role.value if hasattr(identity.role, "value") else str(identity.role),
+        )
+        return False
+    
+    return True
+
+
+# ═══════════════════════════════════════════════════════════════
+# RBAC DECORATORS
 # ═══════════════════════════════════════════════════════════════
 
 def require_role(*required_roles: str):
-    """
-    Décorateur Flask pour restreindre un endpoint à certains rôles.
-    
-    Usage:
-        @auth_bp.route("/admin/users")
-        @require_role("admin")
-        def list_users():
-            ...
-        
-        @auth_bp.route("/traces")
-        @require_role("admin", "developer", "auditor")
-        def list_traces():
-            ...
-    """
+    """Décorateur Flask pour restreindre un endpoint à certains rôles."""
     try:
         from identity import Role
         required = [Role(r) for r in required_roles]
     except (ImportError, ValueError):
-        # identity module non disponible ou rôle invalide
         required = []
     
     def decorator(f):
         @wraps(f)
         def wrapper(*args, **kwargs):
-            # Auth d'abord
             if not require_auth():
                 return jsonify({"error": "Unauthorized"}), 401
             
-            # Si pas de rôles requis (fallback), on passe
             if not required:
                 return f(*args, **kwargs)
             
-            # Vérification rôle
             identity = resolve_full_identity()
             if not identity:
                 return jsonify({"error": "Identity not resolved"}), 401
             
-            # Vérifie qu'au moins un rôle requis est satisfait
             for req_role in required:
                 if identity.has_role(req_role):
                     return f(*args, **kwargs)
             
-            # Aucun rôle ne correspond → Forbidden
             logger.warning(
                 "rbac_denied",
                 identity=identity.to_dict() if hasattr(identity, "to_dict") else str(identity),
@@ -293,15 +330,7 @@ def require_role(*required_roles: str):
 
 
 def require_permission(permission: str):
-    """
-    Décorateur pour vérifier une permission spécifique (plus granulaire).
-    
-    Usage:
-        @auth_bp.route("/admin/orgs")
-        @require_permission("org:create")
-        def create_org():
-            ...
-    """
+    """Décorateur pour vérifier une permission spécifique."""
     def decorator(f):
         @wraps(f)
         def wrapper(*args, **kwargs):
@@ -326,7 +355,6 @@ def require_permission(permission: str):
                         "your_role": identity.role.value if hasattr(identity.role, "value") else str(identity.role),
                     }), 403
             except ImportError:
-                # identity module non dispo → on laisse passer
                 pass
             
             return f(*args, **kwargs)
@@ -351,7 +379,6 @@ def require_auth():
         org_id = resolve_org_id(key)
         if org_id:
             g.org_id = org_id
-            # ✅ Tente de résoudre l'identité complète (non-critique si échec)
             try:
                 resolve_full_identity()
             except Exception as e:
@@ -395,7 +422,6 @@ def login():
         key = str(request.form.get("api_key", "")).strip()
         org_id = resolve_org_id(key)
         if not org_id:
-            # Audit : login failed
             try:
                 audit = get_audit_log()
                 if audit:
@@ -410,7 +436,6 @@ def login():
                 pass
             return render_template_string(LOGIN_HTML, error="Invalid API key."), 401
         
-        # ✅ Login success : créer la réponse AVANT l'audit
         resp = redirect(url_for("auth.dashboard"))
         auth_cookie = current_app.config["AUTH_COOKIE"]
         resp.set_cookie(
@@ -421,7 +446,6 @@ def login():
             max_age=current_app.auth_session_ttl,
         )
         
-        # ✅ Audit : login success (APRÈS la création de la réponse)
         try:
             audit = get_audit_log()
             if audit:
@@ -484,88 +508,3 @@ def dashboard():
     from collector.dashboard import DASHBOARD_HTML
     from flask import make_response
     return make_response(render_template_string(DASHBOARD_HTML))
-# ═══════════════════════════════════════════════════════════════
-# RESOURCE AUTHORIZATION (BOLA prevention - CWE-639)
-# ═══════════════════════════════════════════════════════════════
-
-def authorize_resource_access(
-    target_tenant_id: str,
-    target_org_id: Optional[str] = None,
-    allow_cross_org: bool = False,
-) -> bool:
-    """
-    Vérifie que l'identité courante a accès à la ressource ciblée.
-    
-    Règles :
-      - SYSTEM (clé legacy admin global) → accès total (à migrer vers scoping strict)
-      - Tenant admin → accès à toutes les orgs de SON tenant
-      - Developer/Auditor/Viewer → accès UNIQUEMENT à son org
-    
-    Returns True si autorisé, False sinon.
-    Log chaque denial pour audit.
-    """
-    try:
-        from identity import IdentityType, Role
-    except ImportError:
-        return False  # Fail closed
-    
-    identity = resolve_full_identity()
-    if not identity:
-        logger.warning("authz_denied_no_identity", target_tenant=target_tenant_id)
-        return False
-    
-    # SYSTEM identity (legacy global admin) — accès total
-    # ⚠️ À terme : remplacer par un scoping strict ou supprimer legacy
-    if identity.identity_type == IdentityType.SYSTEM:
-        return True
-    
-    # Vérification tenant : TOUJOURS requise
-    if identity.tenant_id != target_tenant_id:
-        logger.warning(
-            "authz_denied_cross_tenant",
-            actor_tenant=identity.tenant_id,
-            target_tenant=target_tenant_id,
-            actor_role=identity.role.value if hasattr(identity.role, "value") else str(identity.role),
-        )
-        return False
-    
-    # Si pas d'org_id cible (opération tenant-level), OK pour tenant admin
-    if target_org_id is None:
-        return True
-    
-    # Tenant admin peut accéder à toutes les orgs du tenant
-    if identity.role == Role.ADMIN:
-        return True
-    
-    # Developer/Auditor/Viewer : uniquement son org
-    if not allow_cross_org and identity.org_id != target_org_id:
-        logger.warning(
-            "authz_denied_cross_org",
-            actor_org=identity.org_id,
-            target_org=target_org_id,
-            actor_role=identity.role.value if hasattr(identity.role, "value") else str(identity.role),
-        )
-        return False
-    
-    return True
-
-
-def require_resource_access(target_tenant_id: str, target_org_id: Optional[str] = None):
-    """
-    Decorator pour endpoints qui manipulent des ressources cross-tenant/org.
-    
-    Usage:
-        @identity_bp.route("/agents", methods=["POST"])
-        @require_role("admin", "developer")
-        def create_agent():
-            data = request.get_json()
-            target_org_id = data.get("org_id")
-            target_tenant_id = _resolve_tenant_for_org(target_org_id)
-            
-            if not authorize_resource_access(target_tenant_id, target_org_id):
-                return jsonify({"error": "access denied"}), 403
-            # ... suite
-    """
-    # Pas un decorator mais un helper à appeler explicitement
-    # (pour forcer le développeur à réfléchir au scope)
-    pass
