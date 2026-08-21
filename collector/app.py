@@ -81,13 +81,14 @@ def _register_blueprints(app: Flask):
     from collector.admin import admin_bp
     from collector.audit_routes import audit_bp
     from collector.trace_view import trace_bp
+    from collector.identity_routes import identity_bp
     
     app.register_blueprint(auth_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(audit_bp)
     app.register_blueprint(trace_bp)
-
+    app.register_blueprint(identity_bp)
 
 def init_db():
     """Initialise la DB (à appeler au boot)."""
