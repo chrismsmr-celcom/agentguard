@@ -1,4 +1,4 @@
-"""Database setup + PII redaction."""
+"""Database setup + PII redaction + Identity tables."""
 import os
 import re
 import sqlite3
@@ -13,6 +13,7 @@ _PII_PATTERNS = {
     "CARD": re.compile(r"\b(?:\d{4}[- ]?){3}\d{4}\b"),
     "API_KEY": re.compile(r"\b(sk-|pk-|Bearer\s)[A-Za-z0-9_-]{20,}\b"),
 }
+
 
 def redact_pii(obj):
     """Masque récursivement le PII dans les strings."""
@@ -106,13 +107,9 @@ def is_postgres() -> bool:
     return db_type == "postgres" and bool(database_url)
 
 
-# ── INIT DB ─────────────────────────────────────────────────────
+# ── INIT DB (spans + api_keys legacy) ───────────────────────────
 def init_db():
-    """Initialise les tables avec support tokens + detection layer."""
-       try:
-        init_identity_tables()
-    except Exception as e:
-        logger.warning("identity_tables_init_failed", error=str(e))
+    """Initialise les tables principales (spans + api_keys legacy)."""
     if is_postgres():
         _, database_url = _get_db_config()
         conn = get_pg_conn()
@@ -146,8 +143,12 @@ def init_db():
             ]:
                 cur.execute(idx)
 
-            for col, dtype in [("org_id", "TEXT DEFAULT 'default'"), ("model", "TEXT"),
-                               ("input_tokens", "BIGINT DEFAULT 0"), ("output_tokens", "BIGINT DEFAULT 0")]:
+            for col, dtype in [
+                ("org_id", "TEXT DEFAULT 'default'"),
+                ("model", "TEXT"),
+                ("input_tokens", "BIGINT DEFAULT 0"),
+                ("output_tokens", "BIGINT DEFAULT 0"),
+            ]:
                 try:
                     cur.execute(f"ALTER TABLE spans ADD COLUMN IF NOT EXISTS {col} {dtype}")
                 except Exception:
@@ -157,7 +158,8 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS api_keys (
                     id SERIAL PRIMARY KEY, key_hash TEXT UNIQUE NOT NULL,
                     org_id TEXT NOT NULL, org_name TEXT, plan TEXT DEFAULT 'free',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, active BOOLEAN DEFAULT TRUE
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    active BOOLEAN DEFAULT TRUE
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_hash_pg ON api_keys(key_hash)")
@@ -165,7 +167,7 @@ def init_db():
         finally:
             cur.execute("SELECT pg_advisory_unlock(727271)")
             conn.close()
-        logger.info("postgres_initialized", version="v6.0")
+        logger.info("postgres_initialized", version="v6.1")
     else:
         conn = sqlite3.connect(DB_SQLITE_PATH)
         c = conn.cursor()
@@ -193,23 +195,37 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_cost ON spans(cost_usd)",
         ]:
             c.execute(idx)
-        for col, dtype in [("org_id", "TEXT DEFAULT 'default'"), ("model", "TEXT"),
-                           ("input_tokens", "INTEGER DEFAULT 0"), ("output_tokens", "INTEGER DEFAULT 0")]:
+        for col, dtype in [
+            ("org_id", "TEXT DEFAULT 'default'"),
+            ("model", "TEXT"),
+            ("input_tokens", "INTEGER DEFAULT 0"),
+            ("output_tokens", "INTEGER DEFAULT 0"),
+        ]:
             try:
                 c.execute(f"ALTER TABLE spans ADD COLUMN {col} {dtype}")
             except sqlite3.OperationalError:
                 pass
         c.execute("""
             CREATE TABLE IF NOT EXISTS api_keys (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, key_hash TEXT UNIQUE NOT NULL,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key_hash TEXT UNIQUE NOT NULL,
                 org_id TEXT NOT NULL, org_name TEXT, plan TEXT DEFAULT 'free',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, active INTEGER DEFAULT 1
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                active INTEGER DEFAULT 1
             )
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)")
         conn.commit()
         conn.close()
-        logger.info("sqlite_initialized", version="v6.0")
+        logger.info("sqlite_initialized", version="v6.1")
+
+    # ✅ Initialise aussi les tables identity (Phase 1)
+    try:
+        init_identity_tables()
+    except Exception as e:
+        logger.warning("identity_tables_init_failed", error=str(e))
+
+
 # ═══════════════════════════════════════════════════════════════
 # IDENTITY TABLES (added in v6.1)
 # ═══════════════════════════════════════════════════════════════
@@ -299,7 +315,7 @@ def init_identity_tables():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)")
             
-            # Audit log events enrichis (nouvelle table séparée)
+            # Identity events (audit enrichi)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS identity_events (
                     event_id TEXT PRIMARY KEY,
@@ -321,10 +337,10 @@ def init_identity_tables():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_id_events_actor ON identity_events(actor_user_id, created_at DESC)")
             
             conn.commit()
-            print("[AG] ✅ Identity tables initialized (Postgres)")
+            logger.info("identity_tables_initialized", db="postgres")
         except Exception as e:
             conn.rollback()
-            print(f"[AG] ❌ Identity init failed: {e}")
+            logger.error("identity_tables_init_failed", error=str(e))
             raise
         finally:
             conn.close()
@@ -332,88 +348,92 @@ def init_identity_tables():
         # SQLite fallback (dev)
         conn = sqlite3.connect(DB_SQLITE_PATH)
         c = conn.cursor()
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS tenants (
-                tenant_id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                active INTEGER DEFAULT 1
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS orgs (
-                org_id TEXT PRIMARY KEY,
-                tenant_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                active INTEGER DEFAULT 1
-            )
-        """)
-        c.execute("CREATE INDEX IF NOT EXISTS idx_orgs_tenant ON orgs(tenant_id)")
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id TEXT PRIMARY KEY,
-                org_id TEXT NOT NULL,
-                tenant_id TEXT NOT NULL,
-                email TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'viewer',
-                display_name TEXT,
-                password_hash TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                active INTEGER DEFAULT 1,
-                UNIQUE(org_id, email)
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS agents (
-                agent_id TEXT PRIMARY KEY,
-                org_id TEXT NOT NULL,
-                tenant_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                description TEXT,
-                key_hash TEXT UNIQUE NOT NULL,
-                key_prefix TEXT NOT NULL,
-                max_budget_per_day REAL DEFAULT 100.0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_seen_at TIMESTAMP,
-                active INTEGER DEFAULT 1
-            )
-        """)
-        c.execute("CREATE INDEX IF NOT EXISTS idx_agents_key_hash ON agents(key_hash)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_agents_key_prefix ON agents(key_prefix)")
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                session_id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                tenant_id TEXT NOT NULL,
-                org_id TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP NOT NULL,
-                ip_address TEXT,
-                user_agent TEXT,
-                active INTEGER DEFAULT 1
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS identity_events (
-                event_id TEXT PRIMARY KEY,
-                seq_no INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id TEXT NOT NULL,
-                org_id TEXT,
-                actor_user_id TEXT,
-                actor_agent_id TEXT,
-                event_type TEXT NOT NULL,
-                resource_type TEXT NOT NULL,
-                resource_id TEXT NOT NULL,
-                action TEXT NOT NULL,
-                details TEXT,
-                ip_address TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.commit()
-        conn.close()
-        print("[AG] ✅ Identity tables initialized (SQLite)")
+        try:
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS tenants (
+                    tenant_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    active INTEGER DEFAULT 1
+                )
+            """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS orgs (
+                    org_id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    active INTEGER DEFAULT 1
+                )
+            """)
+            c.execute("CREATE INDEX IF NOT EXISTS idx_orgs_tenant ON orgs(tenant_id)")
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id TEXT PRIMARY KEY,
+                    org_id TEXT NOT NULL,
+                    tenant_id TEXT NOT NULL,
+                    email TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'viewer',
+                    display_name TEXT,
+                    password_hash TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    active INTEGER DEFAULT 1,
+                    UNIQUE(org_id, email)
+                )
+            """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS agents (
+                    agent_id TEXT PRIMARY KEY,
+                    org_id TEXT NOT NULL,
+                    tenant_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    key_hash TEXT UNIQUE NOT NULL,
+                    key_prefix TEXT NOT NULL,
+                    max_budget_per_day REAL DEFAULT 100.0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_seen_at TIMESTAMP,
+                    active INTEGER DEFAULT 1
+                )
+            """)
+            c.execute("CREATE INDEX IF NOT EXISTS idx_agents_key_hash ON agents(key_hash)")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_agents_key_prefix ON agents(key_prefix)")
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    session_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    tenant_id TEXT NOT NULL,
+                    org_id TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP NOT NULL,
+                    ip_address TEXT,
+                    user_agent TEXT,
+                    active INTEGER DEFAULT 1
+                )
+            """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS identity_events (
+                    event_id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    org_id TEXT,
+                    actor_user_id TEXT,
+                    actor_agent_id TEXT,
+                    event_type TEXT NOT NULL,
+                    resource_type TEXT NOT NULL,
+                    resource_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    details TEXT,
+                    ip_address TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+            logger.info("identity_tables_initialized", db="sqlite")
+        except Exception as e:
+            logger.error("identity_tables_init_failed", error=str(e))
+            raise
+        finally:
+            conn.close()
 
 
 def resolve_agent_identity(api_key: str):
@@ -424,50 +444,56 @@ def resolve_agent_identity(api_key: str):
     Optimisation : utilise le préfixe de la clé pour un premier
     filtre rapide avant de vérifier le hash complet.
     """
-    from identity import parse_agent_api_key, hash_key
+    try:
+        from identity import parse_agent_api_key, hash_key as identity_hash
+    except ImportError:
+        return None
     
     parsed = parse_agent_api_key(api_key)
     if not parsed:
-        return None  # Format non reconnu (ancienne clé)
+        return None  # Format non reconnu (ancienne clé "ag-xxx")
     
-    key_hash = hash_key(api_key)
+    key_hash = identity_hash(api_key)
     prefix = f"ag_{parsed['tenant_short']}_{parsed['org_short']}_{parsed['agent_short']}"
     
     if is_postgres():
         conn = get_pg_conn()
         cur = conn.cursor()
-        cur.execute("""
-            SELECT a.agent_id, a.org_id, a.tenant_id, a.name, a.active,
-                   o.name as org_name, t.name as tenant_name
-            FROM agents a
-            JOIN orgs o ON a.org_id = o.org_id
-            JOIN tenants t ON a.tenant_id = t.tenant_id
-            WHERE a.key_hash = %s AND a.key_prefix = %s
-        """, (key_hash, prefix))
-        row = cur.fetchone()
-        
-        if row:
-            # Update last_seen_at
-            cur.execute(
-                "UPDATE agents SET last_seen_at = NOW() WHERE agent_id = %s",
-                (row[0],)
-            )
-            conn.commit()
-        
-        conn.close()
+        try:
+            cur.execute("""
+                SELECT a.agent_id, a.org_id, a.tenant_id, a.name, a.active,
+                       o.name as org_name, t.name as tenant_name
+                FROM agents a
+                JOIN orgs o ON a.org_id = o.org_id
+                JOIN tenants t ON a.tenant_id = t.tenant_id
+                WHERE a.key_hash = %s AND a.key_prefix = %s
+            """, (key_hash, prefix))
+            row = cur.fetchone()
+            
+            if row:
+                # Update last_seen_at
+                cur.execute(
+                    "UPDATE agents SET last_seen_at = NOW() WHERE agent_id = %s",
+                    (row[0],)
+                )
+                conn.commit()
+        finally:
+            conn.close()
     else:
         conn = sqlite3.connect(DB_SQLITE_PATH)
         cur = conn.cursor()
-        cur.execute("""
-            SELECT a.agent_id, a.org_id, a.tenant_id, a.name, a.active,
-                   o.name, t.name
-            FROM agents a
-            JOIN orgs o ON a.org_id = o.org_id
-            JOIN tenants t ON a.tenant_id = t.tenant_id
-            WHERE a.key_hash = ? AND a.key_prefix = ?
-        """, (key_hash, prefix))
-        row = cur.fetchone()
-        conn.close()
+        try:
+            cur.execute("""
+                SELECT a.agent_id, a.org_id, a.tenant_id, a.name, a.active,
+                       o.name, t.name
+                FROM agents a
+                JOIN orgs o ON a.org_id = o.org_id
+                JOIN tenants t ON a.tenant_id = t.tenant_id
+                WHERE a.key_hash = ? AND a.key_prefix = ?
+            """, (key_hash, prefix))
+            row = cur.fetchone()
+        finally:
+            conn.close()
     
     if not row:
         return None
