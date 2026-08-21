@@ -1,16 +1,10 @@
 """
-WSGI entry point for Gunicorn (v3.0 prod-ready).
+WSGI entry point for Gunicorn.
 """
-import logging
-from collector import app, init_db
+from collector.app import create_app, init_db
 
-logging.basicConfig(
-    level=logging.getLogger().level,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
-
-# Initialise la DB au démarrage (idempotent + verrou advisory côté PG)
+# Initialise la DB au boot
 init_db()
 
-if __name__ == "__main__":
-    app.run()
+# Crée l'instance Flask
+app = create_app()
