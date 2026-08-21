@@ -49,7 +49,10 @@ def create_app() -> Flask:
     app.config["ADMIN_SECRET"] = os.environ.get("AGENTGUARD_ADMIN_SECRET")
     app.config["AUTH_COOKIE"] = "ag_auth"
     app.config["SPAN_RATE_LIMIT"] = os.environ.get("AGENTGUARD_SPAN_RATE_LIMIT", "30 per minute")
-    
+    app.config["ALLOW_LEGACY_SYSTEM_KEY"] = (
+    os.environ.get("AGENTGUARD_ALLOW_LEGACY_SYSTEM_KEY", "false").lower() == "true"
+)
+app.config["ENVIRONMENT"] = os.environ.get("AGENTGUARD_ENVIRONMENT", "development")
     # Génération auto de la clé API si absente
     if not app.config["API_KEY"]:
         app.config["API_KEY"] = "ag-" + secrets.token_urlsafe(32)
