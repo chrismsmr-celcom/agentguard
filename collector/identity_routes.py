@@ -18,6 +18,7 @@ from collector.db import get_pg_conn, is_postgres, get_sqlite_conn
 from collector.auth import require_auth, require_role, resolve_full_identity
 from identity import (
     Role,
+    IdentityType,  # ✅ AJOUT
     generate_agent_api_key,
     hash_key,
     short_id,
@@ -507,20 +508,35 @@ def revoke_agent(agent_id: str):
     if not identity:
         return jsonify({"error": "identity required"}), 401
     
+    # ✅ Admin SYSTEM (clé legacy) peut révoquer n'importe quel agent
+    # (super-admin global, pas restreint à une org)
+    is_system_admin = (identity.identity_type == IdentityType.SYSTEM)
+    
     conn = _get_conn()
     cur = conn.cursor()
     try:
-        # Vérifie que l'agent existe ET appartient à l'org courante (isolation)
         if is_postgres():
-            cur.execute("""
-                UPDATE agents SET active = FALSE
-                WHERE agent_id = %s AND org_id = %s
-            """, (agent_id, identity.org_id))
+            if is_system_admin:
+                cur.execute(
+                    "UPDATE agents SET active = FALSE WHERE agent_id = %s",
+                    (agent_id,),
+                )
+            else:
+                cur.execute(
+                    "UPDATE agents SET active = FALSE WHERE agent_id = %s AND org_id = %s",
+                    (agent_id, identity.org_id),
+                )
         else:
-            cur.execute("""
-                UPDATE agents SET active = 0
-                WHERE agent_id = ? AND org_id = ?
-            """, (agent_id, identity.org_id))
+            if is_system_admin:
+                cur.execute(
+                    "UPDATE agents SET active = 0 WHERE agent_id = ?",
+                    (agent_id,),
+                )
+            else:
+                cur.execute(
+                    "UPDATE agents SET active = 0 WHERE agent_id = ? AND org_id = ?",
+                    (agent_id, identity.org_id),
+                )
         affected = cur.rowcount
         conn.commit()
     except Exception as e:
@@ -538,7 +554,7 @@ def revoke_agent(agent_id: str):
         resource_type="agent",
         resource_id=agent_id,
         action="revoke",
-        details={"org_id": identity.org_id},
+        details={"org_id": identity.org_id, "system_admin": is_system_admin},
     )
     
     logger.info("agent_revoked", agent_id=agent_id, org_id=identity.org_id)
