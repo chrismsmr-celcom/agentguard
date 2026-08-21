@@ -469,10 +469,50 @@ class ImmutableAuditLog:
                 conn.close()
             except Exception as e:
                 print(f"[AuditLog] Stats failed: {e}")
+        # ✅ NEW : Fallback SQLite / fichier (pour tests)
+        elif os.path.exists(self.backup_file):
+            try:
+                entries = []
+                with open(self.backup_file, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            try:
+                                entries.append(json.loads(line))
+                            except Exception:
+                                continue
+                
+                stats["total_entries"] = len(entries)
+                
+                # by_event_type
+                by_type = {}
+                for e in entries:
+                    t = e.get("event_type", "unknown")
+                    by_type[t] = by_type.get(t, 0) + 1
+                stats["by_event_type"] = by_type
+                
+                # by_risk_level
+                by_risk = {}
+                for e in entries:
+                    r = e.get("risk_level", "info")
+                    by_risk[r] = by_risk.get(r, 0) + 1
+                stats["by_risk_level"] = by_risk
+                
+                # oldest/newest
+                if entries:
+                    timestamps = [e.get("timestamp", 0) for e in entries if e.get("timestamp")]
+                    if timestamps:
+                        stats["oldest_entry"] = datetime.fromtimestamp(min(timestamps)).isoformat()
+                        stats["newest_entry"] = datetime.fromtimestamp(max(timestamps)).isoformat()
+            except Exception as e:
+                print(f"[AuditLog] File stats failed: {e}")
         
         # Vérification rapide (uniquement les 1000 dernières entrées)
-        is_valid, _ = self.verify_chain(limit=1000)
-        stats["chain_intact"] = is_valid
+        try:
+            is_valid, _ = self.verify_chain(limit=1000)
+            stats["chain_intact"] = is_valid
+        except Exception:
+            stats["chain_intact"] = None
         
         return stats
     
