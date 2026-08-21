@@ -372,18 +372,16 @@ class TestUserCreation:
         assert "valid_roles" in resp.json
 
 class TestLegacySystemKey:
-    """La clé legacy SYSTEM doit être contrôlée et tracée."""
+    """La clé legacy SYSTEM doit être contrôlée et tracée en production."""
     
     def test_legacy_key_rejected_in_production_without_flag(self, client, monkeypatch):
-        """En production sans flag, la clé legacy est rejetée."""
-        # ✅ Config complète pour production
+        """En production sans flag, la clé legacy est rejetée (401)."""
         monkeypatch.setenv("AGENTGUARD_ENVIRONMENT", "production")
         monkeypatch.setenv("AGENTGUARD_ALLOW_LEGACY_SYSTEM_KEY", "false")
-        monkeypatch.setenv("AGENTGUARD_CORS_ORIGINS", "https://test.local")  # ✅ Requis
-        monkeypatch.setenv("AGENTGUARD_API_KEY", "ag-test-legacy-key")
-        monkeypatch.setenv("AGENTGUARD_ADMIN_SECRET", "test-admin")
+        monkeypatch.setenv("AGENTGUARD_CORS_ORIGINS", "https://test.local")
+        monkeypatch.setenv("AGENTGUARD_API_KEY", "ag-test-legacy-key-prod")
+        monkeypatch.setenv("AGENTGUARD_ADMIN_SECRET", "test-admin-prod")
         
-        # Recrée l'app avec la nouvelle config
         from collector.app import create_app
         from collector.db import init_db
         
@@ -393,9 +391,31 @@ class TestLegacySystemKey:
         
         with app.test_client() as c:
             resp = c.get("/api/identity/me",
-                headers={"X-API-Key": os.environ["AGENTGUARD_API_KEY"]})
-            # Legacy key rejetée en production sans flag → 401
-            assert resp.status_code == 401
+                headers={"X-API-Key": "ag-test-legacy-key-prod"})
+            assert resp.status_code == 401, \
+                f"Legacy key must be rejected in production, got {resp.status_code}"
+    
+    def test_legacy_key_allowed_with_flag(self, client, monkeypatch):
+        """Avec le flag activé, la clé legacy fonctionne (200)."""
+        monkeypatch.setenv("AGENTGUARD_ENVIRONMENT", "production")
+        monkeypatch.setenv("AGENTGUARD_ALLOW_LEGACY_SYSTEM_KEY", "true")
+        monkeypatch.setenv("AGENTGUARD_CORS_ORIGINS", "https://test.local")
+        monkeypatch.setenv("AGENTGUARD_API_KEY", "ag-test-legacy-key-prod2")
+        monkeypatch.setenv("AGENTGUARD_ADMIN_SECRET", "test-admin-prod2")
+        
+        from collector.app import create_app
+        from collector.db import init_db
+        
+        init_db()
+        app = create_app()
+        app.config["TESTING"] = True
+        
+        with app.test_client() as c:
+            resp = c.get("/api/identity/me",
+                headers={"X-API-Key": "ag-test-legacy-key-prod2"})
+            assert resp.status_code == 200, \
+                f"Legacy key with flag must be allowed, got {resp.status_code}"
+            assert resp.json.get("identity_type") in ("system", "legacy")
     
     def test_legacy_key_allowed_with_flag(self, client, monkeypatch):
         """Avec le flag, la clé legacy fonctionne mais est loguée."""
