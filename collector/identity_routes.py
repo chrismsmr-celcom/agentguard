@@ -181,18 +181,28 @@ def create_org():
     if err:
         return jsonify({"error": err}), 400
     
-    # Si tenant_id non fourni, utilise celui de l'identité courante
+    # ✅ BOLA FIX : Résoudre l'identité AVANT toute opération
     identity = resolve_full_identity()
-    if not tenant_id and identity:
+    if not identity:
+        return jsonify({"error": "identity required"}), 401
+    
+    # Si tenant_id non fourni, utiliser celui de l'acteur (scope-safe)
+    if not tenant_id:
         tenant_id = identity.tenant_id
     
-    if not tenant_id:
-        return jsonify({"error": "tenant_id required"}), 400
+    # ✅ BOLA FIX : Vérification d'appartenance STRICTE
+    from collector.auth import authorize_resource_access
+    if not authorize_resource_access(tenant_id, target_org_id=None):
+        return jsonify({
+            "error": "access denied: cannot create org in this tenant",
+            "your_tenant": identity.tenant_id,
+            "target_tenant": tenant_id,
+        }), 403
     
-    # Vérifie que le tenant existe et appartient à l'identité (isolation)
     conn = _get_conn()
     cur = conn.cursor()
     try:
+        # Vérifie que le tenant existe ET est actif
         if is_postgres():
             cur.execute(
                 "SELECT tenant_id FROM tenants WHERE tenant_id = %s AND active = TRUE",
@@ -231,7 +241,7 @@ def create_org():
         resource_type="org",
         resource_id=org_id,
         action="create",
-        details={"name": name, "tenant_id": tenant_id},
+        details={"name": name, "tenant_id": tenant_id, "actor_tenant": identity.tenant_id},
     )
     
     logger.info("org_created", org_id=org_id, tenant_id=tenant_id)
@@ -349,7 +359,7 @@ def create_user():
 @identity_bp.route("/agents", methods=["POST"])
 @require_role("admin", "developer")
 def create_agent():
-    """Crée un agent IA et retourne sa clé API (affichée UNE SEULE FOIS)."""
+    """Crée un agent IA — avec vérification BOLA stricte."""
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     description = (data.get("description") or "").strip()
@@ -361,8 +371,13 @@ def create_agent():
     if max_budget < 0 or max_budget > 10000:
         return jsonify({"error": "max_budget_per_day must be between 0 and 10000"}), 400
     
+    # ✅ BOLA FIX : Résoudre l'identité AVANT
     identity = resolve_full_identity()
-    if not org_id and identity:
+    if not identity:
+        return jsonify({"error": "identity required"}), 401
+    
+    # Si org_id non fourni, utiliser celui de l'acteur
+    if not org_id:
         org_id = identity.org_id
     
     if not org_id:
@@ -371,7 +386,7 @@ def create_agent():
     conn = _get_conn()
     cur = conn.cursor()
     try:
-        # Vérifie que l'org existe
+        # Récupère l'org cible AVEC son tenant_id
         if is_postgres():
             cur.execute(
                 "SELECT tenant_id FROM orgs WHERE org_id = %s AND active = TRUE",
@@ -385,25 +400,36 @@ def create_agent():
         row = cur.fetchone()
         if not row:
             return jsonify({"error": "org not found"}), 404
-        tenant_id = row[0]
+        target_tenant_id = row[0]
+        
+        # ✅ BOLA FIX : Vérification STRICTE d'appartenance
+        from collector.auth import authorize_resource_access
+        if not authorize_resource_access(target_tenant_id, target_org_id=org_id):
+            return jsonify({
+                "error": "access denied: cannot create agent in this org",
+                "your_tenant": identity.tenant_id,
+                "your_org": identity.org_id,
+                "target_tenant": target_tenant_id,
+                "target_org": org_id,
+            }), 403
         
         agent_id = f"agent_{short_id(length=12)}"
-        api_key = generate_agent_api_key(tenant_id, org_id, agent_id)
+        api_key = generate_agent_api_key(target_tenant_id, org_id, agent_id)
         key_hash = hash_key(api_key)
-        key_prefix = "_".join(api_key.split("_")[:4])  # ag_{t}_{o}_{a}
+        key_prefix = "_".join(api_key.split("_")[:4])
         
         if is_postgres():
             cur.execute("""
                 INSERT INTO agents
                 (agent_id, org_id, tenant_id, name, description, key_hash, key_prefix, max_budget_per_day)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (agent_id, org_id, tenant_id, name, description, key_hash, key_prefix, max_budget))
+            """, (agent_id, org_id, target_tenant_id, name, description, key_hash, key_prefix, max_budget))
         else:
             cur.execute("""
                 INSERT INTO agents
                 (agent_id, org_id, tenant_id, name, description, key_hash, key_prefix, max_budget_per_day)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (agent_id, org_id, tenant_id, name, description, key_hash, key_prefix, max_budget))
+            """, (agent_id, org_id, target_tenant_id, name, description, key_hash, key_prefix, max_budget))
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -417,7 +443,10 @@ def create_agent():
         resource_type="agent",
         resource_id=agent_id,
         action="create",
-        details={"name": name, "org_id": org_id},
+        details={
+            "name": name, "org_id": org_id,
+            "actor_tenant": identity.tenant_id, "actor_org": identity.org_id,
+        },
     )
     
     logger.info("agent_created", agent_id=agent_id, org_id=org_id, name=name)
