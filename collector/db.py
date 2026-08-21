@@ -206,3 +206,279 @@ def init_db():
         conn.commit()
         conn.close()
         logger.info("sqlite_initialized", version="v6.0")
+# ═══════════════════════════════════════════════════════════════
+# IDENTITY TABLES (added in v6.1)
+# ═══════════════════════════════════════════════════════════════
+
+def init_identity_tables():
+    """Crée les tables identity si elles n'existent pas."""
+    if is_postgres():
+        conn = get_pg_conn()
+        cur = conn.cursor()
+        try:
+            # Tenants
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS tenants (
+                    tenant_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    active BOOLEAN DEFAULT TRUE
+                )
+            """)
+            
+            # Orgs
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS orgs (
+                    org_id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+                    name TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    active BOOLEAN DEFAULT TRUE
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_orgs_tenant ON orgs(tenant_id)")
+            
+            # Users (humains)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id TEXT PRIMARY KEY,
+                    org_id TEXT NOT NULL REFERENCES orgs(org_id),
+                    tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+                    email TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'viewer',
+                    display_name TEXT,
+                    password_hash TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    active BOOLEAN DEFAULT TRUE,
+                    UNIQUE(org_id, email)
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+            
+            # Agents (bots IA)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS agents (
+                    agent_id TEXT PRIMARY KEY,
+                    org_id TEXT NOT NULL REFERENCES orgs(org_id),
+                    tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    key_hash TEXT UNIQUE NOT NULL,
+                    key_prefix TEXT NOT NULL,
+                    max_budget_per_day DOUBLE PRECISION DEFAULT 100.0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_seen_at TIMESTAMP,
+                    active BOOLEAN DEFAULT TRUE
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_agents_org ON agents(org_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_agents_tenant ON agents(tenant_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_agents_key_hash ON agents(key_hash)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_agents_key_prefix ON agents(key_prefix)")
+            
+            # Sessions (pour humans seulement)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    session_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL REFERENCES users(user_id),
+                    tenant_id TEXT NOT NULL,
+                    org_id TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP NOT NULL,
+                    ip_address TEXT,
+                    user_agent TEXT,
+                    active BOOLEAN DEFAULT TRUE
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)")
+            
+            # Audit log events enrichis (nouvelle table séparée)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS identity_events (
+                    event_id TEXT PRIMARY KEY,
+                    seq_no BIGSERIAL UNIQUE,
+                    tenant_id TEXT NOT NULL,
+                    org_id TEXT,
+                    actor_user_id TEXT,
+                    actor_agent_id TEXT,
+                    event_type TEXT NOT NULL,
+                    resource_type TEXT NOT NULL,
+                    resource_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    details JSONB,
+                    ip_address TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_id_events_tenant ON identity_events(tenant_id, created_at DESC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_id_events_actor ON identity_events(actor_user_id, created_at DESC)")
+            
+            conn.commit()
+            print("[AG] ✅ Identity tables initialized (Postgres)")
+        except Exception as e:
+            conn.rollback()
+            print(f"[AG] ❌ Identity init failed: {e}")
+            raise
+        finally:
+            conn.close()
+    else:
+        # SQLite fallback (dev)
+        conn = sqlite3.connect(DB_SQLITE_PATH)
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS tenants (
+                tenant_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                active INTEGER DEFAULT 1
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS orgs (
+                org_id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                active INTEGER DEFAULT 1
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_orgs_tenant ON orgs(tenant_id)")
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id TEXT PRIMARY KEY,
+                org_id TEXT NOT NULL,
+                tenant_id TEXT NOT NULL,
+                email TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'viewer',
+                display_name TEXT,
+                password_hash TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                active INTEGER DEFAULT 1,
+                UNIQUE(org_id, email)
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS agents (
+                agent_id TEXT PRIMARY KEY,
+                org_id TEXT NOT NULL,
+                tenant_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                key_hash TEXT UNIQUE NOT NULL,
+                key_prefix TEXT NOT NULL,
+                max_budget_per_day REAL DEFAULT 100.0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_seen_at TIMESTAMP,
+                active INTEGER DEFAULT 1
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_agents_key_hash ON agents(key_hash)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_agents_key_prefix ON agents(key_prefix)")
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                tenant_id TEXT NOT NULL,
+                org_id TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                ip_address TEXT,
+                user_agent TEXT,
+                active INTEGER DEFAULT 1
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS identity_events (
+                event_id TEXT PRIMARY KEY,
+                seq_no INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id TEXT NOT NULL,
+                org_id TEXT,
+                actor_user_id TEXT,
+                actor_agent_id TEXT,
+                event_type TEXT NOT NULL,
+                resource_type TEXT NOT NULL,
+                resource_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                details TEXT,
+                ip_address TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        conn.close()
+        print("[AG] ✅ Identity tables initialized (SQLite)")
+
+
+def resolve_agent_identity(api_key: str):
+    """
+    Résout une clé API agent en identité complète.
+    Retourne un dict avec tenant/org/agent info, ou None.
+    
+    Optimisation : utilise le préfixe de la clé pour un premier
+    filtre rapide avant de vérifier le hash complet.
+    """
+    from identity import parse_agent_api_key, hash_key
+    
+    parsed = parse_agent_api_key(api_key)
+    if not parsed:
+        return None  # Format non reconnu (ancienne clé)
+    
+    key_hash = hash_key(api_key)
+    prefix = f"ag_{parsed['tenant_short']}_{parsed['org_short']}_{parsed['agent_short']}"
+    
+    if is_postgres():
+        conn = get_pg_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT a.agent_id, a.org_id, a.tenant_id, a.name, a.active,
+                   o.name as org_name, t.name as tenant_name
+            FROM agents a
+            JOIN orgs o ON a.org_id = o.org_id
+            JOIN tenants t ON a.tenant_id = t.tenant_id
+            WHERE a.key_hash = %s AND a.key_prefix = %s
+        """, (key_hash, prefix))
+        row = cur.fetchone()
+        
+        if row:
+            # Update last_seen_at
+            cur.execute(
+                "UPDATE agents SET last_seen_at = NOW() WHERE agent_id = %s",
+                (row[0],)
+            )
+            conn.commit()
+        
+        conn.close()
+    else:
+        conn = sqlite3.connect(DB_SQLITE_PATH)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT a.agent_id, a.org_id, a.tenant_id, a.name, a.active,
+                   o.name, t.name
+            FROM agents a
+            JOIN orgs o ON a.org_id = o.org_id
+            JOIN tenants t ON a.tenant_id = t.tenant_id
+            WHERE a.key_hash = ? AND a.key_prefix = ?
+        """, (key_hash, prefix))
+        row = cur.fetchone()
+        conn.close()
+    
+    if not row:
+        return None
+    
+    agent_id, org_id, tenant_id, agent_name, active, org_name, tenant_name = row
+    
+    if not active:
+        return None  # Agent révoqué
+    
+    return {
+        "identity_type": "agent",
+        "tenant_id": tenant_id,
+        "tenant_name": tenant_name,
+        "org_id": org_id,
+        "org_name": org_name,
+        "agent_id": agent_id,
+        "agent_name": agent_name,
+    }
