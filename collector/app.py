@@ -22,14 +22,25 @@ def create_app() -> Flask:
     """Crée et configure l'application Flask."""
     app = Flask(__name__)
     
-    app.secret_key = os.environ.get("AGENTGUARD_FLASK_SECRET") or secrets.token_urlsafe(32)
-    app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("AGENTGUARD_MAX_BODY_BYTES", "262144"))
-    
     # ✅ Security hardening : environnement
     app.config["ENVIRONMENT"] = os.environ.get("AGENTGUARD_ENVIRONMENT", "development")
-    app.config["ALLOW_LEGACY_SYSTEM_KEY"] = (
-        os.environ.get("AGENTGUARD_ALLOW_LEGACY_SYSTEM_KEY", "false").lower() == "true"
-    )
+    is_production = app.config["ENVIRONMENT"] == "production"
+    
+    # ✅ FLASK SECRET : fail-closed en production
+    flask_secret = os.environ.get("AGENTGUARD_FLASK_SECRET")
+    if not flask_secret:
+        if is_production:
+            raise RuntimeError(
+                "AGENTGUARD_FLASK_SECRET must be configured in production. "
+                "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+            )
+        else:
+            flask_secret = secrets.token_urlsafe(32)
+            logger.warning("flask_secret_auto_generated_dev_only")
+    app.secret_key = flask_secret
+    
+    app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("AGENTGUARD_MAX_BODY_BYTES", "262144"))
+    
     
     # CORS : strict en production, permissif en dev
     cors_origins = [x.strip() for x in os.environ.get("AGENTGUARD_CORS_ORIGINS", "").split(",") if x.strip()]
