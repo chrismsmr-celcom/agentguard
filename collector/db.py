@@ -109,7 +109,14 @@ def is_postgres() -> bool:
 
 # ── INIT DB (spans + api_keys legacy) ───────────────────────────
 def init_db():
-    """Initialise les tables principales (spans + api_keys legacy)."""
+    """Initialise les tables principales (spans + api_keys legacy).
+    
+    IMPORTANT: Relit AGENTGUARD_DB_PATH à chaque appel pour supporter
+    les tests qui utilisent des DB temporaires différentes (LiveServer, etc.).
+    """
+    # ✅ Lecture dynamique du path (évite les problèmes de constantes figées)
+    db_path = os.environ.get("AGENTGUARD_DB_PATH", "/tmp/agentguard.db")
+    
     if is_postgres():
         _, database_url = _get_db_config()
         conn = get_pg_conn()
@@ -169,55 +176,70 @@ def init_db():
             conn.close()
         logger.info("postgres_initialized", version="v6.1")
     else:
-        conn = sqlite3.connect(DB_SQLITE_PATH)
+        # ✅ Utilise le path dynamique (pas la constante DB_SQLITE_PATH)
+        conn = sqlite3.connect(db_path)
         c = conn.cursor()
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS spans (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                trace_id TEXT, span_id TEXT, span_type TEXT,
-                timestamp REAL, latency_ms REAL,
-                input_data TEXT, output_data TEXT, security_checks TEXT,
-                blocked INTEGER, block_reason TEXT, cost_usd REAL,
-                input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                detection_layer TEXT, ml_score REAL, llm_score REAL, llm_reason TEXT,
-                org_id TEXT DEFAULT 'default', model TEXT
-            )
-        """)
-        for idx in [
-            "CREATE INDEX IF NOT EXISTS idx_trace ON spans(trace_id)",
-            "CREATE INDEX IF NOT EXISTS idx_created ON spans(created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_blocked ON spans(blocked)",
-            "CREATE INDEX IF NOT EXISTS idx_detection_layer ON spans(detection_layer)",
-            "CREATE INDEX IF NOT EXISTS idx_llm_score ON spans(llm_score)",
-            "CREATE INDEX IF NOT EXISTS idx_org ON spans(org_id)",
-            "CREATE INDEX IF NOT EXISTS idx_audit ON spans(org_id, created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_cost ON spans(cost_usd)",
-        ]:
-            c.execute(idx)
-        for col, dtype in [
-            ("org_id", "TEXT DEFAULT 'default'"),
-            ("model", "TEXT"),
-            ("input_tokens", "INTEGER DEFAULT 0"),
-            ("output_tokens", "INTEGER DEFAULT 0"),
-        ]:
+        try:
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS spans (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trace_id TEXT, span_id TEXT, span_type TEXT,
+                    timestamp REAL, latency_ms REAL,
+                    input_data TEXT, output_data TEXT, security_checks TEXT,
+                    blocked INTEGER, block_reason TEXT, cost_usd REAL,
+                    input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    detection_layer TEXT, ml_score REAL, llm_score REAL, llm_reason TEXT,
+                    org_id TEXT DEFAULT 'default', model TEXT
+                )
+            """)
+            for idx in [
+                "CREATE INDEX IF NOT EXISTS idx_trace ON spans(trace_id)",
+                "CREATE INDEX IF NOT EXISTS idx_created ON spans(created_at)",
+                "CREATE INDEX IF NOT EXISTS idx_blocked ON spans(blocked)",
+                "CREATE INDEX IF NOT EXISTS idx_detection_layer ON spans(detection_layer)",
+                "CREATE INDEX IF NOT EXISTS idx_llm_score ON spans(llm_score)",
+                "CREATE INDEX IF NOT EXISTS idx_org ON spans(org_id)",
+                "CREATE INDEX IF NOT EXISTS idx_audit ON spans(org_id, created_at)",
+                "CREATE INDEX IF NOT EXISTS idx_cost ON spans(cost_usd)",
+            ]:
+                try:
+                    c.execute(idx)
+                except sqlite3.OperationalError:
+                    pass  # Index already exists
+            
+            for col, dtype in [
+                ("org_id", "TEXT DEFAULT 'default'"),
+                ("model", "TEXT"),
+                ("input_tokens", "INTEGER DEFAULT 0"),
+                ("output_tokens", "INTEGER DEFAULT 0"),
+            ]:
+                try:
+                    c.execute(f"ALTER TABLE spans ADD COLUMN {col} {dtype}")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+            
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key_hash TEXT UNIQUE NOT NULL,
+                    org_id TEXT NOT NULL, org_name TEXT, plan TEXT DEFAULT 'free',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    active INTEGER DEFAULT 1
+                )
+            """)
             try:
-                c.execute(f"ALTER TABLE spans ADD COLUMN {col} {dtype}")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)")
             except sqlite3.OperationalError:
-                pass
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS api_keys (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                key_hash TEXT UNIQUE NOT NULL,
-                org_id TEXT NOT NULL, org_name TEXT, plan TEXT DEFAULT 'free',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                active INTEGER DEFAULT 1
-            )
-        """)
-        c.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)")
-        conn.commit()
-        conn.close()
-        logger.info("sqlite_initialized", version="v6.1")
+                pass  # Index already exists
+            
+            conn.commit()
+            logger.info("sqlite_initialized", version="v6.1", db_path=db_path)
+        except Exception as e:
+            logger.error("sqlite_init_failed", error=str(e), db_path=db_path)
+            raise
+        finally:
+            conn.close()
 
     # ✅ Initialise aussi les tables identity (Phase 1)
     try:
