@@ -53,7 +53,13 @@ except ImportError:
 
 
 # ── DB CONNECTIONS ──────────────────────────────────────────────
-DB_SQLITE_PATH = os.environ.get("AGENTGUARD_DB_PATH", "/tmp/agentguard.db")
+def _get_db_path() -> str:
+    """Get SQLite DB path dynamically from environment (avoids module-level capture)."""
+    return os.environ.get("AGENTGUARD_DB_PATH", "/tmp/agentguard.db")
+
+
+# Backward compatibility constant (deprecated — use _get_db_path() instead)
+DB_SQLITE_PATH = _get_db_path()
 _sqlite_dir = os.path.dirname(DB_SQLITE_PATH)
 if _sqlite_dir and not os.path.isdir(_sqlite_dir):
     os.makedirs(_sqlite_dir, exist_ok=True)
@@ -368,7 +374,7 @@ def init_identity_tables():
             conn.close()
     else:
         # SQLite fallback (dev)
-        conn = sqlite3.connect(DB_SQLITE_PATH)
+        conn = sqlite3.connect(_get_db_path())
         c = conn.cursor()
         try:
             c.execute("""
@@ -502,7 +508,7 @@ def resolve_agent_identity(api_key: str):
         finally:
             conn.close()
     else:
-        conn = sqlite3.connect(DB_SQLITE_PATH)
+        conn = sqlite3.connect(_get_db_path())
         cur = conn.cursor()
         try:
             cur.execute("""
