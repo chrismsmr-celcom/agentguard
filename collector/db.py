@@ -447,3 +447,109 @@ def redact_pii(text: str) -> str:
     text = re.sub(r"\bag_[a-zA-Z0-9_]{20,}", "[REDACTED_KEY]", text)
     
     return text
+# ═══════════════════════════════════════════════════════════════
+# UTILITIES (used by collector/api.py, identity_routes, etc.)
+# ═══════════════════════════════════════════════════════════════
+
+def dict_from_row(row, cursor=None) -> dict:
+    """Convert a database row to a dict.
+    
+    Works for both SQLite and PostgreSQL rows.
+    
+    Args:
+        row: A row tuple from cursor.fetchone()
+        cursor: Optional cursor (used for column names if row is tuple)
+    
+    Returns:
+        dict with column names as keys
+    """
+    if row is None:
+        return None
+    
+    # psycopg Row object (has _asdict method)
+    if hasattr(row, "_asdict"):
+        return row._asdict()
+    
+    # psycopg3 Row or namedtuple
+    if hasattr(row, "_fields"):
+        return dict(zip(row._fields, row))
+    
+    # sqlite3.Row
+    if hasattr(row, "keys"):
+        return {k: row[k] for k in row.keys()}
+    
+    # Plain tuple with cursor description
+    if cursor is not None and hasattr(cursor, "description"):
+        return {col[0]: val for col, val in zip(cursor.description, row)}
+    
+    # Fallback: row is already a dict
+    if isinstance(row, dict):
+        return row
+    
+    # Last resort: return as-is
+    return row
+
+
+# Re-export psycopg2 for backward compatibility
+# Some old code imports psycopg2 from db.py
+try:
+    import psycopg2
+except ImportError:
+    # psycopg v3 is installed instead, create alias
+    try:
+        import psycopg as psycopg2  # type: ignore
+    except ImportError:
+        psycopg2 = None  # type: ignore
+
+
+# ═══════════════════════════════════════════════════════════════
+# BACKWARD COMPATIBILITY ALIASES
+# ═══════════════════════════════════════════════════════════════
+
+def get_db():
+    """Backward compatibility alias for get_conn()."""
+    return get_conn()
+
+
+def redact_pii(text: str) -> str:
+    """Redact PII from text (basic implementation)."""
+    import re
+    if not text or not isinstance(text, str):
+        return text
+    
+    # Email
+    text = re.sub(
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}\b",
+        "[REDACTED_EMAIL]",
+        text,
+    )
+    # SSN
+    text = re.sub(r"\b\d{3}-\d{2}-\d{4}\b", "[REDACTED_SSN]", text)
+    # Credit card (16 digits)
+    text = re.sub(r"\b\d{16}\b", "[REDACTED_CC]", text)
+    # API keys (ag_...)
+    text = re.sub(r"\bag_[a-zA-Z0-9_]{20,}", "[REDACTED_KEY]", text)
+    
+    return text
+
+
+# ═══════════════════════════════════════════════════════════════
+# EXPORTS (for star imports)
+# ═══════════════════════════════════════════════════════════════
+
+__all__ = [
+    "_get_db_config",
+    "_get_db_path",
+    "is_postgres",
+    "get_pg_conn",
+    "get_sqlite_conn",
+    "get_conn",
+    "get_db",
+    "DB_SQLITE_PATH",
+    "init_db",
+    "init_identity_tables",
+    "resolve_agent_identity",
+    "dict_from_row",
+    "redact_pii",
+    "psycopg2",
+]
