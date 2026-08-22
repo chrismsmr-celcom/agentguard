@@ -68,10 +68,10 @@ DB_SQLITE_PATH = "/tmp/agentguard.db"
 
 
 # ═══════════════════════════════════════════════════════════════
-# PII REDACTION (ROBUST + RECURSIVE)
+# PII + SECRETS REDACTION (ROBUST + RECURSIVE)
 # ═══════════════════════════════════════════════════════════════
 
-# Compiled regex patterns (compiled once for performance)
+# ── PII patterns (compiled once for performance) ──────────────
 _EMAIL_RE = re.compile(
     r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
     re.IGNORECASE,
@@ -87,25 +87,86 @@ _IPV4_RE = re.compile(
     r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b"
 )
 
+# ── Secret patterns (P1 : JWT, AWS, GitHub, Google, etc.) ─────
+_AWS_KEY_RE = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
+_AWS_SECRET_RE = re.compile(
+    r"(?:aws_secret_access_key|secret_access_key|aws_secret)\s*[=:]\s*['\"]?"
+    r"([A-Za-z0-9/+=]{40})['\"]?",
+    re.IGNORECASE,
+)
+_GITHUB_PAT_RE = re.compile(r"\bghp_[A-Za-z0-9]{36}\b")
+_GITHUB_PAT_FG_RE = re.compile(r"\bgithub_pat_[A-Za-z0-9_]{22,}_[A-Za-z0-9]{59}\b")
+_GITHUB_OAUTH_RE = re.compile(r"\bgho_[A-Za-z0-9]{36}\b")
+_GITHUB_TOKEN_RE = re.compile(r"\bgh[us]_[A-Za-z0-9]{36}\b")
+_GOOGLE_KEY_RE = re.compile(r"\bAIza[0-9A-Za-z\-_]{35}\b")
+_SLACK_TOKEN_RE = re.compile(r"\bxox[baprs]-[0-9]{10,13}-[0-9]{10,13}-[A-Za-z0-9]{24,34}\b")
+_SLACK_WEBHOOK_RE = re.compile(
+    r"https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+"
+)
+_STRIPE_SECRET_RE = re.compile(r"\bsk_(?:live|test)_[0-9A-Za-z]{24,}\b")
+_STRIPE_PUB_RE = re.compile(r"\bpk_(?:live|test)_[0-9A-Za-z]{24,}\b")
+_STRIPE_WEBHOOK_RE = re.compile(r"\bwhsec_[A-Za-z0-9]{32,}\b")
+_JWT_RE = re.compile(
+    r"\beyJ[A-Za-z0-9_-]{10,200}\.[A-Za-z0-9_-]{10,200}\.[A-Za-z0-9_-]{10,200}\b"
+)
+_BEARER_RE = re.compile(r"(?<=Bearer\s)[A-Za-z0-9._\-+/=]{32,}")
+_PEM_KEY_RE = re.compile(
+    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----"
+)
+_DB_URL_RE = re.compile(
+    r"\b(?:postgres|postgresql|mysql|mongodb(?:\+srv)?|redis|rediss|amqp|amqps)://"
+    r"[^\s'\"<>]+"
+)
+_OPENAI_KEY_RE = re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9]{32,}\b")
+_ANTHROPIC_KEY_RE = re.compile(r"\bsk-ant-[A-Za-z0-9\-]{40,}\b")
+_GENERIC_SECRET_RE = re.compile(
+    r"\b(?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|"
+    r"secret[_-]?key|client[_-]?secret|private[_-]?key|"
+    r"password|passwd|pwd|credentials?)\s*[=:]\s*['\"]?([A-Za-z0-9_\-+/=]{20,})['\"]?",
+    re.IGNORECASE,
+)
+
 
 def _redact_string(text: str) -> str:
-    """Redact PII from a single string."""
+    """Redact PII + secrets from a single string."""
+    # PII
     text = _EMAIL_RE.sub("[REDACTED_EMAIL]", text)
     text = _SSN_RE.sub("[REDACTED_SSN]", text)
     text = _CC_RE.sub("[REDACTED_CC]", text)
     text = _PHONE_RE.sub("[REDACTED_PHONE]", text)
     text = _API_KEY_RE.sub("[REDACTED_KEY]", text)
     text = _IPV4_RE.sub("[REDACTED_IP]", text)
+    # Secrets
+    text = _AWS_KEY_RE.sub("[REDACTED_AWS_KEY]", text)
+    text = _AWS_SECRET_RE.sub("[REDACTED_AWS_SECRET]", text)
+    text = _GITHUB_PAT_RE.sub("[REDACTED_GITHUB_PAT]", text)
+    text = _GITHUB_PAT_FG_RE.sub("[REDACTED_GITHUB_PAT]", text)
+    text = _GITHUB_OAUTH_RE.sub("[REDACTED_GITHUB_OAUTH]", text)
+    text = _GITHUB_TOKEN_RE.sub("[REDACTED_GITHUB_TOKEN]", text)
+    text = _GOOGLE_KEY_RE.sub("[REDACTED_GOOGLE_KEY]", text)
+    text = _SLACK_TOKEN_RE.sub("[REDACTED_SLACK_TOKEN]", text)
+    text = _SLACK_WEBHOOK_RE.sub("[REDACTED_SLACK_WEBHOOK]", text)
+    text = _STRIPE_SECRET_RE.sub("[REDACTED_STRIPE_SECRET]", text)
+    text = _STRIPE_PUB_RE.sub("[REDACTED_STRIPE_KEY]", text)
+    text = _STRIPE_WEBHOOK_RE.sub("[REDACTED_STRIPE_WEBHOOK]", text)
+    text = _JWT_RE.sub("[REDACTED_JWT]", text)
+    text = _BEARER_RE.sub("[REDACTED_BEARER]", text)
+    text = _PEM_KEY_RE.sub("[REDACTED_PRIVATE_KEY]", text)
+    text = _DB_URL_RE.sub("[REDACTED_DB_URL]", text)
+    text = _OPENAI_KEY_RE.sub("[REDACTED_OPENAI_KEY]", text)
+    text = _ANTHROPIC_KEY_RE.sub("[REDACTED_ANTHROPIC_KEY]", text)
+    text = _GENERIC_SECRET_RE.sub("[REDACTED_GENERIC_SECRET]", text)
     return text
 
 
 def redact_pii(data: Any) -> Any:
-    """Redact PII from data (recursive implementation).
+    """Redact PII + secrets from data (recursive implementation).
     
     Handles:
     - dict: recursively redacts all string values
-    - list: recursively redacts all elements  
-    - str: redacts emails, SSN, credit cards, API keys, phone numbers, IPs
+    - list/tuple: recursively redacts all elements  
+    - str: redacts emails, SSN, credit cards, API keys, phone numbers, IPs,
+           JWT, AWS keys, GitHub tokens, Google keys, private keys, DB URLs, etc.
     - other types: returns as-is (int, float, bool, None)
     
     This is CRITICAL for tests that send {"prompt": "email: foo@bar.com"}.
