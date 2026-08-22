@@ -419,10 +419,16 @@ def check_auth():
         return None
     if request.endpoint not in PROTECTED_ENDPOINTS:
         return None
-    if not require_auth():
-        if request.endpoint in ("auth.dashboard", "trace.trace_detail"):
-            return redirect(url_for("auth.login"))
-        return jsonify({"error": "Unauthorized — use X-API-Key header"}), 401
+    
+    try:
+        if not require_auth():
+            if request.endpoint in ("auth.dashboard", "trace.trace_detail"):
+                return redirect(url_for("auth.login"))
+            return jsonify({"error": "Unauthorized — use X-API-Key header"}), 401
+    except Exception as e:
+        # ✅ Catch all auth errors and return 401
+        logger.error("auth_middleware_error", error=str(e))
+        return jsonify({"error": "Unauthorized"}), 401
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
