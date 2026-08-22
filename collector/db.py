@@ -411,3 +411,39 @@ def _hash_key(key: str) -> str:
     """Hash an API key with SHA-256."""
     import hashlib
     return hashlib.sha256(key.encode()).hexdigest()
+
+# ═══════════════════════════════════════════════════════════════
+# BACKWARD COMPATIBILITY ALIASES
+# ═══════════════════════════════════════════════════════════════
+
+def get_db():
+    """Backward compatibility alias for get_conn().
+    
+    Used by collector/__init__.py and other legacy code.
+    """
+    return get_conn()
+
+
+def redact_pii(text: str) -> str:
+    """Redact PII from text (basic implementation).
+    
+    Used by collector/__init__.py for backward compatibility.
+    """
+    import re
+    if not text or not isinstance(text, str):
+        return text
+    
+    # Email
+    text = re.sub(
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}\b",
+        "[REDACTED_EMAIL]",
+        text,
+    )
+    # SSN
+    text = re.sub(r"\b\d{3}-\d{2}-\d{4}\b", "[REDACTED_SSN]", text)
+    # Credit card (16 digits)
+    text = re.sub(r"\b\d{16}\b", "[REDACTED_CC]", text)
+    # API keys (ag_...)
+    text = re.sub(r"\bag_[a-zA-Z0-9_]{20,}", "[REDACTED_KEY]", text)
+    
+    return text
