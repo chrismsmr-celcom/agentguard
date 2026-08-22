@@ -1,11 +1,16 @@
 """Database connection helpers — supports SQLite and PostgreSQL."""
 import os
+import re
 import sqlite3
 import structlog
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Any
 
 logger = structlog.get_logger("agentguard.db")
 
+
+# ═══════════════════════════════════════════════════════════════
+# CONFIG + CONNECTION HELPERS
+# ═══════════════════════════════════════════════════════════════
 
 def _get_db_config() -> Tuple[str, str]:
     """Get database type and URL from environment."""
@@ -50,21 +55,92 @@ def get_conn():
     return get_sqlite_conn()
 
 
+def get_db():
+    """Backward compatibility alias for get_conn().
+    
+    Used by collector/__init__.py and other legacy code.
+    """
+    return get_conn()
+
+
 # Backward compat (deprecated — use _get_db_path() in new code)
 DB_SQLITE_PATH = "/tmp/agentguard.db"
 
 
+# ═══════════════════════════════════════════════════════════════
+# PII REDACTION (ROBUST + RECURSIVE)
+# ═══════════════════════════════════════════════════════════════
+
+# Compiled regex patterns (compiled once for performance)
+_EMAIL_RE = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
+    re.IGNORECASE,
+)
+_SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
+_CC_RE = re.compile(r"\b(?:\d{4}[-\s]?){3}\d{4}\b|\b\d{16}\b")
+_PHONE_RE = re.compile(
+    r"\b(?:\+?1[-.\s]?)?(?:\(?[0-9]{3}\)?[-.\s]?)[0-9]{3}[-.\s]?[0-9]{4}\b"
+)
+_API_KEY_RE = re.compile(r"\bag_[a-zA-Z0-9_]{20,}\b")
+_IPV4_RE = re.compile(
+    r"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}"
+    r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b"
+)
+
+
+def _redact_string(text: str) -> str:
+    """Redact PII from a single string."""
+    text = _EMAIL_RE.sub("[REDACTED_EMAIL]", text)
+    text = _SSN_RE.sub("[REDACTED_SSN]", text)
+    text = _CC_RE.sub("[REDACTED_CC]", text)
+    text = _PHONE_RE.sub("[REDACTED_PHONE]", text)
+    text = _API_KEY_RE.sub("[REDACTED_KEY]", text)
+    text = _IPV4_RE.sub("[REDACTED_IP]", text)
+    return text
+
+
+def redact_pii(data: Any) -> Any:
+    """Redact PII from data (recursive implementation).
+    
+    Handles:
+    - dict: recursively redacts all string values
+    - list: recursively redacts all elements  
+    - str: redacts emails, SSN, credit cards, API keys, phone numbers, IPs
+    - other types: returns as-is (int, float, bool, None)
+    
+    This is CRITICAL for tests that send {"prompt": "email: foo@bar.com"}.
+    """
+    if data is None:
+        return None
+    
+    if isinstance(data, str):
+        return _redact_string(data)
+    
+    if isinstance(data, dict):
+        return {k: redact_pii(v) for k, v in data.items()}
+    
+    if isinstance(data, (list, tuple)):
+        redacted = [redact_pii(item) for item in data]
+        return type(data)(redacted) if isinstance(data, tuple) else redacted
+    
+    # int, float, bool, etc. — return unchanged
+    return data
+
+
+# ═══════════════════════════════════════════════════════════════
+# DB INITIALIZATION
+# ═══════════════════════════════════════════════════════════════
+
 def init_db():
     """Initialize all database tables.
     
-    Creates: spans, api_keys, tenants, orgs, users, agents, identity_events, audit_events
+    Creates: spans, api_keys, tenants, orgs, users, agents, identity_events
     """
     if is_postgres():
         conn = get_pg_conn()
         cur = conn.cursor()
         cur.execute("SELECT pg_advisory_lock(727271)")
         try:
-            # Spans table
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS spans (
                     id SERIAL PRIMARY KEY,
@@ -103,7 +179,6 @@ def init_db():
                 except Exception:
                     conn.rollback()
 
-            # API keys table
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS api_keys (
                     id SERIAL PRIMARY KEY, key_hash TEXT UNIQUE NOT NULL,
@@ -119,12 +194,10 @@ def init_db():
             conn.close()
         logger.info("postgres_initialized", version="v6.1")
     else:
-        # ✅ CRITICAL: use _get_db_path() for dynamic lookup
         db_path = _get_db_path()
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
         try:
-            # Spans table
             c.execute("""
                 CREATE TABLE IF NOT EXISTS spans (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -164,7 +237,6 @@ def init_db():
                 except sqlite3.OperationalError:
                     pass
             
-            # API keys table
             c.execute("""
                 CREATE TABLE IF NOT EXISTS api_keys (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -187,7 +259,6 @@ def init_db():
         finally:
             conn.close()
 
-    # Initialize identity tables (Phase 1)
     try:
         init_identity_tables()
     except Exception as e:
@@ -266,7 +337,6 @@ def init_identity_tables():
         finally:
             conn.close()
     else:
-        # ✅ CRITICAL: use _get_db_path() for dynamic lookup
         db_path = _get_db_path()
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
@@ -352,8 +422,6 @@ def resolve_agent_identity(api_key: str) -> Optional[dict]:
     Resolve an agent's API key to its identity.
     
     Returns dict with {agent_id, org_id, tenant_id, agent_name} or None if invalid.
-    
-    Agent API keys have format: ag_{tenant}_{org}_{agent}_{random}
     """
     if not api_key or not api_key.startswith("ag_"):
         return None
@@ -363,7 +431,6 @@ def resolve_agent_identity(api_key: str) -> Optional[dict]:
         return None
     
     _, tenant_id, org_id, agent_id, _ = parts
-    key_prefix = "_".join(parts[:4])
     key_hash = _hash_key(api_key)
     
     try:
@@ -380,7 +447,6 @@ def resolve_agent_identity(api_key: str) -> Optional[dict]:
             finally:
                 conn.close()
         else:
-            # ✅ CRITICAL: use _get_db_path() for dynamic lookup
             conn = sqlite3.connect(_get_db_path())
             cur = conn.cursor()
             try:
@@ -412,41 +478,7 @@ def _hash_key(key: str) -> str:
     import hashlib
     return hashlib.sha256(key.encode()).hexdigest()
 
-# ═══════════════════════════════════════════════════════════════
-# BACKWARD COMPATIBILITY ALIASES
-# ═══════════════════════════════════════════════════════════════
 
-def get_db():
-    """Backward compatibility alias for get_conn().
-    
-    Used by collector/__init__.py and other legacy code.
-    """
-    return get_conn()
-
-
-def redact_pii(text: str) -> str:
-    """Redact PII from text (basic implementation).
-    
-    Used by collector/__init__.py for backward compatibility.
-    """
-    import re
-    if not text or not isinstance(text, str):
-        return text
-    
-    # Email
-    text = re.sub(
-        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}\b",
-        "[REDACTED_EMAIL]",
-        text,
-    )
-    # SSN
-    text = re.sub(r"\b\d{3}-\d{2}-\d{4}\b", "[REDACTED_SSN]", text)
-    # Credit card (16 digits)
-    text = re.sub(r"\b\d{16}\b", "[REDACTED_CC]", text)
-    # API keys (ag_...)
-    text = re.sub(r"\bag_[a-zA-Z0-9_]{20,}", "[REDACTED_KEY]", text)
-    
-    return text
 # ═══════════════════════════════════════════════════════════════
 # UTILITIES (used by collector/api.py, identity_routes, etc.)
 # ═══════════════════════════════════════════════════════════════
@@ -455,47 +487,32 @@ def dict_from_row(row, cursor=None) -> dict:
     """Convert a database row to a dict.
     
     Works for both SQLite and PostgreSQL rows.
-    
-    Args:
-        row: A row tuple from cursor.fetchone()
-        cursor: Optional cursor (used for column names if row is tuple)
-    
-    Returns:
-        dict with column names as keys
     """
     if row is None:
         return None
     
-    # psycopg Row object (has _asdict method)
     if hasattr(row, "_asdict"):
         return row._asdict()
     
-    # psycopg3 Row or namedtuple
     if hasattr(row, "_fields"):
         return dict(zip(row._fields, row))
     
-    # sqlite3.Row
     if hasattr(row, "keys"):
         return {k: row[k] for k in row.keys()}
     
-    # Plain tuple with cursor description
     if cursor is not None and hasattr(cursor, "description"):
         return {col[0]: val for col, val in zip(cursor.description, row)}
     
-    # Fallback: row is already a dict
     if isinstance(row, dict):
         return row
     
-    # Last resort: return as-is
     return row
 
 
 # Re-export psycopg2 for backward compatibility
-# Some old code imports psycopg2 from db.py
 try:
     import psycopg2
 except ImportError:
-    # psycopg v3 is installed instead, create alias
     try:
         import psycopg as psycopg2  # type: ignore
     except ImportError:
@@ -503,38 +520,7 @@ except ImportError:
 
 
 # ═══════════════════════════════════════════════════════════════
-# BACKWARD COMPATIBILITY ALIASES
-# ═══════════════════════════════════════════════════════════════
-
-def get_db():
-    """Backward compatibility alias for get_conn()."""
-    return get_conn()
-
-
-def redact_pii(text: str) -> str:
-    """Redact PII from text (basic implementation)."""
-    import re
-    if not text or not isinstance(text, str):
-        return text
-    
-    # Email
-    text = re.sub(
-        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}\b",
-        "[REDACTED_EMAIL]",
-        text,
-    )
-    # SSN
-    text = re.sub(r"\b\d{3}-\d{2}-\d{4}\b", "[REDACTED_SSN]", text)
-    # Credit card (16 digits)
-    text = re.sub(r"\b\d{16}\b", "[REDACTED_CC]", text)
-    # API keys (ag_...)
-    text = re.sub(r"\bag_[a-zA-Z0-9_]{20,}", "[REDACTED_KEY]", text)
-    
-    return text
-
-
-# ═══════════════════════════════════════════════════════════════
-# EXPORTS (for star imports)
+# EXPORTS
 # ═══════════════════════════════════════════════════════════════
 
 __all__ = [
