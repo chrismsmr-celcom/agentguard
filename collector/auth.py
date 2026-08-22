@@ -8,15 +8,16 @@ from flask import (
     Blueprint, request, jsonify, render_template_string,
     redirect, url_for, g, current_app,
 )
-from collector.db import get_pg_conn, is_postgres, resolve_agent_identity
+from collector.db import (
+    get_pg_conn, get_sqlite_conn, is_postgres, 
+    resolve_agent_identity, _get_db_path
+)
 import sqlite3
 import os
 
 logger = structlog.get_logger("agentguard.auth")
 
 auth_bp = Blueprint("auth", __name__)
-
-DB_SQLITE_PATH = os.environ.get("AGENTGUARD_DB_PATH", "/tmp/agentguard.db")
 
 
 # ── PROTECTED ENDPOINTS ─────────────────────────────────────────
@@ -65,7 +66,8 @@ def _lookup_org_by_key(key: str):
         finally:
             conn.close()
     else:
-        conn = sqlite3.connect(DB_SQLITE_PATH)
+        # ✅ DYNAMIC PATH LOOKUP
+        conn = sqlite3.connect(_get_db_path())
         cur = conn.cursor()
         try:
             cur.execute(
@@ -133,7 +135,8 @@ def _session_org_id(token: str):
             finally:
                 conn.close()
         else:
-            conn = sqlite3.connect(DB_SQLITE_PATH)
+            # ✅ DYNAMIC PATH LOOKUP
+            conn = sqlite3.connect(_get_db_path())
             cur = conn.cursor()
             try:
                 cur.execute(
