@@ -5,7 +5,6 @@ import json
 import secrets
 import structlog
 from flask import Blueprint, request, jsonify, g, current_app
-from flask_cors import cross_origin
 from collector.db import (
     get_db, get_sqlite_conn, dict_from_row, is_postgres, 
     redact_pii, psycopg2, _get_db_path
@@ -20,12 +19,9 @@ api_bp = Blueprint("api", __name__)
 # ═══════════════════════════════════════════════════════════════
 # SPAN INGESTION
 # ═══════════════════════════════════════════════════════════════
+# ✅ P0 FIX : removed @cross_origin(origins=["*"]) — /span now inherits
+# the global CORS policy from app.py (strict in production).
 @api_bp.route("/span", methods=["POST"])
-@cross_origin(
-    origins=["*"],
-    allow_headers=["Content-Type", "X-API-Key"],
-    supports_credentials=True,
-)
 def receive_span():
     """Ingestion de span (LLM call ou tool call)."""
     span_rate_limit = current_app.config["SPAN_RATE_LIMIT"]
@@ -64,30 +60,45 @@ def receive_span():
     data.setdefault("security_checks", [])
     data.setdefault("blocked", False)
 
-    # PII redaction
-    data["input_data"] = redact_pii(data.get("input_data", {}))
-    data["output_data"] = redact_pii(data.get("output_data", {}))
-
-    # Détection layer extraction
+    # ── Détection layer extraction (BEFORE redaction — these are non-PII metadata) ──
     detection_layer = None
     ml_score = None
     llm_score = None
     llm_reason = None
 
-    if "metadata" in data:
-        detection_layer = data.get("metadata", {}).get("detection_layer") or data.get("metadata", {}).get("layer")
-        ml_score = data.get("metadata", {}).get("ml_score")
-        llm_score = data.get("metadata", {}).get("llm_score")
-        llm_reason = data.get("metadata", {}).get("llm_reason")
+    if "metadata" in data and isinstance(data["metadata"], dict):
+        detection_layer = (
+            data["metadata"].get("detection_layer")
+            or data["metadata"].get("layer")
+        )
+        ml_score = data["metadata"].get("ml_score")
+        llm_score = data["metadata"].get("llm_score")
+        llm_reason = data["metadata"].get("llm_reason")
 
     if not detection_layer and data.get("security_checks"):
         for check in data["security_checks"]:
-            if check.get("check_name") in ["prompt_injection", "llm_judge"]:
-                detection_layer = check.get("metadata", {}).get("layer")
-                ml_score = check.get("metadata", {}).get("ml_score")
-                llm_score = check.get("metadata", {}).get("llm_score")
-                llm_reason = check.get("details")
+            if isinstance(check, dict) and check.get("check_name") in ["prompt_injection", "llm_judge"]:
+                meta = check.get("metadata", {}) or {}
+                detection_layer = meta.get("layer")
+                ml_score = meta.get("ml_score")
+                llm_score = meta.get("llm_score")
+                if check.get("details"):
+                    llm_reason = check.get("details")
                 break
+
+    # ✅ P0 FIX : PII + secrets redaction on ALL persisted fields
+    # Before: only input_data/output_data were redacted.
+    # Now: security_checks, block_reason, metadata, llm_reason too.
+    data["input_data"] = redact_pii(data.get("input_data", {}))
+    data["output_data"] = redact_pii(data.get("output_data", {}))
+    data["security_checks"] = redact_pii(data.get("security_checks", []))
+    if data.get("block_reason"):
+        data["block_reason"] = redact_pii(data["block_reason"])
+    if "metadata" in data and data["metadata"] is not None:
+        data["metadata"] = redact_pii(data["metadata"])
+    # llm_reason may contain PII echoed from LLM output
+    if llm_reason and isinstance(llm_reason, str):
+        llm_reason = redact_pii(llm_reason)
 
     model = data.get("input_data", {}).get("model") if isinstance(data.get("input_data"), dict) else None
 
@@ -95,23 +106,27 @@ def receive_span():
     if is_postgres():
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO spans (
-                trace_id, span_id, span_type, timestamp, latency_ms,
-                input_data, output_data, security_checks, blocked,
-                block_reason, cost_usd, input_tokens, output_tokens,
-                detection_layer, ml_score, llm_score, llm_reason, org_id, model
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (
-            data["trace_id"], data["span_id"], data["span_type"],
-            data["timestamp"], data["latency_ms"],
-            json.dumps(data["input_data"]),
-            json.dumps(data["output_data"]),
-            json.dumps(data["security_checks"]),
-            data["blocked"], data.get("block_reason"), data["cost_usd"],
-            data["input_tokens"], data["output_tokens"],
-            detection_layer, ml_score, llm_score, llm_reason, g.org_id, model
-        ))
+        try:
+            cur.execute("""
+                INSERT INTO spans (
+                    trace_id, span_id, span_type, timestamp, latency_ms,
+                    input_data, output_data, security_checks, blocked,
+                    block_reason, cost_usd, input_tokens, output_tokens,
+                    detection_layer, ml_score, llm_score, llm_reason, org_id, model
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                data["trace_id"], data["span_id"], data["span_type"],
+                data["timestamp"], data["latency_ms"],
+                json.dumps(data["input_data"]),
+                json.dumps(data["output_data"]),
+                json.dumps(data["security_checks"]),
+                data["blocked"], data.get("block_reason"), data["cost_usd"],
+                data["input_tokens"], data["output_tokens"],
+                detection_layer, ml_score, llm_score, llm_reason, g.org_id, model
+            ))
+            conn.commit()
+        finally:
+            conn.close()
     else:
         # ✅ DYNAMIC PATH LOOKUP (fix pour tests avec DB temporaire)
         conn = sqlite3.connect(_get_db_path())
@@ -139,11 +154,7 @@ def receive_span():
         finally:
             conn.close()
 
-    if is_postgres():
-        conn.commit()
-        conn.close()
-
-    # Alerting
+    # Alerting (uses already-redacted data)
     if data["blocked"]:
         try:
             import alerting
