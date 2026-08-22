@@ -58,13 +58,12 @@ def create_app() -> Flask:
     else:
         CORS(app, origins=cors_origins or "*", supports_credentials=True)
     
-       # ✅ Rate limiter : Redis recommandé, memory:// accepté si 1 worker
+    # ✅ Rate limiter : Redis recommandé, memory:// accepté si 1 worker
     limiter_storage = os.environ.get("AGENTGUARD_LIMITER_STORAGE", "memory://")
     web_concurrency = int(os.environ.get("WEB_CONCURRENCY", "1"))
     
     if is_production:
         if limiter_storage == "memory://" and web_concurrency > 1:
-            # Multiple workers + memory = rate limit bypass possible
             raise RuntimeError(
                 "AGENTGUARD_LIMITER_STORAGE must be 'redis://...' in production "
                 f"when WEB_CONCURRENCY={web_concurrency} > 1. "
@@ -109,10 +108,15 @@ def create_app() -> Flask:
                 "AGENTGUARD_API_KEY must be configured in production. "
                 "Set it via environment variable. Refusing to start without it."
             )
+        # ✅ P1 AUDITOR FIX: ADMIN_SECRET is now FAIL-CLOSED
+        # Before: warning only with admin endpoints silently disabled
+        # After: RuntimeError, refuses to start with partial config
         if not app.config["ADMIN_SECRET"]:
-            logger.warning(
-                "admin_secret_missing_in_production",
-                note="Admin endpoints will be disabled",
+            raise RuntimeError(
+                "AGENTGUARD_ADMIN_SECRET must be configured in production. "
+                "Admin endpoints (/admin/*, /api/key) require this secret. "
+                "Refusing to start with partial security configuration. "
+                "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
             )
     
     # Génération auto de la clé API si absente (dev only)
@@ -148,7 +152,7 @@ def create_app() -> Flask:
         from flask import jsonify
         return jsonify({"error": "Internal server error"}), 500
     
-    # ✅ Log final (indentation corrigée)
+    # ✅ Log final
     logger.info(
         "app_created",
         environment=app.config.get("ENVIRONMENT", "development"),
