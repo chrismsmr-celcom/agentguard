@@ -80,28 +80,59 @@ def _lookup_org_by_key(key: str):
     return row[0] if row else None
 
 
+# ── PLATFORM IDENTITY RESOLUTION (Phase 1) ────────────────
 def resolve_org_id(key: str):
     """
     Résout une clé API en org_id.
-    Backward compatible : supporte les anciennes clés "ag-xxx" et les nouvelles
-    clés structurées "ag_{tenant}_{org}_{agent}_{random}".
+    
+    Order of resolution:
+    1. Platform key (agp_...) → sets g.platform_identity
+    2. Legacy global API key → "default"
+    3. Agent key (ag_...) → resolves via DB
+    4. Legacy key in api_keys table
     """
     if not key:
         return None
     
-    api_key = current_app.config["API_KEY"]
+    # ── 1. PLATFORM KEY (NEW) ──────────────────────────
+    try:
+        from collector.platform_identity import (
+            resolve_platform_identity, PLATFORM_KEY_PREFIX
+        )
+        if key.startswith(PLATFORM_KEY_PREFIX):
+            platform_identity = resolve_platform_identity(key)
+            if platform_identity:
+                g.platform_identity = platform_identity
+                # Platform identities act as "default" org for authorization
+                # but with explicit permissions checked per-route
+                logger.info(
+                    "platform_identity_resolved",
+                    service=platform_identity["service_name"],
+                    permissions=[p.value for p in platform_identity["permissions"]],
+                )
+                return "platform"  # Special org_id for platform identities
+    except Exception as e:
+        logger.warning("platform_identity_resolution_failed", error=str(e))
     
-    # 1. Clé API globale legacy (ancien système)
+    # ── 2. Legacy global API key ───────────────────────
+    api_key = current_app.config["API_KEY"]
     if api_key and safe_compare(key, api_key):
+        # ⚠️ PHASE 2: Log SYSTEM usage for deprecation tracking
+        logger.warning(
+            "legacy_system_key_used",
+            ip=request.remote_addr,
+            endpoint=request.endpoint,
+            note="DEPRECATED: migrate to platform service identities (agp_...)",
+        )
         return "default"
     
-    # 2. ✅ NEW : Nouvelle clé agent (format structuré)
+    # ── 3. Agent key (ag_...) ──────────────────────────
     identity = resolve_agent_identity(key)
     if identity:
         g.agent_identity = identity
         return identity["org_id"]
     
-    # 3. Fallback : Clé API legacy dans api_keys table
+    # ── 4. Fallback: legacy api_keys table ─────────────
     return _lookup_org_by_key(key)
 
 
