@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# scripts/hooks/pre-push
+#
+# Versioned pre-push hook — copied to .git/hooks/ by setup-hooks.sh
+
+set -e
+
+echo "🔍 [pre-push] Running safety checks..."
+
+# 1. DB_SQLITE_PATH regression
+if grep -rn "DB_SQLITE_PATH" collector/ 2>/dev/null | grep -v "^collector/db.py" | grep -v "# Backward compat" | grep -v "deprecated"; then
+    echo "❌ Static DB_SQLITE_PATH detected outside collector/db.py"
+    exit 1
+fi
+
+# 2. CORS override
+if grep -rn "@cross_origin.*origins=\[" collector/api.py 2>/dev/null; then
+    echo "❌ CORS override detected in api.py"
+    exit 1
+fi
+
+# 3. Smoke tests
+python -m pytest tests/test_adversarial_benchmark.py tests/test_secret_redaction_corpus.py -x -q --tb=line 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "❌ Smoke tests failed"
+    exit 1
+fi
+
+echo "✅ [pre-push] All checks passed"
