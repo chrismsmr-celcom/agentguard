@@ -1,0 +1,67 @@
+# .pre-commit-config.yaml
+#
+# Pre-commit hooks to catch common mistakes BEFORE push.
+#
+# Installation:
+#   pip install pre-commit
+#   pre-commit install
+#   pre-commit run --all-files  # test on all files
+#
+# Hooks will now run automatically on every git commit.
+
+repos:
+  # ── Basic hygiene ──────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        name: Remove trailing whitespace
+      - id: end-of-file-fixer
+        name: Fix end of file
+      - id: check-yaml
+        name: Validate YAML syntax
+      - id: check-json
+        name: Validate JSON syntax
+      - id: check-added-large-files
+        name: Block large files (>500KB)
+        args: ['--maxkb=500']
+      - id: check-merge-conflict
+        name: Detect merge conflict markers
+      - id: debug-statements
+        name: Block debugger/breakpoint statements
+      - id: check-ast
+        name: Validate Python AST
+
+  # ── Security : prevent hardcoded secrets ───────────────
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+        name: Detect secrets in commit
+        # Will catch AWS keys, GitHub tokens, etc.
+        # Bypass with: git commit --no-verify (use only for test tokens)
+
+  # ── Custom : prevent DB_SQLITE_PATH regression ────────
+  - repo: local
+    hooks:
+      - id: no-static-db-path
+        name: Prevent static DB_SQLITE_PATH usage
+        entry: bash -c 'if grep -rn "DB_SQLITE_PATH" collector/ | grep -v "^collector/db.py" | grep -v "# Backward compat" | grep -v "deprecated"; then echo "❌ Static DB_SQLITE_PATH detected outside db.py. Use _get_db_path() instead."; exit 1; fi'
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: no-cross-origin-override
+        name: Prevent CORS override on endpoints
+        entry: bash -c 'if grep -rn "@cross_origin.*origins=\[" collector/api.py; then echo "❌ @cross_origin with explicit origins detected in api.py. Use global CORS policy."; exit 1; fi'
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: pytest-quick
+        name: Quick pytest smoke test (adversarial + auth)
+        entry: python -m pytest tests/test_adversarial_benchmark.py tests/test_auth.py -x -q --tb=line
+        language: system
+        types: [python]
+        pass_filenames: false
+        always_run: true
