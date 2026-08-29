@@ -20,7 +20,9 @@ logger = structlog.get_logger("agentguard.collector")
 
 def create_app() -> Flask:
     """Crée et configure l'application Flask."""
-    app = Flask(__name__)
+    # ✅ Static folder pour servir logo.svg et autres assets
+    static_folder = os.path.join(os.path.dirname(__file__), "static")
+    app = Flask(__name__, static_folder=static_folder, static_url_path="/static")
     
     # ✅ Security hardening : environnement
     app.config["ENVIRONMENT"] = os.environ.get("AGENTGUARD_ENVIRONMENT", "development")
@@ -160,6 +162,7 @@ def create_app() -> Flask:
         legacy_key_allowed=app.config.get("ALLOW_LEGACY_SYSTEM_KEY", False),
         rate_limiter=limiter_storage.split("://")[0] if "://" in limiter_storage else limiter_storage,
         cors_origins=cors_origins or ["*"],
+        static_folder=static_folder,
     )
     
     return app
