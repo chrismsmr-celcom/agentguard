@@ -4,7 +4,7 @@ API endpoints : spans, traces, metrics, queries, signed decisions.
 import json
 import secrets
 import structlog
-from flask import Blueprint, request, jsonify, g, current_app
+from flask import Blueprint, request, jsonify, g, current_app, send_from_directory
 from collector.db import (
     get_db, get_sqlite_conn, dict_from_row, is_postgres, 
     redact_pii, psycopg2, _get_db_path
@@ -14,6 +14,39 @@ import os
 
 logger = structlog.get_logger("agentguard.api")
 api_bp = Blueprint("api", __name__)
+
+
+# ═══════════════════════════════════════════════════════════════
+# STATIC ASSETS (logo, favicon)
+# ═══════════════════════════════════════════════════════════════
+@api_bp.route("/logo.svg")
+def serve_logo():
+    """Serve AgentGuard logo SVG.
+    
+    Fixes dashboard 404 error on logo.svg resource.
+    """
+    static_path = os.path.join(os.path.dirname(__file__), "static")
+    try:
+        return send_from_directory(static_path, "logo.svg", mimetype="image/svg+xml")
+    except Exception as e:
+        logger.warning("logo_serve_failed", error=str(e))
+        # Fallback : retourner un SVG minimal inline
+        fallback_svg = """<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <rect width="100" height="100" fill="#2563eb"/>
+  <text x="50" y="60" font-family="sans-serif" font-size="40" fill="white" text-anchor="middle">AG</text>
+</svg>"""
+        return fallback_svg, 200, {"Content-Type": "image/svg+xml"}
+
+
+@api_bp.route("/favicon.ico")
+def serve_favicon():
+    """Serve favicon (same logo SVG)."""
+    static_path = os.path.join(os.path.dirname(__file__), "static")
+    try:
+        return send_from_directory(static_path, "logo.svg", mimetype="image/x-icon")
+    except Exception:
+        return "", 204  # No content
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -285,103 +318,174 @@ def get_trace(trace_id):
 
 
 # ═══════════════════════════════════════════════════════════════
-# METRICS
+# METRICS — ✅ ROBUST VERSION (fixes 500 errors)
 # ═══════════════════════════════════════════════════════════════
 @api_bp.route("/api/metrics")
 def get_metrics():
-    if is_postgres():
-        conn = get_db()
-        p = "%s"
-    else:
-        conn = sqlite3.connect(_get_db_path())
-        p = "?"
+    """Metrics endpoint — robust with comprehensive error handling.
     
-    cur = conn.cursor()
+    Fixes dashboard 500 error by:
+    1. Guarding against missing g.org_id
+    2. try/except around each DB query
+    3. Returning empty metrics instead of 500 on failure
+    """
+    # ✅ Empty metrics template for fallback
+    empty_metrics = {
+        "total_spans": 0,
+        "total_traces": 0,
+        "blocked_operations": 0,
+        "total_cost_usd": 0.0,
+        "total_tokens": 0,
+        "avg_latency_ms": 0.0,
+        "avg_ml_score": 0.0,
+        "avg_llm_score": 0.0,
+        "llm_judge_count": 0,
+        "risk_distribution": {"low": 0, "medium": 0, "high": 0, "critical": 0},
+        "top_threats": [],
+        "detection_layers": {},
+        "version": "v6.0.0",
+    }
+    
+    # ✅ Guard: ensure g.org_id is set
+    org_id = getattr(g, "org_id", None)
+    if not org_id:
+        logger.warning("metrics_no_org_id", endpoint=request.endpoint)
+        empty_metrics["error"] = "no_org_id"
+        return jsonify(empty_metrics), 200
+    
     try:
-        cur.execute(f"SELECT COUNT(*) FROM spans WHERE org_id = {p}", (g.org_id,))
-        total_spans = cur.fetchone()[0]
-        cur.execute(f"SELECT COUNT(DISTINCT trace_id) FROM spans WHERE org_id = {p}", (g.org_id,))
-        total_traces = cur.fetchone()[0]
-        cur.execute(f"SELECT SUM(CASE WHEN blocked THEN 1 ELSE 0 END) FROM spans WHERE org_id = {p}", (g.org_id,))
-        blocked = cur.fetchone()[0] or 0
-        cur.execute(f"SELECT SUM(cost_usd) FROM spans WHERE org_id = {p}", (g.org_id,))
-        total_cost = cur.fetchone()[0] or 0
-        cur.execute(f"SELECT COALESCE(SUM(input_tokens + output_tokens), 0) FROM spans WHERE org_id = {p}", (g.org_id,))
-        total_tokens = cur.fetchone()[0] or 0
-        cur.execute(f"SELECT AVG(latency_ms) FROM spans WHERE latency_ms > 0 AND org_id = {p}", (g.org_id,))
-        avg_latency = cur.fetchone()[0] or 0
-
         if is_postgres():
-            cur.execute("""
-                SELECT detection_layer, COUNT(*) as count
-                FROM spans WHERE detection_layer IS NOT NULL AND org_id = %s
-                GROUP BY detection_layer
-            """, (g.org_id,))
+            conn = get_db()
+            p = "%s"
         else:
-            cur.execute("""
-                SELECT detection_layer, COUNT(*) as count
-                FROM spans WHERE detection_layer IS NOT NULL AND org_id = ?
-                GROUP BY detection_layer
-            """, (g.org_id,))
-        detection_stats = {row[0]: row[1] for row in cur.fetchall()}
-
-        cur.execute(f"SELECT AVG(ml_score) FROM spans WHERE ml_score IS NOT NULL AND org_id = {p}", (g.org_id,))
-        avg_ml_score = cur.fetchone()[0] or 0
-        cur.execute(f"SELECT AVG(llm_score) FROM spans WHERE llm_score IS NOT NULL AND org_id = {p}", (g.org_id,))
-        avg_llm_score = cur.fetchone()[0] or 0
-        cur.execute(f"SELECT COUNT(*) FROM spans WHERE detection_layer = 'llm_judge' AND org_id = {p}", (g.org_id,))
-        llm_count = cur.fetchone()[0] or 0
-
-        risk_counts = {"low": 0, "medium": 0, "high": 0, "critical": 0}
-        if is_postgres():
-            cur.execute("""
-                SELECT jsonb_array_elements(security_checks) as check
-                FROM spans WHERE created_at > NOW() - INTERVAL '1 day' AND org_id = %s
-            """, (g.org_id,))
-            for row in cur.fetchall():
-                check = row[0] if isinstance(row[0], dict) else {}
-                level = check.get("risk_level", "low")
-                if level in risk_counts:
-                    risk_counts[level] += 1
-        else:
-            cur.execute("""
-                SELECT security_checks FROM spans
-                WHERE created_at > datetime('now', '-1 day') AND org_id = ?
-            """, (g.org_id,))
-            for row in cur.fetchall():
-                try:
-                    checks = json.loads(row[0] or "[]")
-                    for check in checks:
+            conn = sqlite3.connect(_get_db_path())
+            p = "?"
+        
+        cur = conn.cursor()
+        try:
+            # Total spans
+            cur.execute(f"SELECT COUNT(*) FROM spans WHERE org_id = {p}", (org_id,))
+            total_spans = cur.fetchone()[0] or 0
+            
+            # Total traces
+            cur.execute(f"SELECT COUNT(DISTINCT trace_id) FROM spans WHERE org_id = {p}", (org_id,))
+            total_traces = cur.fetchone()[0] or 0
+            
+            # Blocked
+            cur.execute(f"SELECT SUM(CASE WHEN blocked THEN 1 ELSE 0 END) FROM spans WHERE org_id = {p}", (org_id,))
+            blocked = cur.fetchone()[0] or 0
+            
+            # Total cost
+            cur.execute(f"SELECT SUM(cost_usd) FROM spans WHERE org_id = {p}", (org_id,))
+            total_cost = cur.fetchone()[0] or 0
+            
+            # Total tokens
+            cur.execute(f"SELECT COALESCE(SUM(input_tokens + output_tokens), 0) FROM spans WHERE org_id = {p}", (org_id,))
+            total_tokens = cur.fetchone()[0] or 0
+            
+            # Avg latency
+            cur.execute(f"SELECT AVG(latency_ms) FROM spans WHERE latency_ms > 0 AND org_id = {p}", (org_id,))
+            avg_latency = cur.fetchone()[0] or 0
+            
+            # Detection layers
+            try:
+                if is_postgres():
+                    cur.execute("""
+                        SELECT detection_layer, COUNT(*) as count
+                        FROM spans WHERE detection_layer IS NOT NULL AND org_id = %s
+                        GROUP BY detection_layer
+                    """, (org_id,))
+                else:
+                    cur.execute("""
+                        SELECT detection_layer, COUNT(*) as count
+                        FROM spans WHERE detection_layer IS NOT NULL AND org_id = ?
+                        GROUP BY detection_layer
+                    """, (org_id,))
+                detection_stats = {row[0]: row[1] for row in cur.fetchall()}
+            except Exception as e:
+                logger.warning("metrics_detection_query_failed", error=str(e))
+                detection_stats = {}
+            
+            # ML scores
+            try:
+                cur.execute(f"SELECT AVG(ml_score) FROM spans WHERE ml_score IS NOT NULL AND org_id = {p}", (org_id,))
+                avg_ml_score = cur.fetchone()[0] or 0
+                cur.execute(f"SELECT AVG(llm_score) FROM spans WHERE llm_score IS NOT NULL AND org_id = {p}", (org_id,))
+                avg_llm_score = cur.fetchone()[0] or 0
+                cur.execute(f"SELECT COUNT(*) FROM spans WHERE detection_layer = 'llm_judge' AND org_id = {p}", (org_id,))
+                llm_count = cur.fetchone()[0] or 0
+            except Exception as e:
+                logger.warning("metrics_scores_query_failed", error=str(e))
+                avg_ml_score = 0
+                avg_llm_score = 0
+                llm_count = 0
+            
+            # Risk distribution
+            risk_counts = {"low": 0, "medium": 0, "high": 0, "critical": 0}
+            try:
+                if is_postgres():
+                    cur.execute("""
+                        SELECT jsonb_array_elements(security_checks) as check
+                        FROM spans WHERE created_at > NOW() - INTERVAL '1 day' AND org_id = %s
+                    """, (org_id,))
+                    for row in cur.fetchall():
+                        check = row[0] if isinstance(row[0], dict) else {}
                         level = check.get("risk_level", "low")
                         if level in risk_counts:
                             risk_counts[level] += 1
-                except Exception:
-                    pass
-
-        cur.execute(f"""
-            SELECT block_reason, COUNT(*) as count
-            FROM spans WHERE blocked = 1 AND org_id = {p}
-            GROUP BY block_reason ORDER BY count DESC LIMIT 5
-        """, (g.org_id,))
-        top_threats = [{"reason": r[0], "count": r[1]} for r in cur.fetchall()]
-    finally:
-        conn.close()
+                else:
+                    cur.execute("""
+                        SELECT security_checks FROM spans
+                        WHERE created_at > datetime('now', '-1 day') AND org_id = ?
+                    """, (org_id,))
+                    for row in cur.fetchall():
+                        try:
+                            checks = json.loads(row[0] or "[]")
+                            for check in checks:
+                                level = check.get("risk_level", "low")
+                                if level in risk_counts:
+                                    risk_counts[level] += 1
+                        except Exception:
+                            pass
+            except Exception as e:
+                logger.warning("metrics_risk_query_failed", error=str(e))
+            
+            # Top threats
+            try:
+                cur.execute(f"""
+                    SELECT block_reason, COUNT(*) as count
+                    FROM spans WHERE blocked = 1 AND org_id = {p}
+                    GROUP BY block_reason ORDER BY count DESC LIMIT 5
+                """, (org_id,))
+                top_threats = [{"reason": r[0], "count": r[1]} for r in cur.fetchall()]
+            except Exception as e:
+                logger.warning("metrics_threats_query_failed", error=str(e))
+                top_threats = []
+        
+        finally:
+            conn.close()
+        
+        return jsonify({
+            "total_spans": total_spans,
+            "total_traces": total_traces,
+            "blocked_operations": blocked,
+            "total_cost_usd": round(float(total_cost or 0), 6),
+            "total_tokens": int(total_tokens),
+            "avg_latency_ms": round(float(avg_latency or 0), 2),
+            "avg_ml_score": round(float(avg_ml_score or 0), 3),
+            "avg_llm_score": round(float(avg_llm_score or 0), 3),
+            "llm_judge_count": llm_count,
+            "risk_distribution": risk_counts,
+            "top_threats": top_threats,
+            "detection_layers": detection_stats,
+            "version": "v6.0.0",
+        })
     
-    return jsonify({
-        "total_spans": total_spans,
-        "total_traces": total_traces,
-        "blocked_operations": blocked,
-        "total_cost_usd": round(float(total_cost or 0), 6),
-        "total_tokens": int(total_tokens),
-        "avg_latency_ms": round(float(avg_latency or 0), 2),
-        "avg_ml_score": round(float(avg_ml_score or 0), 3),
-        "avg_llm_score": round(float(avg_llm_score or 0), 3),
-        "llm_judge_count": llm_count,
-        "risk_distribution": risk_counts,
-        "top_threats": top_threats,
-        "detection_layers": detection_stats,
-        "version": "v6.0.0",
-    })
+    except Exception as e:
+        logger.error("metrics_endpoint_failed", error=str(e), org_id=org_id)
+        # Return empty metrics instead of 500 — dashboard stays functional
+        empty_metrics["error"] = str(e)[:200]
+        return jsonify(empty_metrics), 200
 
 
 # ═══════════════════════════════════════════════════════════════
