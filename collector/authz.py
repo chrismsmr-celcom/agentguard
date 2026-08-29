@@ -13,15 +13,22 @@ Architecture:
 Identity      Policy       Resource
 (actor)     (action)      (scope)
 
+Identity types supported:
+    - User/Agent (ResolvedIdentity)      → role-based, tenant-scoped
+    - Platform Service (g.platform_identity) → permission-based, explicit
+    - SYSTEM (legacy, deprecated)        → global allow (with toggle)
+
 Usage:
     from collector.authz import authorize, Action
     
     if not authorize(actor=identity, action=Action.AGENT_CREATE, resource=target_org):
         return jsonify({"error": "forbidden"}), 403
 """
+import os
 from enum import Enum
 from typing import Optional, Any
 import structlog
+from flask import g
 
 logger = structlog.get_logger("agentguard.authz")
 
@@ -117,6 +124,56 @@ def _get_role_permissions():
 
 
 # ═══════════════════════════════════════════════════════════════
+# PLATFORM IDENTITY PERMISSION MAPPING
+# Maps Action (authorization kernel) → PlatformPermission (scoped identities)
+# ═══════════════════════════════════════════════════════════════
+
+def _get_action_to_platform_permission():
+    """Lazy import + cached mapping."""
+    try:
+        from collector.platform_identity import PlatformPermission
+    except ImportError:
+        return {}
+    
+    return {
+        # Tenant operations
+        Action.TENANT_CREATE: PlatformPermission.TENANT_CREATE,
+        Action.TENANT_DELETE: PlatformPermission.TENANT_DELETE,
+        Action.TENANT_READ: PlatformPermission.TENANT_READ,
+        
+        # Org operations
+        Action.ORG_CREATE: PlatformPermission.ORG_CREATE,
+        Action.ORG_DELETE: PlatformPermission.ORG_DELETE,
+        Action.ORG_READ: PlatformPermission.ORG_READ,
+        
+        # User/Agent management
+        Action.USER_CREATE: PlatformPermission.USER_MANAGE,
+        Action.USER_DELETE: PlatformPermission.USER_MANAGE,
+        Action.USER_ASSIGN_ROLE: PlatformPermission.USER_MANAGE,
+        Action.USER_READ: PlatformPermission.ORG_READ,
+        Action.AGENT_CREATE: PlatformPermission.AGENT_MANAGE,
+        Action.AGENT_DELETE: PlatformPermission.AGENT_MANAGE,
+        Action.AGENT_REVOKE: PlatformPermission.AGENT_MANAGE,
+        Action.AGENT_LIST: PlatformPermission.AGENT_MANAGE,
+        Action.AGENT_READ: PlatformPermission.AGENT_MANAGE,
+        
+        # Observability
+        Action.TRACES_READ: PlatformPermission.TRACES_READ,
+        Action.TRACES_WRITE: None,  # Write not granted to platform identities
+        Action.METRICS_READ: PlatformPermission.METRICS_READ,
+        Action.AUDIT_READ: PlatformPermission.AUDIT_READ,
+        
+        # Billing
+        Action.BILLING_VIEW: PlatformPermission.BILLING_READ,
+        
+        # Settings / API keys — not granted to scoped platform identities
+        Action.SETTINGS_EDIT: PlatformPermission.PLATFORM_CONFIG,
+        Action.APIKEY_CREATE: PlatformPermission.PLATFORM_CONFIG,
+        Action.APIKEY_REVOKE: PlatformPermission.PLATFORM_CONFIG,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
 # CORE AUTHORIZATION FUNCTION
 # ═══════════════════════════════════════════════════════════════
 
@@ -140,12 +197,13 @@ def authorize(
         True if ALLOW, False if DENY
     
     Rules (in priority order):
-        1. No actor → DENY
-        2. SYSTEM identity → ALLOW (with warning log, to be deprecated)
-        3. Cross-tenant mismatch → DENY (always, for any role)
-        4. Role doesn't have permission for action → DENY
-        5. Cross-org mismatch (non-admin) → DENY
-        6. Otherwise → ALLOW
+        1. No actor AND no platform identity → DENY
+        2. Platform identity (agp_...) → permission-based check
+        3. SYSTEM identity (legacy) → ALLOW with warning (toggle to disable)
+        4. Cross-tenant mismatch → DENY (always)
+        5. Role doesn't have permission → DENY
+        6. Cross-org mismatch (non-admin) → DENY
+        7. Otherwise → ALLOW
     """
     try:
         from identity import IdentityType, Role
@@ -154,6 +212,20 @@ def authorize(
         return False
     
     context = context or {}
+    
+    # ─────────────────────────────────────────────────────
+    # RULE 0: Check for platform identity first (g.platform_identity)
+    # Platform identities act INDEPENDENTLY of actor — they represent
+    # service-to-service auth (audit-service, billing-service, etc.)
+    # ─────────────────────────────────────────────────────
+    platform_identity = getattr(g, "platform_identity", None)
+    if platform_identity:
+        return _authorize_platform(
+            platform_identity=platform_identity,
+            action=action,
+            resource=resource,
+            context=context,
+        )
     
     # ─────────────────────────────────────────────────────
     # RULE 1: No actor → DENY
@@ -169,14 +241,38 @@ def authorize(
         return False
     
     # ─────────────────────────────────────────────────────
-    # RULE 2: SYSTEM identity (legacy) → ALLOW with warning
+    # RULE 2: SYSTEM identity (LEGACY, DEPRECATED)
+    # Two modes:
+    #   - Default: ALLOW with high-visibility warning (migration phase)
+    #   - AGENTGUARD_DISABLE_LEGACY_SYSTEM=true: DENY (Phase 3, 6 months+)
     # ─────────────────────────────────────────────────────
     if actor.identity_type == IdentityType.SYSTEM:
+        disable_system = os.environ.get(
+            "AGENTGUARD_DISABLE_LEGACY_SYSTEM", "false"
+        ).lower() == "true"
+        
+        if disable_system:
+            # ── PHASE 3: Hard block ──
+            logger.error(
+                "authz_system_blocked",
+                action=action.value,
+                resource=_describe_resource(resource),
+                note="SYSTEM identity disabled via AGENTGUARD_DISABLE_LEGACY_SYSTEM. "
+                     "Migrate to platform service identities (agp_...).",
+                migration_docs="https://docs.agentguard.io/migration/platform-identities",
+                **context,
+            )
+            return False
+        
+        # ── PHASE 1/2: Soft warning ──
         logger.warning(
-            "authz_system_access",
+            "authz_system_access_deprecated",
             action=action.value,
             resource=_describe_resource(resource),
-            note="SYSTEM has global access — migrate to scoped identities",
+            note="DEPRECATED: SYSTEM has global access. Migrate to scoped "
+                 "platform identities (agp_...). Will be blocked in 6 months.",
+            migration_docs="https://docs.agentguard.io/migration/platform-identities",
+            blast_radius="global",
             **context,
         )
         return True
@@ -214,7 +310,7 @@ def authorize(
             reason="insufficient_role",
             action=action.value,
             actor_role=_role_value(actor.role),
-            allowed=[a.value for a in allowed_actions][:5],  # first 5 for log brevity
+            allowed=[a.value for a in allowed_actions][:5],
             **context,
         )
         return False
@@ -250,6 +346,75 @@ def authorize(
         actor_role=_role_value(actor.role),
         actor_tenant=actor.tenant_id,
         resource=_describe_resource(resource),
+    )
+    return True
+
+
+# ═══════════════════════════════════════════════════════════════
+# PLATFORM IDENTITY AUTHORIZATION (NEW)
+# ═══════════════════════════════════════════════════════════════
+
+def _authorize_platform(
+    platform_identity: dict,
+    action: Action,
+    resource: Optional[Any],
+    context: dict,
+) -> bool:
+    """
+    Authorize a platform identity (agp_... key).
+    
+    Platform identities use EXPLICIT permissions instead of role matrices.
+    No tenant/org scope — they are cross-tenant by design but with
+    granular action restrictions.
+    """
+    try:
+        from collector.platform_identity import PlatformPermission
+    except ImportError:
+        logger.error("authz_platform_module_missing")
+        return False
+    
+    service_name = platform_identity.get("service_name", "unknown")
+    granted_permissions = platform_identity.get("permissions", set())
+    
+    # Map action to required platform permission
+    action_map = _get_action_to_platform_permission()
+    required_permission = action_map.get(action)
+    
+    # Action not mapped → DENY (fail closed)
+    if required_permission is None:
+        logger.warning(
+            "authz_platform_denied",
+            reason="action_not_mapped",
+            service=service_name,
+            action=action.value,
+            resource=_describe_resource(resource),
+            note="This action is not available to platform identities",
+            **context,
+        )
+        return False
+    
+    # Permission not granted → DENY
+    if required_permission not in granted_permissions:
+        logger.warning(
+            "authz_platform_denied",
+            reason="insufficient_permission",
+            service=service_name,
+            action=action.value,
+            required=required_permission.value,
+            granted=[p.value for p in granted_permissions],
+            resource=_describe_resource(resource),
+            **context,
+        )
+        return False
+    
+    # ALLOW — log with service context
+    logger.info(
+        "authz_platform_allowed",
+        service=service_name,
+        action=action.value,
+        permission=required_permission.value,
+        resource=_describe_resource(resource),
+        **context,
     )
     return True
 
