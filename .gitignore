@@ -32,3 +32,7 @@ venv/
 .vscode/
 .idea/
 .DS_Store
+# Ajoute cette ligne à .gitignore
+echo "" >> .gitignore
+echo "# Git hooks (installed by scripts/setup-hooks.sh)" >> .gitignore
+echo ".git/hooks/pre-push" >> .gitignore
