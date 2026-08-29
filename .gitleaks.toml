@@ -1,0 +1,31 @@
+# .gitleaks.toml
+#
+# Gitleaks configuration — allow test patterns in tests/
+
+title = "AgentGuard Gitleaks Config"
+
+[extend]
+# Use default gitleaks config as base
+useDefault = true
+
+[allowlist]
+description = "Global allowlist for test files"
+paths = [
+    '''tests/test_secret_redaction_corpus\.py''',
+    '''tests/test_adversarial_benchmark\.py''',
+    '''benchmarks/adversarial_corpus\.json''',
+    '''\.gitleaks\.toml''',
+]
+
+# Specific patterns to ignore (test tokens are FAKE)
+regexes = [
+    '''AKIAIOSFODNN7EXAMPLE''',      # AWS test key
+    '''ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij''',  # GitHub test PAT
+    '''gho_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij''',  # GitHub OAuth test
+    '''ghs_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij''',  # GitHub server test
+    '''AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe''',  # Google test key
+    '''sk_live_51H7bq2KJad5QZ9xYzAbCdEfGhIjKlMnOp''',  # Stripe test
+    '''sk_test_51H7bq2KJad5QZ9xYzAbCdEfGhIjKlMnOp''',  # Stripe test
+    '''sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz1234567890abcdef''',  # OpenAI test
+    '''sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz1234567890abcdefGHIJKL''',  # Anthropic test
+]
