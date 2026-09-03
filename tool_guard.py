@@ -298,6 +298,7 @@ class ToolGuard:
 
         metadata.update(
             {
+                "policy": "tool_guard",
                 "tool_category": policy.category,
                 "session_id": request.session_id,
             }
