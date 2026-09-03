@@ -196,7 +196,7 @@ class RiskEngine:
 
         if data.external_side_effect:
             factors["external_side_effect"] = 80
-            score += 80 * 0.10
+            score += 80 * 0.15
 
             reasons.append(
                 "Action produces an external side effect"
@@ -210,7 +210,7 @@ class RiskEngine:
 
         if data.irreversible:
             factors["irreversible"] = 100
-            score += 100 * 0.15
+            score += 100 * 0.20
 
             reasons.append(
                 "Action is irreversible"
