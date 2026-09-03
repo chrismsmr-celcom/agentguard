@@ -1,14 +1,15 @@
-"""
+
 ╔══════════════════════════════════════════════════════════════════╗
-║  🛡️ AGENTGUARD SDK v3.5.0 - PRODUCTION READY                   ║
+║  🛡️ AGENTGUARD SDK v3.6.0 - PRODUCTION READY                   ║
 ║                                                                ║
-║  Changements majeurs v3.5 :                                    ║
+║  Changements majeurs v3.6 :                                    ║
 ║  ✅ Triple Judge System (defense in depth)                      ║
 ║  ✅ Prompt Guard (Meta) — injection specialist, ~10ms           ║
 ║  ✅ Llama Guard 3 (Meta) — content safety, OWASP taxonomy       ║
 ║  ✅ DeepSeek — contextual tie-breaker                           ║
 ║  ✅ Vote logic: ANY attack → DENY, ALL safe → ALLOW             ║
 ║                                                                ║
+║  ✅ Runtime Risk Engine + Trajectory Security                   ║
 ║  + v3.4 (Atomic Budgets, Redis transactions)                   ║
 ║  + v3.3 (Taint Tracking, data flow security)                   ║
 ║  + v3.2 (Signed Decisions Ed25519, zero-trust)                 ║
@@ -697,6 +698,239 @@ class PolicyEngine:
 
 
 # -----------------------------------------------------------------------------
+# RUNTIME RISK ENGINE + TRAJECTORY SECURITY — v3.6
+# -----------------------------------------------------------------------------
+@dataclass
+class RuntimeRiskDecision:
+    """Décision runtime déterministe, évaluée avant l'exécution d'un outil."""
+    action: str
+    risk_score: float
+    risk_level: RiskLevel
+    reasons: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def allowed(self) -> bool:
+        return self.action == "ALLOW"
+
+
+@dataclass
+class TrajectoryEvent:
+    """Événement borné de trajectoire d'un agent."""
+    timestamp: float
+    event_type: str
+    tool_name: Optional[str] = None
+    taint_level: Optional[str] = None
+    external: bool = False
+    irreversible: bool = False
+    risk_score: float = 0.0
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+class TrajectoryAnalyzer:
+    """
+    Analyse légère de la séquence d'actions d'un agent.
+
+    Objectif v3.6 : détecter les chaînes dangereuses, pas remplacer PolicyEngine
+    ou TaintTracker. L'historique est strictement borné pour éviter une croissance
+    mémoire non contrôlée.
+    """
+
+    _EXTERNAL_TOOLS = {
+        "http_request", "fetch", "webhook", "send_email", "send_message",
+        "post_message", "upload_file", "publish", "browser_navigate",
+    }
+    _IRREVERSIBLE_TOOLS = {
+        "delete", "delete_file", "delete_all", "drop_database", "drop_table",
+        "execute_command", "run_shell", "subprocess", "transfer_funds",
+        "send_email", "publish", "upload_file",
+    }
+    _PRIVILEGED_TOOLS = {
+        "execute_command", "run_shell", "subprocess", "sudo", "admin_action",
+        "grant_access", "change_permissions", "delete_all",
+    }
+
+    def __init__(self, max_events: int = 100):
+        self.max_events = max(10, int(max_events))
+        self._events: Dict[str, List[TrajectoryEvent]] = {}
+
+    def record(self, agent_id: str, event: TrajectoryEvent) -> None:
+        events = self._events.setdefault(agent_id, [])
+        events.append(event)
+        if len(events) > self.max_events:
+            del events[:-self.max_events]
+
+    def events(self, agent_id: str) -> List[TrajectoryEvent]:
+        return list(self._events.get(agent_id, []))
+
+    def clear(self, agent_id: Optional[str] = None) -> None:
+        if agent_id is None:
+            self._events.clear()
+        else:
+            self._events.pop(agent_id, None)
+
+    def analyze(
+        self,
+        agent_id: str,
+        tool_name: str,
+        params: Optional[Dict[str, Any]] = None,
+        taint_level: Optional[str] = None,
+    ) -> Tuple[float, List[str], Dict[str, Any]]:
+        history = self._events.get(agent_id, [])
+        reasons: List[str] = []
+        score = 0.0
+        params = params or {}
+
+        external = tool_name in self._EXTERNAL_TOOLS
+        irreversible = tool_name in self._IRREVERSIBLE_TOOLS
+        privileged = tool_name in self._PRIVILEGED_TOOLS
+
+        # 1. Donnée non fiable -> outil dangereux.
+        if taint_level in {"MALICIOUS", "malicious"} and (external or privileged):
+            score += 70
+            reasons.append("malicious taint reaches a high-impact sink")
+        elif taint_level in {"SECRET", "secret"} and external:
+            score += 65
+            reasons.append("secret data reaches an external sink")
+        elif taint_level in {"UNTRUSTED", "untrusted"} and privileged:
+            score += 55
+            reasons.append("untrusted data reaches a privileged tool")
+
+        # 2. Outil intrinsèquement sensible.
+        if irreversible:
+            score += 25
+            reasons.append("irreversible side effect")
+        if privileged:
+            score += 25
+            reasons.append("privileged tool")
+        if external:
+            score += 15
+            reasons.append("external side effect")
+
+        # 3. Détection de trajectoires : collecte -> externalisation,
+        #    accès privilégié -> externalisation, plusieurs actions sensibles.
+        recent = history[-20:]
+        had_sensitive_read = any(
+            e.event_type in {"database_read", "filesystem_read", "secret_read", "data_access"}
+            or e.metadata.get("sensitive_read") is True
+            for e in recent
+        )
+        had_privileged = any(
+            e.tool_name in self._PRIVILEGED_TOOLS or e.metadata.get("privileged") is True
+            for e in recent
+        )
+        had_external = any(e.external for e in recent)
+        sensitive_chain = had_sensitive_read and external
+        privilege_chain = had_privileged and external
+
+        if sensitive_chain:
+            score += 35
+            reasons.append("sensitive data access followed by external side effect")
+        if privilege_chain:
+            score += 30
+            reasons.append("privileged action followed by external side effect")
+        if had_external and irreversible:
+            score += 20
+            reasons.append("external side effect combined with irreversible action")
+
+        # 4. Paramètres explicitement marqués comme sensibles.
+        serialized = ""
+        try:
+            serialized = json.dumps(params, default=str)[:4000].lower()
+        except Exception:
+            serialized = str(params)[:4000].lower()
+        if any(x in serialized for x in ("api_key", "access_token", "password", "secret", "private_key")) and external:
+            score += 35
+            reasons.append("credential-like parameter sent to external tool")
+
+        score = min(100.0, score)
+        metadata = {
+            "history_size": len(history),
+            "external": external,
+            "irreversible": irreversible,
+            "privileged": privileged,
+            "sensitive_chain": sensitive_chain,
+            "privilege_chain": privilege_chain,
+        }
+        return score, reasons, metadata
+
+
+class RuntimeRiskEngine:
+    """Moteur de décision runtime déterministe. Les règles dures sont prioritaires."""
+
+    def __init__(self, fail_closed: bool = True, approval_threshold: float = 55.0):
+        self.fail_closed = bool(fail_closed)
+        self.approval_threshold = max(0.0, min(100.0, float(approval_threshold)))
+
+    @staticmethod
+    def _level(score: float) -> RiskLevel:
+        if score >= 85:
+            return RiskLevel.CRITICAL
+        if score >= 65:
+            return RiskLevel.HIGH
+        if score >= 35:
+            return RiskLevel.MEDIUM
+        return RiskLevel.LOW
+
+    def evaluate(
+        self,
+        tool_name: str,
+        params: Optional[Dict[str, Any]],
+        trajectory_score: float = 0.0,
+        trajectory_reasons: Optional[List[str]] = None,
+        trajectory_metadata: Optional[Dict[str, Any]] = None,
+        taint_level: Optional[str] = None,
+        local_check: Optional[SecurityCheck] = None,
+    ) -> RuntimeRiskDecision:
+        params = params or {}
+        reasons = list(trajectory_reasons or [])
+        metadata = dict(trajectory_metadata or {})
+        local_risk = 0.0
+
+        if local_check is not None and not local_check.passed:
+            if local_check.risk_level == RiskLevel.CRITICAL:
+                return RuntimeRiskDecision("DENY", 100.0, RiskLevel.CRITICAL,
+                                           [f"local policy: {local_check.details}"], metadata)
+            if local_check.risk_level == RiskLevel.HIGH:
+                local_risk = 70.0
+                reasons.append(f"local policy: {local_check.details}")
+            elif local_check.risk_level == RiskLevel.MEDIUM:
+                local_risk = 40.0
+                reasons.append(f"local policy: {local_check.details}")
+
+        score = max(float(trajectory_score), local_risk)
+        level = self._level(score)
+
+        taint = str(taint_level or "").upper()
+        external = bool(metadata.get("external"))
+        irreversible = bool(metadata.get("irreversible"))
+        privileged = bool(metadata.get("privileged"))
+
+        # Hard deny rules: these are not overridable by a lower score.
+        if taint == "MALICIOUS" and (external or privileged):
+            return RuntimeRiskDecision("DENY", 100.0, RiskLevel.CRITICAL,
+                                       reasons + ["hard rule: MALICIOUS taint cannot reach high-impact sink"], metadata)
+        if taint == "SECRET" and external:
+            return RuntimeRiskDecision("DENY", 100.0, RiskLevel.CRITICAL,
+                                       reasons + ["hard rule: SECRET taint cannot reach external sink"], metadata)
+
+        if score >= 85:
+            return RuntimeRiskDecision("DENY", score, RiskLevel.CRITICAL, reasons or ["critical runtime risk"], metadata)
+
+        # Irreversible or privileged actions with significant contextual risk require approval.
+        if score >= self.approval_threshold and (irreversible or privileged or external):
+            return RuntimeRiskDecision("REQUIRE_APPROVAL", score, level,
+                                       reasons or ["runtime risk requires approval"], metadata)
+
+        if score >= 65:
+            return RuntimeRiskDecision("DENY", score, RiskLevel.HIGH,
+                                       reasons or ["high runtime risk"], metadata)
+
+        return RuntimeRiskDecision("ALLOW", score, level, reasons, metadata)
+
+
+
+# -----------------------------------------------------------------------------
 # SPAN & AGENT GUARD
 # -----------------------------------------------------------------------------
 @dataclass
@@ -764,6 +998,19 @@ class AgentGuard:
         self._taint_tracker = TaintTracker() if _TAINT_AVAILABLE and TaintTracker else None
         self._taint_counter = 0
 
+        # v3.6 : Runtime Risk + bounded trajectory security
+        runtime_enabled = os.getenv("AGENTGUARD_RUNTIME_RISK_ENABLED", "true").lower() in ("true", "1", "on", "yes")
+        runtime_fail_closed = os.getenv("AGENTGUARD_RUNTIME_FAIL_CLOSED", "true").lower() in ("true", "1", "on", "yes")
+        runtime_history = int(os.getenv("AGENTGUARD_TRAJECTORY_MAX_EVENTS", "100"))
+        approval_threshold = float(os.getenv("AGENTGUARD_RUNTIME_APPROVAL_THRESHOLD", "55"))
+        self._runtime_enabled = runtime_enabled
+        self._runtime_fail_closed = runtime_fail_closed
+        self._trajectory = TrajectoryAnalyzer(max_events=runtime_history) if runtime_enabled else None
+        self._runtime_risk = RuntimeRiskEngine(
+            fail_closed=runtime_fail_closed,
+            approval_threshold=approval_threshold,
+        ) if runtime_enabled else None
+
         # ✅ v3.4 : Atomic Budget Manager
         self._budget_manager = None
         if _BUDGET_MANAGER_AVAILABLE and AtomicBudgetManager:
@@ -829,6 +1076,9 @@ class AgentGuard:
             taint_tracking=self._taint_tracker is not None,
             atomic_budget=self._budget_manager is not None,
             triple_judge=self._triple_judge is not None,
+            runtime_risk=self._runtime_enabled,
+            runtime_fail_closed=self._runtime_fail_closed,
+            trajectory=self._trajectory is not None,
         )
 
     def _init_signed_decisions(self):
@@ -1200,6 +1450,107 @@ class AgentGuard:
             return result
         return wrapper
 
+    def get_runtime_risk_status(self) -> Dict[str, Any]:
+        """Retourne l'état du moteur runtime et de la trajectoire."""
+        return {
+            "enabled": self._runtime_enabled,
+            "fail_closed": self._runtime_fail_closed,
+            "trajectory_enabled": self._trajectory is not None,
+            "history_size": len(self._trajectory.events(self.agent_id)) if self._trajectory else 0,
+            "approval_threshold": self._runtime_risk.approval_threshold if self._runtime_risk else None,
+        }
+
+    def get_trajectory(self) -> List[Dict[str, Any]]:
+        """Retourne la trajectoire bornée de l'agent courant."""
+        if not self._trajectory:
+            return []
+        return [
+            {
+                "timestamp": e.timestamp,
+                "event_type": e.event_type,
+                "tool_name": e.tool_name,
+                "taint_level": e.taint_level,
+                "external": e.external,
+                "irreversible": e.irreversible,
+                "risk_score": e.risk_score,
+                "metadata": e.metadata,
+            }
+            for e in self._trajectory.events(self.agent_id)
+        ]
+
+    def _runtime_authorize(
+        self,
+        tool_name: str,
+        params: Dict[str, Any],
+        local_check: SecurityCheck,
+        taint_level: Optional[str] = None,
+    ) -> RuntimeRiskDecision:
+        """Autorise/refuse un outil avant son exécution réelle."""
+        if not self._runtime_enabled or not self._runtime_risk or not self._trajectory:
+            return RuntimeRiskDecision("ALLOW", 0.0, RiskLevel.LOW, [], {"disabled": True})
+
+        trajectory_score, reasons, metadata = self._trajectory.analyze(
+            self.agent_id,
+            tool_name,
+            params,
+            taint_level=taint_level,
+        )
+        try:
+            return self._runtime_risk.evaluate(
+                tool_name,
+                params,
+                trajectory_score=trajectory_score,
+                trajectory_reasons=reasons,
+                trajectory_metadata=metadata,
+                taint_level=taint_level,
+                local_check=local_check,
+            )
+        except Exception as exc:
+            logger.error("runtime_risk_evaluation_failed", tool=tool_name, error=str(exc))
+            if self._runtime_fail_closed:
+                return RuntimeRiskDecision(
+                    "DENY", 100.0, RiskLevel.CRITICAL,
+                    ["runtime risk engine failure (fail_closed)"],
+                    {"error": str(exc)[:300]},
+                )
+            return RuntimeRiskDecision(
+                "ALLOW", 0.0, RiskLevel.LOW,
+                ["runtime risk engine failure (fail_open)"],
+                {"error": str(exc)[:300]},
+            )
+
+    def _record_trajectory_tool(
+        self,
+        tool_name: str,
+        decision: RuntimeRiskDecision,
+        taint_level: Optional[str] = None,
+        event_type: str = "tool_call",
+        params: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not self._trajectory:
+            return
+        metadata = dict(decision.metadata)
+        metadata["reasons"] = decision.reasons[:10]
+        metadata["privileged"] = tool_name in TrajectoryAnalyzer._PRIVILEGED_TOOLS
+        # Heuristic: read operations are important for subsequent exfiltration analysis.
+        metadata["sensitive_read"] = tool_name in {
+            "query_database", "db_execute", "read_file", "read_secret", "get_credentials",
+            "list_customers", "get_customer_data", "search_database",
+        }
+        self._trajectory.record(
+            self.agent_id,
+            TrajectoryEvent(
+                timestamp=time.time(),
+                event_type=event_type,
+                tool_name=tool_name,
+                taint_level=taint_level,
+                external=tool_name in TrajectoryAnalyzer._EXTERNAL_TOOLS,
+                irreversible=tool_name in TrajectoryAnalyzer._IRREVERSIBLE_TOOLS,
+                risk_score=decision.risk_score,
+                metadata=metadata,
+            ),
+        )
+
     def guard_tool_call(self, tool_name: str, params: Optional[Dict[str, Any]] = None, func: Optional[Callable] = None):
         """Vérifie une tool call avant exécution."""
         if params is None and func is None:
@@ -1218,6 +1569,45 @@ class AgentGuard:
         budget_remaining = self.max_budget - self.total_spent
 
         check = self.policy_engine.check_tool_policy(tool_name, params, budget_remaining)
+
+        # v3.6 : Runtime Risk Engine — décision AVANT toute exécution
+        runtime_decision = self._runtime_authorize(tool_name, params, check)
+        runtime_check = SecurityCheck(
+            "runtime_risk",
+            runtime_decision.action == "ALLOW",
+            runtime_decision.risk_level,
+            "; ".join(runtime_decision.reasons[:5]) or "Runtime risk approved",
+            {
+                "action": runtime_decision.action,
+                "risk_score": runtime_decision.risk_score,
+                **runtime_decision.metadata,
+            },
+            SecurityAction.ALLOW if runtime_decision.action == "ALLOW" else (
+                SecurityAction.REVIEW if runtime_decision.action == "REQUIRE_APPROVAL" else SecurityAction.BLOCK
+            ),
+        )
+
+        if runtime_decision.action != "ALLOW":
+            reason = "; ".join(runtime_decision.reasons[:5]) or "runtime policy violation"
+            span = GuardSpan(
+                span_id=span_id, trace_id=self.trace_id, span_type="tool_call",
+                timestamp=start, latency_ms=(time.time() - start) * 1000,
+                input_data={"tool": tool_name, "params": params},
+                output_data={
+                    "blocked": True,
+                    "runtime_decision": runtime_decision.action,
+                    "risk_score": runtime_decision.risk_score,
+                },
+                security_checks=[check, runtime_check],
+                blocked=True,
+                block_reason=f"[RUNTIME {runtime_decision.action}] {reason}",
+                input_tokens=0,
+                output_tokens=0,
+            )
+            self.spans.append(span)
+            self._send_to_collector(span)
+            self._record_trajectory_tool(tool_name, runtime_decision)
+            raise SecurityException(f"🛡️ Runtime risk {runtime_decision.action}: {reason}")
 
         # ✅ v3.3 : Taint flow check
         taint_violation = None
@@ -1252,7 +1642,7 @@ class AgentGuard:
                         timestamp=start, latency_ms=(time.time() - start) * 1000,
                         input_data={"tool": tool_name, "params": params, "taint": taint_combined_dict},
                         output_data={"blocked": True, "taint_violation": taint_violation},
-                        security_checks=[check],
+                        security_checks=[check, runtime_check],
                         blocked=True,
                         block_reason=f"[TAINT] {taint_violation}",
                         input_tokens=0,
@@ -1272,7 +1662,7 @@ class AgentGuard:
                     timestamp=start, latency_ms=(time.time() - start) * 1000,
                     input_data={"tool": tool_name, "params": params},
                     output_data={"blocked": True, "signed_decision": signed_decision},
-                    security_checks=[check],
+                    security_checks=[check, runtime_check],
                     blocked=True,
                     block_reason=f"[SIGNED DENY] {signed_decision.get('reason', 'policy violation')}",
                     input_tokens=0,
@@ -1291,7 +1681,7 @@ class AgentGuard:
                 timestamp=start, latency_ms=(time.time() - start) * 1000,
                 input_data={"tool": tool_name, "params": params},
                 output_data={"blocked": True},
-                security_checks=[check],
+                security_checks=[check, runtime_check],
                 blocked=True,
                 block_reason=check.details,
                 input_tokens=0,
@@ -1309,7 +1699,7 @@ class AgentGuard:
                 timestamp=start, latency_ms=(time.time() - start) * 1000,
                 input_data={"tool": tool_name, "params": params},
                 output_data={"error": str(exc)[:1000]},
-                security_checks=[check],
+                security_checks=[check, runtime_check],
                 input_tokens=0,
                 output_tokens=0,
             )
@@ -1318,6 +1708,11 @@ class AgentGuard:
             raise
 
         output_data = {"result": str(result)[:500]}
+        output_data["runtime_risk"] = {
+            "action": runtime_decision.action,
+            "risk_score": runtime_decision.risk_score,
+            "risk_level": runtime_decision.risk_level.value,
+        }
         if taint_combined_dict:
             output_data["taint"] = taint_combined_dict
         if taint_violation and taint_violation.startswith("REVIEW:"):
@@ -1328,12 +1723,13 @@ class AgentGuard:
             timestamp=start, latency_ms=(time.time() - start) * 1000,
             input_data={"tool": tool_name, "params": params},
             output_data=output_data,
-            security_checks=[check],
+            security_checks=[check, runtime_check],
             input_tokens=0,
             output_tokens=0,
         )
         self.spans.append(span)
         self._send_to_collector(span)
+        self._record_trajectory_tool(tool_name, runtime_decision)
         return result
 
     def get_report(self):
@@ -1354,6 +1750,8 @@ class AgentGuard:
             "taint_tracking_enabled": self._taint_tracker is not None,
             "atomic_budget_enabled": self._budget_manager is not None,
             "triple_judge_enabled": self._triple_judge is not None,
+            "runtime_risk_enabled": self._runtime_enabled,
+            "trajectory_events": len(self._trajectory.events(self.agent_id)) if self._trajectory else 0,
         }
         
         if self._taint_tracker:
@@ -1365,13 +1763,18 @@ class AgentGuard:
         # ✅ v3.5 : Statut des juges
         if self._triple_judge:
             report["judges"] = self._triple_judge.get_status()
+
+        if self._runtime_enabled:
+            report["runtime_risk"] = self.get_runtime_risk_status()
+            report["trajectory"] = self.get_trajectory()
         
         return report
 
 
-__version__ = "3.5.0"
+__version__ = "3.6.0"
 
 __all__ = [
     "AgentGuard", "SecurityException", "RiskLevel", "SecurityAction",
     "DetectionConfidence", "SecurityCheck", "GuardSpan", "PolicyEngine",
+    "RuntimeRiskDecision", "RuntimeRiskEngine", "TrajectoryEvent", "TrajectoryAnalyzer",
 ]
