@@ -454,8 +454,8 @@ class TestE2EInjectionInTools:
             execute_command(command="rm -rf /")
         
         assert "blocked" in str(exc_info.value).lower() or "Tool" in str(exc_info.value)
-       msg = str(exc_info.value).lower()
-       assert "blocked" in msg or "deny" in msg or "denied" in msg or "tool" in msg
+        msg = str(exc_info.value).lower()
+        assert "blocked" in msg or "deny" in msg or "denied" in msg or "tool" in msg
     
     def test_safe_command_allowed(self, live_server, agent_setup):
         """Safe commands pass through."""
