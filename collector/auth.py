@@ -1759,246 +1759,717 @@ def _audit_login(
 
 
 # ═══════════════════════════════════════════════════════════════
-# LOGIN PAGE
+# LOGIN PAGE (Professional, Enterprise-Grade, No Emojis)
 # ═══════════════════════════════════════════════════════════════
 
 LOGIN_HTML = """
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport"
-      content="width=device-width,initial-scale=1">
-<title>Cerbere — Sign in</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cerbere — Secure Access</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-<style>
-:root {
-    color-scheme: dark;
-    --bg: #050b14;
-    --card: #0b1626;
-    --border: #1d3047;
-    --text: #edf5ff;
-    --muted: #8da2ba;
-    --accent: #38bdf8;
-    --accent2: #2563eb;
-    --danger: #fb7185;
-}
+        :root {
+            --bg-primary: #09090b;
+            --bg-secondary: #18181b;
+            --bg-card: rgba(24, 24, 27, 0.6);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --border-hover: rgba(239, 68, 68, 0.5);
+            --text-primary: #fafafa;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+            --accent-red: #ef4444;
+            --accent-orange: #f97316;
+            --accent-glow: rgba(239, 68, 68, 0.15);
+            --success: #10b981;
+        }
 
-* {
-    box-sizing: border-box;
-}
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
 
-body {
-    margin: 0;
-    min-height: 100vh;
-    display: grid;
-    place-items: center;
-    background:
-        radial-gradient(
-            circle at 50% 10%,
-            #102d4c 0%,
-            var(--bg) 58%
-        );
-    color: var(--text);
-    font-family:
-        Inter,
-        ui-sans-serif,
-        system-ui,
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        sans-serif;
-}
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            min-height: 100vh;
+        }
 
-.wrap {
-    width: min(440px, 92vw);
-}
+        .login-section {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 3rem;
+            background: var(--bg-primary);
+            position: relative;
+        }
 
-.brand {
-    text-align: center;
-    margin-bottom: 28px;
-}
+        .login-container {
+            width: 100%;
+            max-width: 420px;
+            position: relative;
+            z-index: 1;
+        }
 
-.logo {
-    width: 58px;
-    height: 58px;
-    margin: 0 auto 16px;
-    display: grid;
-    place-items: center;
-    border-radius: 17px;
-    background:
-        linear-gradient(
-            135deg,
-            var(--accent2),
-            var(--accent)
-        );
-    box-shadow:
-        0 14px 45px
-        rgba(37,99,235,.28);
-    font-size: 28px;
-}
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 2.5rem;
+        }
 
-h1 {
-    margin: 0;
-    font-size: 25px;
-    letter-spacing: -.02em;
-}
+        .logo img {
+            width: 40px;
+            height: 40px;
+        }
 
-.subtitle {
-    margin-top: 8px;
-    color: var(--muted);
-    font-size: 14px;
-}
+        .logo-text {
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: var(--text-primary);
+        }
 
-.card {
-    padding: 30px;
-    border:
-        1px solid var(--border);
-    border-radius: 20px;
-    background:
-        rgba(11,22,38,.96);
-    box-shadow:
-        0 24px 70px
-        rgba(0,0,0,.35);
-}
+        .welcome-text {
+            margin-bottom: 2rem;
+        }
 
-label {
-    display: block;
-    margin-bottom: 9px;
-    font-size: 13px;
-    font-weight: 650;
-}
+        .welcome-text h1 {
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            letter-spacing: -0.02em;
+            color: var(--text-primary);
+        }
 
-input {
-    width: 100%;
-    height: 50px;
-    padding: 0 14px;
-    border:
-        1px solid #29415c;
-    border-radius: 11px;
-    outline: none;
-    background: #07111f;
-    color: var(--text);
-    font: inherit;
-}
+        .welcome-text p {
+            color: var(--text-secondary);
+            font-size: 15px;
+            line-height: 1.5;
+        }
 
-input:focus {
-    border-color: var(--accent);
-    box-shadow:
-        0 0 0 3px
-        rgba(56,189,248,.10);
-}
+        .auth-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 2rem;
+            background: rgba(255, 255, 255, 0.03);
+            padding: 4px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
 
-button {
-    width: 100%;
-    height: 50px;
-    margin-top: 16px;
-    border: 0;
-    border-radius: 11px;
-    background:
-        linear-gradient(
-            135deg,
-            var(--accent2),
-            var(--accent)
-        );
-    color: white;
-    font: inherit;
-    font-weight: 700;
-    cursor: pointer;
-}
+        .auth-tab {
+            flex: 1;
+            padding: 10px 16px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+        }
 
-button:hover {
-    filter: brightness(1.07);
-}
+        .auth-tab.active {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-primary);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+        }
 
-.hint {
-    margin-top: 16px;
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 1.55;
-    text-align: center;
-}
+        .auth-tab:hover:not(.active) {
+            color: var(--text-primary);
+        }
 
-.error {
-    margin-bottom: 16px;
-    padding: 11px 13px;
-    border:
-        1px solid
-        rgba(251,113,133,.35);
-    border-radius: 10px;
-    background:
-        rgba(127,29,29,.20);
-    color: #fecdd3;
-    font-size: 13px;
-    line-height: 1.45;
-}
+        .auth-form {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
 
-.success {
-    margin-bottom: 16px;
-    padding: 11px 13px;
-    border:
-        1px solid
-        rgba(56,189,248,.30);
-    border-radius: 10px;
-    background:
-        rgba(14,116,144,.14);
-    color: #bae6fd;
-    font-size: 13px;
-    line-height: 1.45;
-}
-</style>
+        .auth-form.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 14px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 14px;
+            transition: all 0.2s ease;
+            outline: none;
+        }
+
+        .form-group input:focus {
+            border-color: var(--border-hover);
+            background: rgba(255, 255, 255, 0.05);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .form-group input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .btn-primary {
+            width: 100%;
+            padding: 12px;
+            background: var(--text-primary);
+            border: none;
+            border-radius: 8px;
+            color: var(--bg-primary);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-primary:hover {
+            background: #e4e4e7;
+        }
+
+        .btn-primary:active {
+            transform: scale(0.98);
+        }
+
+        .divider {
+            display: flex;
+            align-items: center;
+            margin: 1.5rem 0;
+            color: var(--text-muted);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .divider::before,
+        .divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border-color);
+        }
+
+        .divider span {
+            padding: 0 1rem;
+        }
+
+        .social-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 1.5rem;
+        }
+
+        .social-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 12px;
+            background: transparent;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+        }
+
+        .social-btn:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: var(--text-muted);
+        }
+
+        .social-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        .signup-link {
+            text-align: center;
+            margin-top: 1.5rem;
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .signup-link a {
+            color: var(--text-primary);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.2s ease;
+        }
+
+        .signup-link a:hover {
+            text-decoration: underline;
+        }
+
+        .security-badge {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 2rem;
+            padding: 10px;
+            background: rgba(16, 185, 129, 0.05);
+            border: 1px solid rgba(16, 185, 129, 0.15);
+            border-radius: 6px;
+            color: var(--success);
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+        }
+
+        .security-badge::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            background: var(--success);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--success);
+            animation: pulse-dot 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .alert {
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 1.5rem;
+            line-height: 1.5;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .alert-error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            color: #f87171;
+        }
+
+        .alert-success {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            color: #34d399;
+        }
+
+        .hero-section {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 3rem;
+            background: var(--bg-secondary);
+            overflow: hidden;
+            border-left: 1px solid var(--border-color);
+        }
+
+        .hero-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            overflow: hidden;
+        }
+
+        .wave-container {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+        }
+
+        .wave {
+            position: absolute;
+            width: 150%;
+            height: 150%;
+            top: -25%;
+            left: -25%;
+            background: radial-gradient(circle, rgba(239, 68, 68, 0.08) 0%, transparent 60%);
+            border-radius: 40%;
+            animation: rotate 30s linear infinite;
+            transition: transform 0.1s ease-out;
+        }
+
+        .wave:nth-child(2) {
+            background: radial-gradient(circle, rgba(249, 115, 22, 0.06) 0%, transparent 60%);
+            animation-delay: -10s;
+            animation-duration: 40s;
+        }
+
+        .wave:nth-child(3) {
+            background: radial-gradient(circle, rgba(239, 68, 68, 0.04) 0%, transparent 60%);
+            animation-delay: -20s;
+            animation-duration: 50s;
+        }
+
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .grid-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image: 
+                linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+            mask-image: radial-gradient(circle at center, black 40%, transparent 80%);
+            -webkit-mask-image: radial-gradient(circle at center, black 40%, transparent 80%);
+        }
+
+        .hero-content {
+            position: relative;
+            z-index: 1;
+            text-align: center;
+            max-width: 560px;
+        }
+
+        .hero-logo {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 2rem;
+            filter: drop-shadow(0 0 40px rgba(239, 68, 68, 0.2));
+            transition: transform 0.5s ease;
+        }
+
+        .hero-section:hover .hero-logo {
+            transform: scale(1.05);
+        }
+
+        .hero-title {
+            font-size: 36px;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            line-height: 1.2;
+            letter-spacing: -0.02em;
+            color: var(--text-primary);
+        }
+
+        .hero-title span {
+            background: linear-gradient(135deg, var(--accent-red) 0%, var(--accent-orange) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero-subtitle {
+            font-size: 16px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            margin-bottom: 3rem;
+        }
+
+        .hero-features {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            text-align: left;
+        }
+
+        .feature {
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .feature:hover {
+            border-color: rgba(239, 68, 68, 0.3);
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .feature-icon {
+            width: 32px;
+            height: 32px;
+            margin-bottom: 12px;
+            color: var(--accent-red);
+        }
+
+        .feature h3 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 4px;
+            color: var(--text-primary);
+        }
+
+        .feature p {
+            font-size: 13px;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        @media (max-width: 968px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+            .hero-section {
+                display: none;
+            }
+            .login-section {
+                padding: 2rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .social-buttons {
+                grid-template-columns: 1fr;
+            }
+            .hero-features {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
 </head>
-
 <body>
-<main class="wrap">
+    <div class="container">
+        <!-- LEFT SIDE - LOGIN -->
+        <section class="login-section">
+            <div class="login-container">
+                <div class="logo">
+                    <img src="/static/logo.svg" alt="Cerbere Logo">
+                    <span class="logo-text">CERBERE</span>
+                </div>
 
-<div class="brand">
-    <div class="logo">🛡️</div>
-    <h1>Cerbere</h1>
-    <div class="subtitle">
-        AI Runtime Security Console
+                <div class="welcome-text">
+                    <h1>Welcome back</h1>
+                    <p>Secure access to your AI runtime security console.</p>
+                </div>
+
+                {% if error %}
+                <div class="alert alert-error">
+                    {{ error }}
+                </div>
+                {% endif %}
+
+                {% if success %}
+                <div class="alert alert-success">
+                    {{ success }}
+                </div>
+                {% endif %}
+
+                <div class="auth-tabs">
+                    <button class="auth-tab active" onclick="switchTab('email')" id="tab-email">
+                        Work Email
+                    </button>
+                    <button class="auth-tab" onclick="switchTab('sso')" id="tab-sso">
+                        Enterprise SSO
+                    </button>
+                </div>
+
+                <!-- Email Form -->
+                <form class="auth-form active" id="email-form" method="post" action="/login">
+                    <div class="form-group">
+                        <label for="email">Work Email</label>
+                        <input 
+                            type="email" 
+                            id="email" 
+                            name="email" 
+                            placeholder="name@company.com" 
+                            required 
+                            autocomplete="email"
+                            autocapitalize="none"
+                        >
+                    </div>
+                    <button type="submit" class="btn-primary" id="email-btn">
+                        Send Magic Link
+                    </button>
+                </form>
+
+                <!-- SSO Form -->
+                <form class="auth-form" id="sso-form" method="post" action="/login">
+                    <div class="form-group">
+                        <label for="company-domain">Company Domain</label>
+                        <input 
+                            type="text" 
+                            id="company-domain" 
+                            name="domain" 
+                            placeholder="company.com" 
+                            required
+                        >
+                    </div>
+                    <div class="form-group">
+                        <label for="sso-email">Work Email</label>
+                        <input 
+                            type="email" 
+                            id="sso-email" 
+                            name="email" 
+                            placeholder="name@company.com" 
+                            required
+                        >
+                    </div>
+                    <button type="submit" class="btn-primary" id="sso-btn">
+                        Continue with SSO
+                    </button>
+                </form>
+
+                <div class="divider">
+                    <span>Or continue with</span>
+                </div>
+
+                <div class="social-buttons">
+                    <a href="/auth/google" class="social-btn">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                        </svg>
+                        Google
+                    </a>
+                    <a href="/auth/github" class="social-btn">
+                        <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+                        </svg>
+                        GitHub
+                    </a>
+                </div>
+
+                <div class="signup-link">
+                    Don't have an account? <a href="/signup">Sign up</a>
+                </div>
+
+                <div class="security-badge">
+                    SOC 2 Type II Compliant
+                </div>
+            </div>
+        </section>
+
+        <!-- RIGHT SIDE - HERO -->
+        <section class="hero-section" id="hero-section">
+            <div class="hero-bg">
+                <div class="wave-container">
+                    <div class="wave"></div>
+                    <div class="wave"></div>
+                    <div class="wave"></div>
+                </div>
+                <div class="grid-overlay"></div>
+            </div>
+
+            <div class="hero-content">
+                <img src="/static/logo.svg" alt="Cerbere" class="hero-logo">
+                <h1 class="hero-title">Cerbere &mdash; The Three-Headed <span>Guardian</span> of AI Agents</h1>
+                <p class="hero-subtitle">
+                    Advanced runtime security and observability for AI agents. 
+                    Monitor, detect, and protect your AI infrastructure in real-time.
+                </p>
+
+                <div class="hero-features">
+                    <div class="feature">
+                        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                        </svg>
+                        <h3>Runtime Security</h3>
+                        <p>Real-time threat detection and policy enforcement.</p>
+                    </div>
+                    <div class="feature">
+                        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                        <h3>Observability</h3>
+                        <p>Complete visibility into agent behavior and decisions.</p>
+                    </div>
+                    <div class="feature">
+                        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                        </svg>
+                        <h3>Access Control</h3>
+                        <p>Granular RBAC and audit trails for compliance.</p>
+                    </div>
+                    <div class="feature">
+                        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                        </svg>
+                        <h3>Low Latency</h3>
+                        <p>Sub-millisecond security checks without blocking.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
     </div>
-</div>
 
-<section class="card">
+    <script>
+        function switchTab(tab) {
+            const tabs = document.querySelectorAll('.auth-tab');
+            const forms = document.querySelectorAll('.auth-form');
+            
+            tabs.forEach(t => t.classList.remove('active'));
+            forms.forEach(f => f.classList.remove('active'));
+            
+            if (tab === 'email') {
+                document.getElementById('tab-email').classList.add('active');
+                document.getElementById('email-form').classList.add('active');
+            } else {
+                document.getElementById('tab-sso').classList.add('active');
+                document.getElementById('sso-form').classList.add('active');
+            }
+        }
 
-{% if error %}
-<div class="error">{{ error }}</div>
-{% endif %}
+        const heroSection = document.getElementById('hero-section');
+        const waves = document.querySelectorAll('.wave');
+        
+        if (heroSection && waves.length > 0) {
+            heroSection.addEventListener('mousemove', (e) => {
+                const rect = heroSection.getBoundingClientRect();
+                const x = (e.clientX - rect.left) / rect.width - 0.5;
+                const y = (e.clientY - rect.top) / rect.height - 0.5;
+                
+                waves.forEach((wave, index) => {
+                    const speed = (index + 1) * 15;
+                    wave.style.transform = `translate(${x * speed}px, ${y * speed}px)`;
+                });
+            });
 
-{% if success %}
-<div class="success">{{ success }}</div>
-{% endif %}
-
-<form method="post" action="/login">
-
-<label for="email">
-    Work email
-</label>
-
-<input
-    id="email"
-    name="email"
-    type="email"
-    autocomplete="email"
-    placeholder="you@company.com"
-    required
-    autofocus
->
-
-<button type="submit">
-    Send secure sign-in link
-</button>
-
-</form>
-
-<div class="hint">
-    We'll send a single-use sign-in link to your
-    work email. The link expires in 10 minutes.
-</div>
-
-</section>
-</main>
+            heroSection.addEventListener('mouseleave', () => {
+                waves.forEach(wave => {
+                    wave.style.transform = 'translate(0, 0)';
+                });
+            });
+        }
+    </script>
 </body>
 </html>
 """
