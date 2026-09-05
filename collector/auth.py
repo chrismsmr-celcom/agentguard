@@ -2486,6 +2486,7 @@ def check_auth():
 
     public_endpoints = {
         "auth.login",
+        "auth.signup",
         "auth.healthz",
         "auth.auth_login",
         "auth.verify_magic_link",
@@ -2668,6 +2669,306 @@ def login():
             success=None,
         ), 500
 
+# ═══════════════════════════════════════════════════════════════
+# SIGN UP PAGE
+# ═══════════════════════════════════════════════════════════════
+
+SIGNUP_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cerbere — Create Account</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Mêmes variables et styles que la page de login pour une cohérence totale */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-primary: #09090b; --bg-secondary: #18181b;
+            --border-color: rgba(255, 255, 255, 0.08); --border-hover: rgba(239, 68, 68, 0.5);
+            --text-primary: #fafafa; --text-secondary: #a1a1aa; --text-muted: #71717a;
+            --accent-red: #ef4444; --accent-orange: #f97316; --accent-glow: rgba(239, 68, 68, 0.15);
+            --success: #10b981;
+        }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary); color: var(--text-primary);
+            min-height: 100vh; overflow-x: hidden; -webkit-font-smoothing: antialiased;
+        }
+        .container { display: grid; grid-template-columns: 1fr 1fr; min-height: 100vh; }
+        .login-section {
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            padding: 3rem; background: var(--bg-primary); position: relative;
+        }
+        .login-container { width: 100%; max-width: 420px; position: relative; z-index: 1; }
+        .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 2.5rem; }
+        .logo img { width: 40px; height: 40px; }
+        .logo-text { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; color: var(--text-primary); }
+        .welcome-text { margin-bottom: 2rem; }
+        .welcome-text h1 { font-size: 28px; font-weight: 600; margin-bottom: 0.5rem; letter-spacing: -0.02em; }
+        .welcome-text p { color: var(--text-secondary); font-size: 15px; line-height: 1.5; }
+        .form-group { margin-bottom: 1.25rem; }
+        .form-group label { display: block; margin-bottom: 0.5rem; font-size: 13px; font-weight: 500; color: var(--text-secondary); }
+        .form-group input {
+            width: 100%; padding: 12px 14px; background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary);
+            font-size: 14px; transition: all 0.2s ease; outline: none;
+        }
+        .form-group input:focus {
+            border-color: var(--border-hover); background: rgba(255, 255, 255, 0.05);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+        .form-group input::placeholder { color: var(--text-muted); }
+        .btn-primary {
+            width: 100%; padding: 12px; background: var(--text-primary); border: none;
+            border-radius: 8px; color: var(--bg-primary); font-size: 14px; font-weight: 600;
+            cursor: pointer; transition: all 0.2s ease;
+        }
+        .btn-primary:hover { background: #e4e4e7; }
+        .btn-primary:active { transform: scale(0.98); }
+        .signup-link { text-align: center; margin-top: 1.5rem; color: var(--text-secondary); font-size: 14px; }
+        .signup-link a { color: var(--text-primary); text-decoration: none; font-weight: 500; transition: color 0.2s ease; }
+        .signup-link a:hover { text-decoration: underline; }
+        .security-badge {
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            margin-top: 2rem; padding: 10px; background: rgba(16, 185, 129, 0.05);
+            border: 1px solid rgba(16, 185, 129, 0.15); border-radius: 6px;
+            color: var(--success); font-size: 12px; font-weight: 500; letter-spacing: 0.02em;
+        }
+        .security-badge::before {
+            content: ''; width: 6px; height: 6px; background: var(--success);
+            border-radius: 50%; box-shadow: 0 0 8px var(--success); animation: pulse-dot 2s infinite;
+        }
+        @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .alert { padding: 12px 16px; border-radius: 8px; font-size: 14px; margin-bottom: 1.5rem; line-height: 1.5; animation: fadeIn 0.3s ease; }
+        .alert-error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #f87171; }
+        .alert-success { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); color: #34d399; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* Hero Section (identique à login) */
+        .hero-section {
+            position: relative; display: flex; flex-direction: column; justify-content: center;
+            align-items: center; padding: 3rem; background: var(--bg-secondary);
+            overflow: hidden; border-left: 1px solid var(--border-color);
+        }
+        .hero-bg { position: absolute; top: 0; left: 0; right: 0; bottom: 0; overflow: hidden; }
+        .wave-container { position: absolute; width: 100%; height: 100%; }
+        .wave {
+            position: absolute; width: 150%; height: 150%; top: -25%; left: -25%;
+            background: radial-gradient(circle, rgba(239, 68, 68, 0.08) 0%, transparent 60%);
+            border-radius: 40%; animation: rotate 30s linear infinite; transition: transform 0.1s ease-out;
+        }
+        .wave:nth-child(2) { background: radial-gradient(circle, rgba(249, 115, 22, 0.06) 0%, transparent 60%); animation-delay: -10s; animation-duration: 40s; }
+        .wave:nth-child(3) { background: radial-gradient(circle, rgba(239, 68, 68, 0.04) 0%, transparent 60%); animation-delay: -20s; animation-duration: 50s; }
+        @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .grid-overlay {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background-image: linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+            background-size: 40px 40px; mask-image: radial-gradient(circle at center, black 40%, transparent 80%);
+        }
+        .hero-content { position: relative; z-index: 1; text-align: center; max-width: 560px; }
+        .hero-logo { width: 80px; height: 80px; margin-bottom: 2rem; filter: drop-shadow(0 0 40px rgba(239, 68, 68, 0.2)); transition: transform 0.5s ease; }
+        .hero-section:hover .hero-logo { transform: scale(1.05); }
+        .hero-title { font-size: 36px; font-weight: 700; margin-bottom: 1rem; line-height: 1.2; letter-spacing: -0.02em; color: var(--text-primary); }
+        .hero-title span { background: linear-gradient(135deg, var(--accent-red) 0%, var(--accent-orange) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .hero-subtitle { font-size: 16px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 3rem; }
+        .hero-features { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; text-align: left; }
+        .feature { padding: 16px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 8px; transition: all 0.3s ease; }
+        .feature:hover { border-color: rgba(239, 68, 68, 0.3); background: rgba(255, 255, 255, 0.04); }
+        .feature-icon { width: 32px; height: 32px; margin-bottom: 12px; color: var(--accent-red); }
+        .feature h3 { font-size: 14px; font-weight: 600; margin-bottom: 4px; color: var(--text-primary); }
+        .feature p { font-size: 13px; color: var(--text-muted); line-height: 1.4; }
+        @media (max-width: 968px) { .container { grid-template-columns: 1fr; } .hero-section { display: none; } .login-section { padding: 2rem; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <section class="login-section">
+            <div class="login-container">
+                <div class="logo">
+                    <img src="/static/logo.svg" alt="Cerbere Logo">
+                    <span class="logo-text">CERBERE</span>
+                </div>
+
+                <div class="welcome-text">
+                    <h1>Create your account</h1>
+                    <p>Start securing your AI agents in minutes.</p>
+                </div>
+
+                {% if error %}
+                <div class="alert alert-error">{{ error }}</div>
+                {% endif %}
+
+                {% if success %}
+                <div class="alert alert-success">{{ success }}</div>
+                {% endif %}
+
+                <form class="auth-form active" method="post" action="/signup">
+                    <div class="form-group">
+                        <label for="name">Full Name</label>
+                        <input type="text" id="name" name="name" placeholder="John Doe" required autocomplete="name">
+                    </div>
+                    <div class="form-group">
+                        <label for="email">Work Email</label>
+                        <input type="email" id="email" name="email" placeholder="name@company.com" required autocomplete="email" autocapitalize="none">
+                    </div>
+                    <div class="form-group">
+                        <label for="company">Company Name <span style="color: var(--text-muted); font-weight: 400;">(Optional)</span></label>
+                        <input type="text" id="company" name="company" placeholder="Acme Inc." autocomplete="organization">
+                    </div>
+                    <button type="submit" class="btn-primary">Create account & send link</button>
+                </form>
+
+                <div class="signup-link">
+                    Already have an account? <a href="/login">Sign in</a>
+                </div>
+
+                <div class="security-badge">SOC 2 Type II Compliant</div>
+            </div>
+        </section>
+
+        <section class="hero-section" id="hero-section">
+            <div class="hero-bg">
+                <div class="wave-container">
+                    <div class="wave"></div><div class="wave"></div><div class="wave"></div>
+                </div>
+                <div class="grid-overlay"></div>
+            </div>
+            <div class="hero-content">
+                <img src="/static/logo.svg" alt="Cerbere" class="hero-logo">
+                <h1 class="hero-title">Cerbere &mdash; The Three-Headed <span>Guardian</span> of AI Agents</h1>
+                <p class="hero-subtitle">Advanced runtime security and observability for AI agents. Monitor, detect, and protect your AI infrastructure in real-time.</p>
+                <div class="hero-features">
+                    <div class="feature">
+                        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                        <h3>Runtime Security</h3><p>Real-time threat detection and policy enforcement.</p>
+                    </div>
+                    <div class="feature">
+                        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                        <h3>Observability</h3><p>Complete visibility into agent behavior and decisions.</p>
+                    </div>
+                    <div class="feature">
+                        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                        <h3>Access Control</h3><p>Granular RBAC and audit trails for compliance.</p>
+                    </div>
+                    <div class="feature">
+                        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                        <h3>Low Latency</h3><p>Sub-millisecond security checks without blocking.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+    <script>
+        const heroSection = document.getElementById('hero-section');
+        const waves = document.querySelectorAll('.wave');
+        if (heroSection && waves.length > 0) {
+            heroSection.addEventListener('mousemove', (e) => {
+                const rect = heroSection.getBoundingClientRect();
+                const x = (e.clientX - rect.left) / rect.width - 0.5;
+                const y = (e.clientY - rect.top) / rect.height - 0.5;
+                waves.forEach((wave, index) => {
+                    const speed = (index + 1) * 15;
+                    wave.style.transform = `translate(${x * speed}px, ${y * speed}px)`;
+                });
+            });
+            heroSection.addEventListener('mouseleave', () => {
+                waves.forEach(wave => { wave.style.transform = 'translate(0, 0)'; });
+            });
+        }
+    </script>
+</body>
+</html>
+"""
+
+
+@auth_bp.route("/signup", methods=["GET", "POST"])
+def signup():
+    if request.method == "GET":
+        return render_template_string(SIGNUP_HTML, error=None, success=None)
+
+    email = _normalize_email(request.form.get("email", ""))
+    display_name = request.form.get("name", "").strip()
+    
+    if not _valid_email(email):
+        return render_template_string(SIGNUP_HTML, error="Enter a valid work email address.", success=None), 400
+    
+    if not display_name:
+        return render_template_string(SIGNUP_HTML, error="Full name is required.", success=None), 400
+
+    try:
+        _ensure_magic_link_table()
+        
+        # 1. Vérifier si l'utilisateur existe déjà
+        existing_user = _user_by_email(email)
+        if existing_user:
+            return render_template_string(
+                SIGNUP_HTML, 
+                error="An account with this email already exists. Please log in.", 
+                success=None
+            ), 400
+
+        # 2. Générer les identifiants pour le nouvel utilisateur
+        user_id = str(uuid.uuid4())
+        org_id = str(uuid.uuid4())  # Crée une nouvelle organisation pour cet utilisateur
+        tenant_id = "default"       # Ou générez un UUID si votre architecture l'exige
+
+        # 3. Insérer l'utilisateur dans Supabase (PostgreSQL) ou SQLite
+        if is_postgres():
+            conn = get_pg_conn()
+            try:
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO users (user_id, org_id, tenant_id, email, display_name, role, active, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                """, (user_id, org_id, tenant_id, email, display_name, "admin", True))
+                conn.commit()
+            finally:
+                conn.close()
+        else:
+            conn = sqlite3.connect(_get_db_path())
+            try:
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO users (user_id, org_id, tenant_id, email, display_name, role, active, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (user_id, org_id, tenant_id, email, display_name, "admin", 1))
+                conn.commit()
+            finally:
+                conn.close()
+
+        # 4. Générer et envoyer automatiquement le Magic Link pour une connexion immédiate
+        raw_token = secrets.token_urlsafe(MAGIC_LINK_TOKEN_BYTES)
+        token_hash = _hash_magic_token(raw_token)
+        expires_at = _utcnow() + timedelta(seconds=MAGIC_LINK_TTL_SECONDS)
+
+        _store_magic_link(user_id=user_id, token_hash=token_hash, expires_at=expires_at)
+        link = _build_magic_link(raw_token)
+        _send_magic_link_email(email, link)
+
+        logger.info(
+            "user_registered_and_magic_link_sent", 
+            user_id=user_id, 
+            email=email,
+            ip=request.remote_addr,
+        )
+
+        return render_template_string(
+            SIGNUP_HTML,
+            error=None,
+            success="Account created successfully! A secure sign-in link has been sent to your email."
+        )
+
+    except Exception as exc:
+        logger.error("signup_failed", error=str(exc), email=email)
+        return render_template_string(
+            SIGNUP_HTML, 
+            error="Unable to create account. Please try again.", 
+            success=None
+        ), 500
 
 # ═══════════════════════════════════════════════════════════════
 # MAGIC LINK VERIFY
