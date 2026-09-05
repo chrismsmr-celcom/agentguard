@@ -2892,6 +2892,7 @@ def signup():
 
     email = _normalize_email(request.form.get("email", ""))
     display_name = request.form.get("name", "").strip()
+    company_name = request.form.get("company", "").strip() or "Personal Workspace"
     
     if not _valid_email(email):
         return render_template_string(SIGNUP_HTML, error="Enter a valid work email address.", success=None), 400
@@ -2911,27 +2912,43 @@ def signup():
                 success=None
             ), 400
 
-        # 2. Générer les identifiants pour le nouvel utilisateur
+        # 2. Générer les identifiants uniques
         user_id = str(uuid.uuid4())
-        org_id = str(uuid.uuid4())  # Crée une nouvelle organisation pour cet utilisateur
-        tenant_id = "default"       # Ou générez un UUID si votre architecture l'exige
+        org_id = str(uuid.uuid4())
+        tenant_id = "default" # Ajustez si votre architecture utilise des UUID spécifiques pour les tenants
 
-        # 3. Insérer l'utilisateur dans Supabase (PostgreSQL) ou SQLite
+        # 3. Insérer l'organisation PUIS l'utilisateur (Ordre crucial pour la foreign key)
         if is_postgres():
             conn = get_pg_conn()
             try:
                 cur = conn.cursor()
+                
+                # Étape A : Créer l'organisation d'abord
+                cur.execute("""
+                    INSERT INTO orgs (org_id, name, tenant_id, created_at)
+                    VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (org_id) DO NOTHING
+                """, (org_id, company_name, tenant_id))
+                
+                # Étape B : Créer l'utilisateur lié à cette organisation
                 cur.execute("""
                     INSERT INTO users (user_id, org_id, tenant_id, email, display_name, role, active, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                 """, (user_id, org_id, tenant_id, email, display_name, "admin", True))
+                
                 conn.commit()
             finally:
                 conn.close()
         else:
+            # Fallback SQLite pour le développement local
             conn = sqlite3.connect(_get_db_path())
             try:
                 cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO orgs (org_id, name, tenant_id, created_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                """, (org_id, company_name, tenant_id))
+                
                 cur.execute("""
                     INSERT INTO users (user_id, org_id, tenant_id, email, display_name, role, active, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
