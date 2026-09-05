@@ -1,6 +1,10 @@
-"""Flask app factory + global config."""
+"""
+Application factory and Flask configuration for Cerbere / AgentGuard.
+"""
+
 import os
 import secrets
+
 import structlog
 from flask import Flask
 from flask_cors import CORS
@@ -8,175 +12,447 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from itsdangerous import URLSafeTimedSerializer
 
+
 structlog.configure(
     processors=[
-        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.TimeStamper(fmt="iso", utc=True),
         structlog.processors.add_log_level,
-        structlog.processors.JSONRenderer()
+        structlog.processors.JSONRenderer(),
     ]
 )
+
 logger = structlog.get_logger("agentguard.collector")
 
 
 def create_app() -> Flask:
-    """Crée et configure l'application Flask."""
-    # ✅ Static folder pour servir logo.svg et autres assets
+    """Create and configure the Flask application."""
+
     static_folder = os.path.join(os.path.dirname(__file__), "static")
-    app = Flask(__name__, static_folder=static_folder, static_url_path="/static")
-    
-    # ✅ Security hardening : environnement
-    app.config["ENVIRONMENT"] = os.environ.get("AGENTGUARD_ENVIRONMENT", "development")
-    is_production = app.config["ENVIRONMENT"] == "production"
-    app.config["ALLOW_LEGACY_SYSTEM_KEY"] = (
-        os.environ.get("AGENTGUARD_ALLOW_LEGACY_SYSTEM_KEY", "false").lower() == "true"
+
+    app = Flask(
+        __name__,
+        static_folder=static_folder,
+        static_url_path="/static",
     )
-    
-    # ✅ FLASK SECRET : fail-closed en production
+
+    # ==============================================================
+    # ENVIRONMENT
+    # ==============================================================
+
+    app.config["ENVIRONMENT"] = os.environ.get(
+        "AGENTGUARD_ENVIRONMENT",
+        "development",
+    )
+
+    is_production = app.config["ENVIRONMENT"] == "production"
+
+    app.config["ALLOW_LEGACY_SYSTEM_KEY"] = (
+        os.environ.get(
+            "AGENTGUARD_ALLOW_LEGACY_SYSTEM_KEY",
+            "false",
+        ).lower()
+        == "true"
+    )
+
+    # ==============================================================
+    # FLASK SECRET
+    # ==============================================================
+
     flask_secret = os.environ.get("AGENTGUARD_FLASK_SECRET")
+
     if not flask_secret:
         if is_production:
             raise RuntimeError(
                 "AGENTGUARD_FLASK_SECRET must be configured in production. "
-                "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+                "Generate one with: "
+                "python -c 'import secrets; print(secrets.token_urlsafe(32))'"
             )
-        else:
-            flask_secret = secrets.token_urlsafe(32)
-            logger.warning("flask_secret_auto_generated_dev_only")
+
+        flask_secret = secrets.token_urlsafe(32)
+
+        logger.warning(
+            "flask_secret_auto_generated_dev_only"
+        )
+
     app.secret_key = flask_secret
-    
-    app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("AGENTGUARD_MAX_BODY_BYTES", "262144"))
-    
-    # CORS : strict en production, permissif en dev
-    cors_origins = [x.strip() for x in os.environ.get("AGENTGUARD_CORS_ORIGINS", "").split(",") if x.strip()]
-    
+
+    # ==============================================================
+    # REQUEST LIMITS
+    # ==============================================================
+
+    app.config["MAX_CONTENT_LENGTH"] = int(
+        os.environ.get(
+            "AGENTGUARD_MAX_BODY_BYTES",
+            "262144",
+        )
+    )
+
+    # ==============================================================
+    # CORS
+    # ==============================================================
+
+    cors_origins = [
+        x.strip()
+        for x in os.environ.get(
+            "AGENTGUARD_CORS_ORIGINS",
+            "",
+        ).split(",")
+        if x.strip()
+    ]
+
     if is_production:
         if not cors_origins:
             raise RuntimeError(
                 "AGENTGUARD_CORS_ORIGINS must be configured in production. "
-                "Example: AGENTGUARD_CORS_ORIGINS=https://dashboard.example.com"
+                "Example: "
+                "AGENTGUARD_CORS_ORIGINS=https://dashboard.example.com"
             )
-        CORS(app, origins=cors_origins, supports_credentials=True)
-        logger.info("cors_strict_mode", origins=cors_origins)
+
+        CORS(
+            app,
+            origins=cors_origins,
+            supports_credentials=True,
+        )
+
+        logger.info(
+            "cors_strict_mode",
+            origins=cors_origins,
+        )
     else:
-        CORS(app, origins=cors_origins or "*", supports_credentials=True)
-    
-    # ✅ Rate limiter : Redis recommandé, memory:// accepté si 1 worker
-    limiter_storage = os.environ.get("AGENTGUARD_LIMITER_STORAGE", "memory://")
-    web_concurrency = int(os.environ.get("WEB_CONCURRENCY", "1"))
-    
+        CORS(
+            app,
+            origins=cors_origins or "*",
+            supports_credentials=True,
+        )
+
+    # ==============================================================
+    # RATE LIMITING
+    # ==============================================================
+
+    limiter_storage = os.environ.get(
+        "AGENTGUARD_LIMITER_STORAGE",
+        "memory://",
+    )
+
+    web_concurrency = int(
+        os.environ.get(
+            "WEB_CONCURRENCY",
+            "1",
+        )
+    )
+
     if is_production:
-        if limiter_storage == "memory://" and web_concurrency > 1:
+        if (
+            limiter_storage == "memory://"
+            and web_concurrency > 1
+        ):
             raise RuntimeError(
-                "AGENTGUARD_LIMITER_STORAGE must be 'redis://...' in production "
-                f"when WEB_CONCURRENCY={web_concurrency} > 1. "
+                "AGENTGUARD_LIMITER_STORAGE must be 'redis://...' "
+                "in production when "
+                f"WEB_CONCURRENCY={web_concurrency} > 1. "
                 "memory:// allows rate-limit bypass via replica hopping. "
-                "Example: AGENTGUARD_LIMITER_STORAGE=redis://your-redis:6379/0"
+                "Example: "
+                "AGENTGUARD_LIMITER_STORAGE=redis://your-redis:6379/0"
             )
-        elif limiter_storage == "memory://":
+
+        if limiter_storage == "memory://":
             logger.warning(
                 "rate_limiter_memory_single_worker",
-                note="Safe with WEB_CONCURRENCY=1, but switch to Redis for multi-replica deployments",
+                note=(
+                    "Safe with WEB_CONCURRENCY=1, but switch to Redis "
+                    "for multi-replica deployments"
+                ),
                 web_concurrency=web_concurrency,
             )
         else:
-            logger.info("rate_limiter_redis_mode", storage=limiter_storage)
+            logger.info(
+                "rate_limiter_redis_mode",
+                storage=limiter_storage,
+            )
     else:
-        logger.info("rate_limiter_mode", storage=limiter_storage)
-    
+        logger.info(
+            "rate_limiter_mode",
+            storage=limiter_storage,
+        )
+
     app.limiter = Limiter(
         get_remote_address,
         app=app,
-        default_limits=[os.environ.get("AGENTGUARD_RATE_LIMIT", "120 per minute")],
+        default_limits=[
+            os.environ.get(
+                "AGENTGUARD_RATE_LIMIT",
+                "120 per minute",
+            )
+        ],
         storage_uri=limiter_storage,
     )
-    
-    # Auth serializer
-    app.auth_serializer = URLSafeTimedSerializer(app.secret_key, salt="agentguard-auth-v1")
-    app.auth_session_ttl = int(os.environ.get("AGENTGUARD_AUTH_SESSION_TTL", "900"))
-    app.auth_cookie_secure = os.environ.get("AGENTGUARD_COOKIE_SECURE", "true").lower() == "true"
-    
-    # Config globale
-    app.config["DB_TYPE"] = os.environ.get("AGENTGUARD_DB_TYPE", "sqlite")
-    app.config["DATABASE_URL"] = os.environ.get("DATABASE_URL", "")
-    app.config["API_KEY"] = os.environ.get("AGENTGUARD_API_KEY", None)
-    app.config["ADMIN_SECRET"] = os.environ.get("AGENTGUARD_ADMIN_SECRET")
+
+    # ==============================================================
+    # AUTHENTICATION SERIALIZERS
+    # ==============================================================
+
+    app.auth_serializer = URLSafeTimedSerializer(
+        app.secret_key,
+        salt="agentguard-auth-v1",
+    )
+
+    app.auth_session_ttl = int(
+        os.environ.get(
+            "AGENTGUARD_AUTH_SESSION_TTL",
+            "900",
+        )
+    )
+
+    app.auth_cookie_secure = (
+        os.environ.get(
+            "AGENTGUARD_COOKIE_SECURE",
+            "true",
+        ).lower()
+        == "true"
+    )
+
+    # Human authentication / magic-link configuration.
+    app.config["MAGIC_LINK_ENABLED"] = (
+        os.environ.get(
+            "AGENTGUARD_MAGIC_LINK_ENABLED",
+            "true",
+        ).lower()
+        == "true"
+    )
+
+    app.config["MAGIC_LINK_TTL"] = int(
+        os.environ.get(
+            "AGENTGUARD_MAGIC_LINK_TTL",
+            "600",
+        )
+    )
+
+    app.config["HUMAN_SESSION_TTL"] = int(
+        os.environ.get(
+            "AGENTGUARD_HUMAN_SESSION_TTL",
+            "28800",
+        )
+    )
+
+    app.config["APP_URL"] = (
+        os.environ.get(
+            "AGENTGUARD_APP_URL",
+            "",
+        )
+        .strip()
+        .rstrip("/")
+    )
+
+    app.config["EMAIL_FROM"] = (
+        os.environ.get(
+            "AGENTGUARD_EMAIL_FROM",
+            "",
+        )
+        .strip()
+    )
+
+    app.config["SMTP_HOST"] = (
+        os.environ.get(
+            "AGENTGUARD_SMTP_HOST",
+            "",
+        )
+        .strip()
+    )
+
+    app.config["SMTP_PORT"] = int(
+        os.environ.get(
+            "AGENTGUARD_SMTP_PORT",
+            "587",
+        )
+    )
+
+    app.config["SMTP_USERNAME"] = (
+        os.environ.get(
+            "AGENTGUARD_SMTP_USERNAME",
+            "",
+        )
+        .strip()
+    )
+
+    app.config["SMTP_PASSWORD"] = os.environ.get(
+        "AGENTGUARD_SMTP_PASSWORD",
+        "",
+    )
+
+    app.config["SMTP_USE_TLS"] = (
+        os.environ.get(
+            "AGENTGUARD_SMTP_USE_TLS",
+            "true",
+        ).lower()
+        == "true"
+    )
+
+    app.config["HUMAN_AUTH_COOKIE"] = "cerbere_session"
+
+    # ==============================================================
+    # DATABASE
+    # ==============================================================
+
+    app.config["DB_TYPE"] = os.environ.get(
+        "AGENTGUARD_DB_TYPE",
+        "sqlite",
+    )
+
+    app.config["DATABASE_URL"] = os.environ.get(
+        "DATABASE_URL",
+        "",
+    )
+
+    # ==============================================================
+    # MACHINE AUTHENTICATION
+    # ==============================================================
+
+    app.config["API_KEY"] = os.environ.get(
+        "AGENTGUARD_API_KEY",
+        None,
+    )
+
+    app.config["ADMIN_SECRET"] = os.environ.get(
+        "AGENTGUARD_ADMIN_SECRET"
+    )
+
+    # Legacy API-key dashboard cookie.
     app.config["AUTH_COOKIE"] = "ag_auth"
-    app.config["SPAN_RATE_LIMIT"] = os.environ.get("AGENTGUARD_SPAN_RATE_LIMIT", "30 per minute")
-    
-    # ✅ FAIL CLOSED en production si secrets manquants
+
+    app.config["SPAN_RATE_LIMIT"] = os.environ.get(
+        "AGENTGUARD_SPAN_RATE_LIMIT",
+        "30 per minute",
+    )
+
+    # ==============================================================
+    # PRODUCTION FAIL-CLOSED
+    # ==============================================================
+
     if is_production:
         if not app.config["API_KEY"]:
             raise RuntimeError(
                 "AGENTGUARD_API_KEY must be configured in production. "
-                "Set it via environment variable. Refusing to start without it."
+                "Set it via environment variable. "
+                "Refusing to start without it."
             )
-        # ✅ P1 AUDITOR FIX: ADMIN_SECRET is now FAIL-CLOSED
-        # Before: warning only with admin endpoints silently disabled
-        # After: RuntimeError, refuses to start with partial config
+
         if not app.config["ADMIN_SECRET"]:
             raise RuntimeError(
                 "AGENTGUARD_ADMIN_SECRET must be configured in production. "
                 "Admin endpoints (/admin/*, /api/key) require this secret. "
                 "Refusing to start with partial security configuration. "
-                "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+                "Generate one with: "
+                "python -c 'import secrets; print(secrets.token_urlsafe(32))'"
             )
-    
-    # Génération auto de la clé API si absente (dev only)
+
+    # ==============================================================
+    # DEVELOPMENT API KEY
+    # ==============================================================
+
     if not app.config["API_KEY"]:
         if app.config["ENVIRONMENT"] == "development":
-            app.config["API_KEY"] = "ag-" + secrets.token_urlsafe(32)
+            app.config["API_KEY"] = (
+                "ag-" + secrets.token_urlsafe(32)
+            )
+
             app.config["_API_KEY_WAS_GENERATED"] = True
-            logger.warning("api_key_generated_in_memory_dev_only")
+
+            logger.warning(
+                "api_key_generated_in_memory_dev_only"
+            )
         else:
             raise RuntimeError(
                 "AGENTGUARD_API_KEY required in non-development environments"
             )
     else:
         app.config["_API_KEY_WAS_GENERATED"] = False
-    
-    # Warning si clé auto-générée en PostgreSQL (production-like)
-    if app.config["_API_KEY_WAS_GENERATED"] and app.config["DB_TYPE"] == "postgres":
+
+    if (
+        app.config["_API_KEY_WAS_GENERATED"]
+        and app.config["DB_TYPE"] == "postgres"
+    ):
         logger.warning(
             "api_key_generated_but_postgres_active",
-            note="Configure AGENTGUARD_API_KEY in env to persist across restarts",
+            note=(
+                "Configure AGENTGUARD_API_KEY in env "
+                "to persist across restarts"
+            ),
         )
-    
-    # Enregistre les blueprints
+
+    # ==============================================================
+    # BLUEPRINTS
+    # ==============================================================
+
     _register_blueprints(app)
-    
-    # Error handler global
+
+    # ==============================================================
+    # GLOBAL ERROR HANDLER
+    # ==============================================================
+
     @app.errorhandler(Exception)
     def handle_unexpected_error(e):
         from werkzeug.exceptions import HTTPException
+
         if isinstance(e, HTTPException):
             return e
-        app.logger.exception("Unhandled error")
+
+        app.logger.exception(
+            "Unhandled error"
+        )
+
         from flask import jsonify
-        return jsonify({"error": "Internal server error"}), 500
-    
-    # ✅ Log final
+
+        return jsonify(
+            {
+                "error": "Internal server error",
+            }
+        ), 500
+
+    # ==============================================================
+    # FINAL LOG
+    # ==============================================================
+
     logger.info(
         "app_created",
-        environment=app.config.get("ENVIRONMENT", "development"),
-        db_type=app.config.get("DB_TYPE", "sqlite"),
-        legacy_key_allowed=app.config.get("ALLOW_LEGACY_SYSTEM_KEY", False),
-        rate_limiter=limiter_storage.split("://")[0] if "://" in limiter_storage else limiter_storage,
+        environment=app.config.get(
+            "ENVIRONMENT",
+            "development",
+        ),
+        db_type=app.config.get(
+            "DB_TYPE",
+            "sqlite",
+        ),
+        legacy_key_allowed=app.config.get(
+            "ALLOW_LEGACY_SYSTEM_KEY",
+            False,
+        ),
+        magic_link_enabled=app.config.get(
+            "MAGIC_LINK_ENABLED",
+            True,
+        ),
+        rate_limiter=(
+            limiter_storage.split("://")[0]
+            if "://" in limiter_storage
+            else limiter_storage
+        ),
         cors_origins=cors_origins or ["*"],
         static_folder=static_folder,
     )
-    
+
     return app
 
 
 def _register_blueprints(app: Flask):
-    """Enregistre tous les blueprints."""
+    """Register all application blueprints."""
+
     from collector.auth import auth_bp
     from collector.api import api_bp
     from collector.admin import admin_bp
     from collector.audit_routes import audit_bp
     from collector.trace_view import trace_bp
     from collector.identity_routes import identity_bp
-    
+
     app.register_blueprint(auth_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(admin_bp)
@@ -186,6 +462,8 @@ def _register_blueprints(app: Flask):
 
 
 def init_db():
-    """Initialise la DB (à appeler au boot)."""
+    """Initialize the database at boot."""
+
     from collector.db import init_db as _init_db
+
     _init_db()
