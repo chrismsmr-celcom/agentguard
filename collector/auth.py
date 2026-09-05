@@ -2892,7 +2892,7 @@ def signup():
 
     email = _normalize_email(request.form.get("email", ""))
     display_name = request.form.get("name", "").strip()
-    company_name = request.form.get("company", "").strip() or "Personal Workspace"
+    company_name = request.form.get("company", "").strip()
     
     if not _valid_email(email):
         return render_template_string(SIGNUP_HTML, error="Enter a valid work email address.", success=None), 400
@@ -2912,25 +2912,33 @@ def signup():
                 success=None
             ), 400
 
-        # 2. Générer les identifiants uniques
+        # 2. Générer les identifiants uniques pour la chaîne Tenant -> Org -> User
         user_id = str(uuid.uuid4())
         org_id = str(uuid.uuid4())
-        tenant_id = "default" # Ajustez si votre architecture utilise des UUID spécifiques pour les tenants
+        tenant_id = str(uuid.uuid4()) # On crée un nouveau tenant dédié pour cet inscrit
+        
+        tenant_name = company_name or f"{display_name}'s Workspace"
+        org_name = company_name or "Default Organization"
 
-        # 3. Insérer l'organisation PUIS l'utilisateur (Ordre crucial pour la foreign key)
+        # 3. Insérer dans l'ordre des contraintes de clé étrangère (Foreign Keys)
         if is_postgres():
             conn = get_pg_conn()
             try:
                 cur = conn.cursor()
                 
-                # Étape A : Créer l'organisation d'abord
+                # Étape A : Créer le Tenant
                 cur.execute("""
-                    INSERT INTO orgs (org_id, name, tenant_id, created_at)
-                    VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
-                    ON CONFLICT (org_id) DO NOTHING
-                """, (org_id, company_name, tenant_id))
+                    INSERT INTO tenants (tenant_id, name, created_at)
+                    VALUES (%s, %s, CURRENT_TIMESTAMP)
+                """, (tenant_id, tenant_name))
                 
-                # Étape B : Créer l'utilisateur lié à cette organisation
+                # Étape B : Créer l'Organisation liée à ce Tenant
+                cur.execute("""
+                    INSERT INTO orgs (org_id, tenant_id, name, created_at)
+                    VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                """, (org_id, tenant_id, org_name))
+                
+                # Étape C : Créer l'Utilisateur lié à ce Tenant et cette Organisation
                 cur.execute("""
                     INSERT INTO users (user_id, org_id, tenant_id, email, display_name, role, active, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
@@ -2945,9 +2953,14 @@ def signup():
             try:
                 cur = conn.cursor()
                 cur.execute("""
-                    INSERT INTO orgs (org_id, name, tenant_id, created_at)
+                    INSERT INTO tenants (tenant_id, name, created_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                """, (tenant_id, tenant_name))
+                
+                cur.execute("""
+                    INSERT INTO orgs (org_id, tenant_id, name, created_at)
                     VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                """, (org_id, company_name, tenant_id))
+                """, (org_id, tenant_id, org_name))
                 
                 cur.execute("""
                     INSERT INTO users (user_id, org_id, tenant_id, email, display_name, role, active, created_at)
