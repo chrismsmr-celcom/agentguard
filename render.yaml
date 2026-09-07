@@ -36,6 +36,9 @@ services:
           # SMTP requis en production pour que les magic links partent
           # réellement (sinon _send_magic_link_email lève une RuntimeError
           # maintenant que AGENTGUARD_ENVIRONMENT=production est correct).
+          # Legacy SMTP maison : gardé en secours si Supabase Auth est
+          # désactivé (SUPABASE_ENABLED=false tant que les 3 clés ci-dessous
+          # ne sont pas toutes renseignées).
           - key: AGENTGUARD_SMTP_HOST
             sync: false
           - key: AGENTGUARD_SMTP_PORT
@@ -43,6 +46,14 @@ services:
           - key: AGENTGUARD_SMTP_USER
             sync: false
           - key: AGENTGUARD_SMTP_PASS
+            sync: false
+          # Supabase Auth (magic link + Google + GitHub) — voir
+          # Dashboard Supabase > Project Settings > API
+          - key: AGENTGUARD_SUPABASE_URL
+            sync: false
+          - key: AGENTGUARD_SUPABASE_ANON_KEY
+            sync: false
+          - key: AGENTGUARD_SUPABASE_JWT_SECRET
             sync: false
 
 databases:
