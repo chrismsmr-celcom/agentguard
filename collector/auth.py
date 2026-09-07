@@ -1858,7 +1858,8 @@ SUPABASE_LOGIN_HTML = """
     </div>
 
     <script>
-        const supabase = window.supabase.createClient(
+        // Renommé en supabaseClient pour éviter les conflits avec les extensions navigateur (Avast, etc.)
+        const supabaseClient = window.supabase.createClient(
             "{{ supabase_url }}",
             "{{ supabase_anon_key }}"
         );
@@ -1875,7 +1876,7 @@ SUPABASE_LOGIN_HTML = """
             btn.disabled = true;
             btn.textContent = "Sending...";
 
-            const { error } = await supabase.auth.signInWithOtp({
+            const { error } = await supabaseClient.auth.signInWithOtp({
                 email,
                 options: { emailRedirectTo: window.location.origin + "/login" }
             });
@@ -1891,25 +1892,24 @@ SUPABASE_LOGIN_HTML = """
         });
 
         document.getElementById("btn-google").addEventListener("click", () => {
-            supabase.auth.signInWithOAuth({
+            supabaseClient.auth.signInWithOAuth({
                 provider: "google",
                 options: { redirectTo: window.location.origin + "/login" }
             });
         });
 
         document.getElementById("btn-github").addEventListener("click", () => {
-            supabase.auth.signInWithOAuth({
+            supabaseClient.auth.signInWithOAuth({
                 provider: "github",
                 options: { redirectTo: window.location.origin + "/login" }
             });
         });
 
         // Après clic sur le magic link ou retour OAuth, Supabase met la
-        // session dans l'URL (fragment #access_token=... ou ?code=...).
-        // On la récupère côté client puis on l'échange contre le cookie
-        // de session posé par le backend (httpOnly, donc invisible en JS).
+        // session dans l'URL. On la récupère côté client puis on l'échange 
+        // contre le cookie de session posé par le backend.
         (async () => {
-            const { data: { session } } = await supabase.auth.getSession();
+            const { data: { session } } = await supabaseClient.auth.getSession();
             if (!session) return;
 
             showAlert("Signing you in...", "success");
