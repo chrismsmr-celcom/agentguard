@@ -453,9 +453,9 @@ class TestE2EInjectionInTools:
         with pytest.raises(SecurityException) as exc_info:
             execute_command(command="rm -rf /")
         
-        assert "blocked" in str(exc_info.value).lower() or "Tool" in str(exc_info.value)
+        # Le nouveau message d'erreur contient "DENY" ou "risk"
         msg = str(exc_info.value).lower()
-        assert "blocked" in msg or "deny" in msg or "denied" in msg or "tool" in msg
+        assert "deny" in msg or "blocked" in msg or "denied" in msg or "risk" in msg
     
     def test_safe_command_allowed(self, live_server, agent_setup):
         """Safe commands pass through."""
@@ -472,7 +472,6 @@ class TestE2EInjectionInTools:
         
         result = execute_command(command="echo hello")
         assert result == "executed"
-
 
 # ═══════════════════════════════════════════════════════════════
 # 8. LARGE PAYLOAD DoS PROTECTION
