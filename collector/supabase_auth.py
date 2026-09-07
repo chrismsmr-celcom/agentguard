@@ -56,12 +56,7 @@ class SupabaseAuthError(Exception):
 
 def verify_supabase_jwt(token: str) -> dict:
     """
-    Vérifie la signature + expiration d'un access_token émis par
-    Supabase Auth (GoTrue). Lève SupabaseAuthError si invalide.
-
-    Retourne le payload décodé : sub (= user_id Supabase), email,
-    user_metadata (name, avatar_url... selon provider), app_metadata
-    (provider utilisé : email / google / github).
+    Vérifie la signature + expiration d'un access_token émis par Supabase Auth.
     """
     if not SUPABASE_JWT_SECRET:
         raise SupabaseAuthError("AGENTGUARD_SUPABASE_JWT_SECRET non configuré")
@@ -70,7 +65,7 @@ def verify_supabase_jwt(token: str) -> dict:
         payload = jwt.decode(
             token,
             SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
+            algorithms=["HS256"],  # <-- CETTE LIGNE EST CRUCIALE
             audience="authenticated",
         )
     except jwt.ExpiredSignatureError:
