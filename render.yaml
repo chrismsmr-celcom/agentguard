@@ -10,7 +10,13 @@ services:
         value: 3.11.0
       - key: AGENTGUARD_DB_TYPE
         value: postgres
-      - key: AGENTGUARD_ENV
+      # BUG CORRIGÉ : collector/app.py lit AGENTGUARD_ENVIRONMENT
+      # (pas AGENTGUARD_ENV). Avec l'ancien nom, is_production restait
+      # FAUX en permanence -> FLASK_SECRET jamais imposé (donc généré
+      # aléatoirement à chaque redémarrage = déconnexion de tout le
+      # monde + magic links invalidés), CORS jamais strict, clé API
+      # legacy jamais désactivée.
+      - key: AGENTGUARD_ENVIRONMENT
         value: production
     envVarGroups:
       - name: agentguard-secrets
@@ -19,6 +25,25 @@ services:
             generateValue: true
           - key: AGENTGUARD_ADMIN_SECRET
             generateValue: true
+          # Ces deux clés N'ÉTAIENT PAS DÉFINIES sur Render alors que le
+          # code les EXIGE en production (voir collector/app.py) :
+          # sans elles l'app plantait au boot, ou (avant le fix ci-dessus)
+          # tournait avec un secret Flask régénéré à chaque redémarrage.
+          - key: AGENTGUARD_FLASK_SECRET
+            generateValue: true
+          - key: AGENTGUARD_CORS_ORIGINS
+            value: https://agentguard-collector.onrender.com
+          # SMTP requis en production pour que les magic links partent
+          # réellement (sinon _send_magic_link_email lève une RuntimeError
+          # maintenant que AGENTGUARD_ENVIRONMENT=production est correct).
+          - key: AGENTGUARD_SMTP_HOST
+            sync: false
+          - key: AGENTGUARD_SMTP_PORT
+            value: "587"
+          - key: AGENTGUARD_SMTP_USER
+            sync: false
+          - key: AGENTGUARD_SMTP_PASS
+            sync: false
 
 databases:
   - name: agentguard-db
