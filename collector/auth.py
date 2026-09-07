@@ -1857,77 +1857,107 @@ SUPABASE_LOGIN_HTML = """
         <button class="btn-oauth" id="btn-github">Continue with GitHub</button>
     </div>
 
-    <script>
-        // Renommé en supabaseClient pour éviter les conflits avec les extensions navigateur (Avast, etc.)
+       <script>
         const supabaseClient = window.supabase.createClient(
             "{{ supabase_url }}",
             "{{ supabase_anon_key }}"
         );
 
         function showAlert(msg, kind) {
-            document.getElementById("alert-box").innerHTML =
-                `<div class="alert alert-${kind}">${msg}</div>`;
+            const box = document.getElementById("alert-box");
+            if (box) box.innerHTML = `<div class="alert alert-${kind}">${msg}</div>`;
         }
 
-        document.getElementById("otp-form").addEventListener("submit", async (e) => {
-            e.preventDefault();
-            const email = document.getElementById("email").value.trim();
-            const btn = document.getElementById("otp-btn");
-            btn.disabled = true;
-            btn.textContent = "Sending...";
+        // 1. Gérer l'envoi du Magic Link
+        const otpForm = document.getElementById("otp-form");
+        if (otpForm) {
+            otpForm.addEventListener("submit", async (e) => {
+                e.preventDefault();
+                const email = document.getElementById("email").value.trim();
+                const btn = document.getElementById("otp-btn");
+                btn.disabled = true;
+                btn.textContent = "Sending...";
 
-            const { error } = await supabaseClient.auth.signInWithOtp({
-                email,
-                options: { emailRedirectTo: window.location.origin + "/login" }
+                const { error } = await supabaseClient.auth.signInWithOtp({
+                    email,
+                    options: { emailRedirectTo: window.location.origin + "/login" }
+                });
+
+                btn.disabled = false;
+                btn.textContent = "Send Magic Link";
+
+                if (error) {
+                    showAlert(error.message, "error");
+                } else {
+                    showAlert("Check your inbox — your secure sign-in link is on its way.", "success");
+                }
             });
+        }
 
-            btn.disabled = false;
-            btn.textContent = "Send Magic Link";
+        // 2. Gérer les boutons OAuth
+        const btnGoogle = document.getElementById("btn-google");
+        if (btnGoogle) {
+            btnGoogle.addEventListener("click", () => {
+                supabaseClient.auth.signInWithOAuth({
+                    provider: "google",
+                    options: { redirectTo: window.location.origin + "/login" }
+                });
+            });
+        }
 
-            if (error) {
-                showAlert(error.message, "error");
-            } else {
-                showAlert("Check your inbox — your secure sign-in link is on its way.", "success");
+        const btnGithub = document.getElementById("btn-github");
+        if (btnGithub) {
+            btnGithub.addEventListener("click", () => {
+                supabaseClient.auth.signInWithOAuth({
+                    provider: "github",
+                    options: { redirectTo: window.location.origin + "/login" }
+                });
+            });
+        }
+
+        // 3. Gérer le retour du Magic Link (Le point crucial !)
+        async function handleMagicLinkReturn() {
+            // On attend 150ms que Supabase parse l'URL (#access_token=...)
+            await new Promise(resolve => setTimeout(resolve, 150));
+
+            const { data: { session }, error } = await supabaseClient.auth.getSession();
+
+            if (session && session.access_token) {
+                showAlert("Signing you in...", "success");
+
+                try {
+                    const resp = await fetch("/api/auth/supabase-session", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        credentials: "include",
+                        body: JSON.stringify({ access_token: session.access_token })
+                    });
+
+                    if (resp.ok) {
+                        // Succès : on redirige vers le dashboard
+                        window.location.href = "/";
+                    } else {
+                        const body = await resp.json().catch(() => ({}));
+                        showAlert(body.error || "Sign-in failed.", "error");
+                        // Nettoyer l'URL pour enlever le token visible
+                        window.history.replaceState({}, document.title, "/login");
+                    }
+                } catch (err) {
+                    showAlert("Network error during sign-in.", "error");
+                    window.history.replaceState({}, document.title, "/login");
+                }
+            }
+        }
+
+        // Exécuter la vérification au chargement de la page
+        handleMagicLinkReturn();
+
+        // Écouter les changements d'état (au cas où le parsing est asynchrone)
+        supabaseClient.auth.onAuthStateChange((event, session) => {
+            if (event === 'SIGNED_IN' && session) {
+                handleMagicLinkReturn();
             }
         });
-
-        document.getElementById("btn-google").addEventListener("click", () => {
-            supabaseClient.auth.signInWithOAuth({
-                provider: "google",
-                options: { redirectTo: window.location.origin + "/login" }
-            });
-        });
-
-        document.getElementById("btn-github").addEventListener("click", () => {
-            supabaseClient.auth.signInWithOAuth({
-                provider: "github",
-                options: { redirectTo: window.location.origin + "/login" }
-            });
-        });
-
-        // Après clic sur le magic link ou retour OAuth, Supabase met la
-        // session dans l'URL. On la récupère côté client puis on l'échange 
-        // contre le cookie de session posé par le backend.
-        (async () => {
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            if (!session) return;
-
-            showAlert("Signing you in...", "success");
-
-            const resp = await fetch("/api/auth/supabase-session", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                credentials: "include",
-                body: JSON.stringify({ access_token: session.access_token })
-            });
-
-            if (resp.ok) {
-                window.location.href = "/";
-            } else {
-                const body = await resp.json().catch(() => ({}));
-                showAlert(body.error || "Sign-in failed.", "error");
-            }
-        })();
     </script>
 </body>
 </html>
