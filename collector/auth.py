@@ -1778,7 +1778,215 @@ def _audit_login(
 
 
 # ═══════════════════════════════════════════════════════════════
-# LOGIN PAGE (Professional, Enterprise-Grade, No Emojis)
+# SUPABASE AUTH — magic link + Google + GitHub
+# ═══════════════════════════════════════════════════════════════
+#
+# Remplace l'ancien envoi d'email fait à la main. Supabase gère l'OTP
+# et les deux providers OAuth ; ce backend ne fait que vérifier le JWT
+# et poser le même cookie de session que l'ancien flow (voir
+# collector/supabase_auth.py pour le detail).
+
+from collector.supabase_auth import (
+    SUPABASE_ANON_KEY,
+    SUPABASE_ENABLED,
+    SUPABASE_URL,
+    SupabaseAuthError,
+    get_or_provision_user,
+    verify_supabase_jwt,
+)
+
+SUPABASE_LOGIN_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cerbere — Secure Access</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body {
+            font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+            background:#09090b; color:#fafafa; min-height:100vh;
+            display:flex; align-items:center; justify-content:center;
+        }
+        .card { width:100%; max-width:400px; padding:2rem; }
+        h1 { font-size:24px; margin-bottom:.5rem; }
+        p.sub { color:#a1a1aa; font-size:14px; margin-bottom:2rem; }
+        input {
+            width:100%; padding:12px 14px; margin-bottom:12px;
+            background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08);
+            border-radius:8px; color:#fafafa; font-size:14px; outline:none;
+        }
+        button {
+            width:100%; padding:12px; border:none; border-radius:8px;
+            font-size:14px; font-weight:600; cursor:pointer; margin-bottom:10px;
+        }
+        .btn-primary { background:#fafafa; color:#09090b; }
+        .btn-oauth {
+            background:transparent; color:#fafafa;
+            border:1px solid rgba(255,255,255,.08);
+            display:flex; align-items:center; justify-content:center; gap:8px;
+        }
+        .divider {
+            text-align:center; color:#71717a; font-size:12px;
+            margin:20px 0; text-transform:uppercase; letter-spacing:.05em;
+        }
+        .alert {
+            padding:12px 14px; border-radius:8px; font-size:13px;
+            margin-bottom:16px; line-height:1.5;
+        }
+        .alert-error { background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.2); color:#f87171; }
+        .alert-success { background:rgba(16,185,129,.1); border:1px solid rgba(16,185,129,.2); color:#34d399; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Welcome back</h1>
+        <p class="sub">Secure access to your AI runtime security console.</p>
+        <div id="alert-box"></div>
+
+        <form id="otp-form">
+            <input type="email" id="email" placeholder="name@company.com" required autocomplete="email">
+            <button type="submit" class="btn-primary" id="otp-btn">Send Magic Link</button>
+        </form>
+
+        <div class="divider">Or continue with</div>
+
+        <button class="btn-oauth" id="btn-google">Continue with Google</button>
+        <button class="btn-oauth" id="btn-github">Continue with GitHub</button>
+    </div>
+
+    <script>
+        const supabase = window.supabase.createClient(
+            "{{ supabase_url }}",
+            "{{ supabase_anon_key }}"
+        );
+
+        function showAlert(msg, kind) {
+            document.getElementById("alert-box").innerHTML =
+                `<div class="alert alert-${kind}">${msg}</div>`;
+        }
+
+        document.getElementById("otp-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const email = document.getElementById("email").value.trim();
+            const btn = document.getElementById("otp-btn");
+            btn.disabled = true;
+            btn.textContent = "Sending...";
+
+            const { error } = await supabase.auth.signInWithOtp({
+                email,
+                options: { emailRedirectTo: window.location.origin + "/login" }
+            });
+
+            btn.disabled = false;
+            btn.textContent = "Send Magic Link";
+
+            if (error) {
+                showAlert(error.message, "error");
+            } else {
+                showAlert("Check your inbox — your secure sign-in link is on its way.", "success");
+            }
+        });
+
+        document.getElementById("btn-google").addEventListener("click", () => {
+            supabase.auth.signInWithOAuth({
+                provider: "google",
+                options: { redirectTo: window.location.origin + "/login" }
+            });
+        });
+
+        document.getElementById("btn-github").addEventListener("click", () => {
+            supabase.auth.signInWithOAuth({
+                provider: "github",
+                options: { redirectTo: window.location.origin + "/login" }
+            });
+        });
+
+        // Après clic sur le magic link ou retour OAuth, Supabase met la
+        // session dans l'URL (fragment #access_token=... ou ?code=...).
+        // On la récupère côté client puis on l'échange contre le cookie
+        // de session posé par le backend (httpOnly, donc invisible en JS).
+        (async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) return;
+
+            showAlert("Signing you in...", "success");
+
+            const resp = await fetch("/api/auth/supabase-session", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ access_token: session.access_token })
+            });
+
+            if (resp.ok) {
+                window.location.href = "/";
+            } else {
+                const body = await resp.json().catch(() => ({}));
+                showAlert(body.error || "Sign-in failed.", "error");
+            }
+        })();
+    </script>
+</body>
+</html>
+"""
+
+
+@auth_bp.get("/api/auth/config")
+def supabase_public_config():
+    """Expose la config publique (URL + anon key) au front — jamais le JWT secret."""
+    return jsonify({
+        "supabase_enabled": SUPABASE_ENABLED,
+        "supabase_url": SUPABASE_URL,
+        "supabase_anon_key": SUPABASE_ANON_KEY,
+    })
+
+
+@auth_bp.post("/api/auth/supabase-session")
+def supabase_session():
+    """
+    Échange un access_token Supabase (vérifié côté serveur) contre le
+    cookie de session httpOnly existant. Provisionne tenant/org/user
+    au premier login. Endpoint public (avant login, forcément).
+    """
+    if not SUPABASE_ENABLED:
+        return jsonify({"error": "Supabase auth not configured"}), 503
+
+    data = request.get_json(silent=True) or {}
+    token = str(data.get("access_token", "")).strip()
+
+    if not token:
+        return jsonify({"error": "access_token required"}), 400
+
+    try:
+        payload = verify_supabase_jwt(token)
+        user = get_or_provision_user(payload)
+    except SupabaseAuthError as exc:
+        logger.warning("supabase_session_rejected", error=str(exc))
+        return jsonify({"error": "Invalid or expired session"}), 401
+    except Exception as exc:
+        logger.error("supabase_session_failed", error=str(exc))
+        return jsonify({"error": "Unable to establish session"}), 500
+
+    user_id, org_id, _, email, _, _, active = user
+
+    if not active:
+        return jsonify({"error": "Account disabled"}), 403
+
+    response = jsonify({"status": "ok"})
+    _set_human_session(response, user_id)
+
+    _audit_login(success=True, email=email, org_id=org_id)
+
+    logger.info("supabase_login_success", user_id=user_id, org_id=org_id)
+
+    return response
+
+
+# ═══════════════════════════════════════════════════════════════
+# LOGIN PAGE — LEGACY (fallback si Supabase non configuré)
 # ═══════════════════════════════════════════════════════════════
 
 LOGIN_HTML = """
@@ -2557,6 +2765,14 @@ def check_auth():
 )
 def login():
     if request.method == "GET":
+        if SUPABASE_ENABLED:
+            return render_template_string(
+                SUPABASE_LOGIN_HTML,
+                supabase_url=SUPABASE_URL,
+                supabase_anon_key=SUPABASE_ANON_KEY,
+            )
+
+        # Secours : Supabase pas encore configuré -> ancien flow SMTP maison.
         return render_template_string(
             LOGIN_HTML,
             error=None,
