@@ -53,16 +53,35 @@ MAGIC_LINK_ENABLED = (
     in {"1", "true", "yes", "on"}
 )
 
-SMTP_HOST = os.environ.get("SMTP_HOST", "").strip()
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
-SMTP_USERNAME = os.environ.get("SMTP_USERNAME", "").strip()
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
-SMTP_FROM = os.environ.get(
+def _env_first(*names: str, default: str = "") -> str:
+    """Lit la première variable d'env définie parmi plusieurs alias.
+
+    BUG CORRIGÉ : auth.py lisait SMTP_HOST/SMTP_PORT/SMTP_USERNAME/...
+    alors que env.example et render.yaml documentent AGENTGUARD_SMTP_HOST/
+    AGENTGUARD_SMTP_PORT/AGENTGUARD_SMTP_USER/AGENTGUARD_SMTP_PASS.
+    Résultat : même correctement configuré, le SMTP n'était JAMAIS
+    détecté -> aucun magic link n'était réellement envoyé par email.
+    On accepte maintenant les deux formes, en priorisant le préfixe
+    AGENTGUARD_ (celui documenté et déployé).
+    """
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return default
+
+
+SMTP_HOST = _env_first("AGENTGUARD_SMTP_HOST", "SMTP_HOST").strip()
+SMTP_PORT = int(_env_first("AGENTGUARD_SMTP_PORT", "SMTP_PORT", default="587"))
+SMTP_USERNAME = _env_first("AGENTGUARD_SMTP_USER", "SMTP_USERNAME").strip()
+SMTP_PASSWORD = _env_first("AGENTGUARD_SMTP_PASS", "SMTP_PASSWORD")
+SMTP_FROM = _env_first(
+    "AGENTGUARD_SMTP_FROM",
     "SMTP_FROM",
-    SMTP_USERNAME or "security@agentguard.local",
+    default=(SMTP_USERNAME or "security@agentguard.local"),
 ).strip()
 SMTP_USE_TLS = (
-    os.environ.get("SMTP_USE_TLS", "true").lower()
+    _env_first("AGENTGUARD_SMTP_USE_TLS", "SMTP_USE_TLS", default="true").lower()
     in {"1", "true", "yes", "on"}
 )
 
