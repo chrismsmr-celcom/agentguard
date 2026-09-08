@@ -112,20 +112,48 @@ tr:hover td{background:#191c29}
 .searchbox{background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font:inherit;font-size:12px;width:100%}
 .toast{position:fixed;right:20px;bottom:20px;background:var(--card2);border:1px solid var(--border2);padding:10px 14px;border-radius:8px;font-size:12px;z-index:100;opacity:0;transition:.2s}
 .toast.show{opacity:1}
+
+/* ── Professional icon and agent connection system ─────────────────── */
+.ui-icon{width:14px;height:14px;display:inline-block;vertical-align:-2px;flex:0 0 14px;color:currentColor}
+.ui-icon svg{display:block;width:100%;height:100%}
+.logo-fallback{display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:10px;font-weight:800;letter-spacing:-.04em;color:var(--text);background:var(--card2);border:1px solid var(--border2);border-radius:7px}
+.brand-mark{width:40px;height:40px;display:grid;place-items:center;flex:0 0 40px;border-radius:10px;background:var(--card2);border:1px solid var(--border2);font:800 10px/1 var(--mono);letter-spacing:.02em;color:var(--text);overflow:hidden}.brand-mark img{width:23px;height:23px;display:block;object-fit:contain}.brand-mark .brand-fallback{display:none}.brand-mark img[data-fallback]+.brand-fallback{display:none}
+.brand-mark.python{color:#8ab4ff}.brand-mark.mcp{color:#b7a2ff}.brand-mark.http{color:#7dd3fc}.brand-mark.composio{color:#f0abfc}.brand-mark.openai{color:#d1d5db}.brand-mark.anthropic{color:#f5d0a9}.brand-mark.langgraph{color:#86efac}.brand-mark.crewai{color:#fda4af}
+.connect-modal{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(4,6,12,.74);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.connect-modal.open{display:flex}
+.connect-panel{width:min(960px,100%);max-height:min(820px,calc(100vh - 48px));overflow:auto;background:var(--bg2);border:1px solid var(--border2);border-radius:14px;box-shadow:0 24px 80px rgba(0,0,0,.48);animation:connectIn .16s ease-out}
+@keyframes connectIn{from{opacity:0;transform:translateY(8px) scale(.99)}to{opacity:1;transform:none}}
+.connect-head{display:flex;align-items:center;gap:12px;padding:18px 20px;border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(16,18,26,.97);backdrop-filter:blur(10px);z-index:2}
+.connect-head .title{font-size:15px;font-weight:650}.connect-head .subtitle{font-size:11px;color:var(--muted);margin-top:2px}
+.connect-close{margin-left:auto;width:32px;height:32px;border:1px solid var(--border2);border-radius:7px;background:var(--card);color:var(--muted);font-size:20px;line-height:1;display:grid;place-items:center}
+.connect-close:hover{color:var(--text);border-color:#454a63}
+.connect-body{padding:20px}.connect-view{display:none}.connect-view.active{display:block}
+.connect-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.connect-card{display:flex;gap:13px;align-items:flex-start;text-align:left;width:100%;padding:15px;background:var(--card);border:1px solid var(--border);border-radius:10px;color:var(--text);transition:.15s ease;position:relative}
+button.connect-card{cursor:pointer}button.connect-card:hover{transform:translateY(-1px);border-color:#454a63;background:var(--card2)}
+.connect-card .name{font-weight:600;font-size:13px}.connect-card .desc{display:block;font-size:11px;color:var(--muted);margin-top:3px;line-height:1.45}
+.connect-section{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:20px 0 9px}.connect-section:first-child{margin-top:0}
+.connect-note{padding:10px 12px;border:1px solid var(--border);background:var(--card);border-radius:8px;color:var(--muted);font-size:11px;margin-top:14px}
+.connect-detail{display:none}.connect-detail.active{display:block}.connect-detail h3{margin:0 0 5px;font-size:16px}.connect-detail p{color:var(--muted);font-size:12px;margin:0 0 14px}
+.connect-back{border:0;background:none;color:var(--muted);padding:0;margin-bottom:16px;font-size:12px;display:inline-flex;align-items:center;gap:5px}.connect-back:hover{color:var(--text)}
+.connect-code-wrap{position:relative;margin:10px 0 16px}.connect-code{background:#0a0c12;border:1px solid var(--border);border-radius:8px;padding:14px 62px 14px 14px;font-family:var(--mono);font-size:11px;color:#aeb6c8;white-space:pre-wrap;word-break:break-word;line-height:1.55;overflow:auto}
+.connect-copy{position:absolute;right:9px;top:9px;border:1px solid var(--border2);background:var(--card2);color:var(--muted);border-radius:5px;padding:4px 8px;font-size:10px}.connect-copy:hover{color:var(--text);border-color:#454a63}
+.connect-agents{margin-top:20px;border-top:1px solid var(--border);padding-top:14px}.connect-agent-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)}.connect-agent-row:last-child{border-bottom:0}.connect-agent-dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:0 0 8px}.connect-agent-dot.connected{background:var(--green)}.connect-agent-dot.idle{background:var(--yellow)}.connect-agent-name{font-family:var(--mono);font-size:11px}.connect-agent-status{margin-left:auto;font-size:10px;color:var(--muted)}
+@media(max-width:760px){.connect-modal{padding:12px}.connect-panel{max-height:calc(100vh - 24px)}.connect-grid{grid-template-columns:1fr}.connect-body{padding:14px}}
 @media(max-width:1200px){.g5{grid-template-columns:repeat(3,1fr)}.g4,.g3{grid-template-columns:repeat(2,1fr)}.tr-body{grid-template-columns:1fr}.fside{display:none}}
 @media(max-width:760px){.g5,.g4,.g3,.g2{grid-template-columns:1fr}.tabs{overflow-x:auto}}
 </style>
 </head>
 <body>
 <header class="topbar">
-  <div class="logo-box"><img src="/static/logo.svg" alt="" onerror="this.outerHTML='🛡️'"></div>
+  <div class="logo-box"><img src="/static/logo.svg" alt="AgentGuard" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="logo-fallback" aria-hidden="true">AG</span></div>
   <span class="prod">AgentGuard <small>AI Observability</small></span>
   <nav class="tabs" id="topTabs">
     <button data-view="overview">Overview</button>
     <button data-view="health" class="active">Service Health (Preview)</button>
     <button data-view="tracing">Explorer (Preview)</button>
     <button data-view="audit">Compliance Audit</button>
-    <button disabled title="Experimental — coming soon">AI Agents (Experimental)</button>
+    <button type="button" onclick="openConnectAgentModal()">AI Agents</button>
   </nav>
   <div class="tb-right">
     <button class="btn" onclick="toast('Connections gérées via /admin/customers')">+ Connection</button>
@@ -133,10 +161,10 @@ tr:hover td{background:#191c29}
   </div>
 </header>
 <div class="toolbar">
-  <div class="filter-pill">⧩ <span>Service in (<b>agentguard-collector</b>)</span><span class="x" title="clear">✕</span></div>
+  <div class="filter-pill"><span class="ui-icon" data-icon="filter"></span><span>Service in (<b>agentguard-collector</b>)</span><span class="x" title="clear">✕</span></div>
   <div class="right">
     <span class="pill">Last 14 days ▾</span>
-    <button class="btn" onclick="refreshAll()">⟳ Refresh</button>
+    <button class="btn" onclick="refreshAll()"><span class="ui-icon" data-icon="refresh"></span> Refresh</button>
     <form method="post" action="/logout" style="margin:0"><button class="btn" type="submit">Sign out</button></form>
   </div>
 </div>
@@ -147,7 +175,7 @@ tr:hover td{background:#191c29}
 <section id="view-overview" class="view">
   <div class="sec">Service Health &amp; Performance</div>
   <div class="grid" style="grid-template-columns:170px 1fr 1fr 1fr;gap:12px">
-    <div class="card logo-card" style="background:#000;border:0;border-radius:18px"><div class="logo-box"><img src="/static/logo.svg" onerror="this.outerHTML='🛡️'" style="width:100%;height:100%;object-fit:cover;border-radius:18px"></div></div>
+    <div class="card logo-card" style="background:#000;border:0;border-radius:18px"><div class="logo-box"><img src="/static/logo.svg" alt="AgentGuard" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'" style="width:100%;height:100%;object-fit:cover;border-radius:18px"><span class="logo-fallback" aria-hidden="true">AG</span></div></div>
     <div class="card"><div class="clabel">Open Problems</div><div class="hero mid" id="ovProblems" style="color:var(--red2)">0</div></div>
     <div class="card"><div class="clabel"># of Total Requests</div><div class="hero mid" id="ovRequests">0</div><div class="trend" id="ovRequestsT"></div></div>
     <div class="card"><div class="clabel">Cost</div><div class="hero mid" id="ovCost">$0</div><div class="trend" id="ovCostT"></div></div>
@@ -168,7 +196,7 @@ tr:hover td{background:#191c29}
 </section>
 
 <section id="view-health" class="view active">
-  <div class="sec"><span class="ico">⏱</span>Traffic and Latency <span class="info">i</span></div>
+  <div class="sec"><span class="ico"><span class="ui-icon" data-icon="latency"></span></span>Traffic and Latency <span class="info">i</span></div>
   <div class="stat-tabs" id="latTabs"><button class="active" data-s="avg">AVG</button><button data-s="p50">p50</button><button data-s="p90">p90</button><button data-s="p95">p95</button></div>
   <div class="grid g2">
     <div class="card"><span class="menu">⋮</span><div class="clabel">Time to response</div><div class="hero" style="text-align:center" id="ttrHero">—</div><div class="chart" id="ttrChart"></div></div>
@@ -180,7 +208,7 @@ tr:hover td{background:#191c29}
     <div class="card"><span class="menu">⋮</span><div class="clabel">Average cost per request</div><div class="hero" id="avgCostHero">—</div><div class="chart" id="avgCostChart" style="height:120px"></div></div>
     <div class="card"><button class="alert-btn">+ New alert</button><span class="menu">⋮</span><div class="clabel">Token usage forecast</div><div class="chart tall" id="tokForecast"></div><div class="legend"><span><i style="background:var(--purple2)"></i>Total amount of tokens used</span></div></div>
   </div>
-  <div class="sec"><span class="ico">🛡</span>Guardrails <span class="info">i</span></div>
+  <div class="sec"><span class="ico"><span class="ui-icon" data-icon="security"></span></span>Guardrails <span class="info">i</span></div>
   <div class="grid g2">
     <div class="card"><span class="menu">⋮</span><div class="clabel">Number of requests with guardrail enabled</div><div class="hero" id="grHero">0</div></div>
     <div class="card"><span class="menu">⋮</span><div class="clabel">Guardrail activation by type</div><div class="chart tall" id="grStacked"></div><div class="legend" id="grLegend"></div></div>
@@ -194,8 +222,8 @@ tr:hover td{background:#191c29}
     <span>⇄</span><span class="name">AgentGuard.workflow</span>
     <select id="traceSelect" class="pill" style="background:var(--card);color:var(--text);border:1px solid var(--border2)"></select>
     <span id="trDate" class="dim"></span>
-    <span>⏱ Duration: <b id="trDur">—</b></span>
-    <span class="err">◇ Errors: <b id="trErr">0</b></span>
+    <span><span class="ui-icon" data-icon="latency"></span> Duration: <b id="trDur">—</b></span>
+    <span class="err"><span class="ui-icon" data-icon="error"></span> Errors: <b id="trErr">0</b></span>
     <span class="mono dim">ID: <span id="trId"></span> ⧉</span>
     <span class="right"><span>Open with ⊞</span><span>Close details</span><span>Minimize</span></span>
   </div>
@@ -242,12 +270,72 @@ tr:hover td{background:#191c29}
 
 </main>
 </div>
+
+<div id="connectAgentModal" class="connect-modal" role="dialog" aria-modal="true" aria-labelledby="connectAgentTitle" aria-describedby="connectAgentSubtitle" onclick="if(event.target===this)closeConnectAgentModal()">
+  <div class="connect-panel">
+    <div class="connect-head">
+      <div>
+        <div class="title" id="connectAgentTitle">Connect an AI agent</div>
+        <div class="subtitle" id="connectAgentSubtitle">Choose an integration path and send your first protected event.</div>
+      </div>
+      <button class="connect-close" type="button" aria-label="Close" title="Close" onclick="closeConnectAgentModal()">×</button>
+    </div>
+    <div class="connect-body">
+      <div id="connectChooser" class="connect-view active">
+        <div class="connect-section">AgentGuard integrations</div>
+        <div class="connect-grid">
+          <button class="connect-card" type="button" onclick="showConnectDetail('python')"><span class="brand-mark python"><img src="https://cdn.jsdelivr.net/npm/simple-icons@16.29.0/icons/python.svg" alt="Python" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><span class="brand-fallback">PY</span></span><span><span class="name">Python SDK</span><span class="desc">Native runtime instrumentation for LLM calls and tool execution.</span></span></button>
+          <button class="connect-card" type="button" onclick="showConnectDetail('mcp')"><span class="brand-mark mcp">MCP</span><span><span class="name">MCP</span><span class="desc">Security boundary for MCP clients, servers and tool calls.</span></span></button>
+          <button class="connect-card" type="button" onclick="showConnectDetail('http')"><span class="brand-mark http">HTTP</span><span><span class="name">HTTP Gateway</span><span class="desc">Language-agnostic telemetry and policy boundary.</span></span></button>
+          <button class="connect-card" type="button" onclick="showConnectDetail('composio')"><span class="brand-mark composio"><img src="https://cdn.jsdelivr.net/npm/simple-icons@16.29.0/icons/composio.svg" alt="Composio" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><span class="brand-fallback">C</span></span><span><span class="name">Composio</span><span class="desc">Guard Composio tool execution with AgentGuard policy enforcement.</span></span></button>
+        </div>
+        <div class="connect-section">AI providers</div>
+        <div class="connect-grid">
+          <button class="connect-card" type="button" onclick="showConnectDetail('openai')"><span class="brand-mark openai"><img src="https://cdn.jsdelivr.net/npm/simple-icons@16.29.0/icons/openai.svg" alt="OpenAI" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><span class="brand-fallback">O</span></span><span><span class="name">OpenAI</span><span class="desc">Protect Responses and Chat Completions through the SDK.</span></span></button>
+          <button class="connect-card" type="button" onclick="showConnectDetail('anthropic')"><span class="brand-mark anthropic"><img src="https://cdn.jsdelivr.net/npm/simple-icons@16.29.0/icons/anthropic.svg" alt="Anthropic" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><span class="brand-fallback">A</span></span><span><span class="name">Anthropic</span><span class="desc">Protect Claude requests and tool-use workflows.</span></span></button>
+        </div>
+        <div class="connect-section">Agent frameworks</div>
+        <div class="connect-grid">
+          <button class="connect-card" type="button" onclick="showConnectDetail('langgraph')"><span class="brand-mark langgraph"><img src="https://cdn.jsdelivr.net/npm/simple-icons@16.29.0/icons/langgraph.svg" alt="LangGraph" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><span class="brand-fallback">LG</span></span><span><span class="name">LangGraph</span><span class="desc">Instrument graph nodes and side-effecting tool edges.</span></span></button>
+          <button class="connect-card" type="button" onclick="showConnectDetail('crewai')"><span class="brand-mark crewai"><img src="https://cdn.jsdelivr.net/npm/simple-icons@16.29.0/icons/crewai.svg" alt="CrewAI" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><span class="brand-fallback">CA</span></span><span><span class="name">CrewAI</span><span class="desc">Guard CrewAI tools and agent execution paths.</span></span></button>
+        </div>
+        <div class="connect-note"><b>Security:</b> keep <span class="mono">AGENTGUARD_API_KEY</span> in the agent environment or secret manager. Never expose it in browser code. The admin secret remains server-side and is not used by this onboarding flow.</div>
+        <div class="connect-agents"><div class="connect-section" style="margin-top:0">Recently observed agents</div><div id="connectAgentList"><div class="empty" style="padding:18px 8px">No agent telemetry observed yet.</div></div></div>
+      </div>
+      <div id="connectPython" class="connect-view connect-detail"></div>
+      <div id="connectMcp" class="connect-view connect-detail"></div>
+      <div id="connectHttp" class="connect-view connect-detail"></div>
+      <div id="connectComposio" class="connect-view connect-detail"></div>
+      <div id="connectOpenai" class="connect-view connect-detail"></div>
+      <div id="connectAnthropic" class="connect-view connect-detail"></div>
+      <div id="connectLanggraph" class="connect-view connect-detail"></div>
+      <div id="connectCrewai" class="connect-view connect-detail"></div>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="toast"></div>
 
 <script>
 var state = { modelFilter: new Set(), selTrace: null, selSpan: 0, latStat: 'avg' };
 
 var $ = function(id) { return document.getElementById(id); };
+
+var ICON_PATHS = {
+    security: '<path d="M12 3 20 6v5c0 5.2-3.4 9.2-8 11-4.6-1.8-8-5.8-8-11V6l8-3Z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m8.7 12 2.1 2.1 4.5-4.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
+    error: '<path d="M12 3 22 21H2L12 3Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 9v5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="17.5" r="1" fill="currentColor"/>',
+    latency: '<circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v5l3.5 2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
+    back: '<path d="M15 5 8 12l7 7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
+    refresh: '<path d="M20 11a8 8 0 0 0-14.7-3L3 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M3 6v5h5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
+    filter: '<path d="M4 6h16M7 12h10M10 18h4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>'
+};
+function renderIcons(root) {
+    (root || document).querySelectorAll('.ui-icon[data-icon]').forEach(function(el) {
+        var key = el.getAttribute('data-icon');
+        if (ICON_PATHS[key]) el.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICON_PATHS[key] + '</svg>';
+    });
+}
+renderIcons(document);
 
 var esc = function(v) {
     return String(v || '').replace(/[&<>'"]/g, function(c) {
@@ -707,17 +795,17 @@ function loadTrace() {
             var dotClass = r.span_type === 'tool_call' ? 'client' : '';
             var clientLabel = r.span_type === 'llm_call' ? 'client' : 'internal';
             var modelPart = r.model ? '.' + esc(r.model.split('-')[0]) : '';
-            var warnPart = r.blocked ? '<span class="warn">⚠</span>' : '';
+            var warnPart = r.blocked ? '<span class="warn"><span class="ui-icon" data-icon="error"></span></span>' : '';
             treeHTML += '<div class="span-row ' + (i === state.selSpan ? 'sel' : '') + '" style="' + (hide ? 'display:none' : '') + '" onclick="selectSpan(' + i + ')"><span class="tw"><span style="color:var(--dim)">—</span><span class="dot ' + dotClass + '"></span><span style="color:var(--dim);font-size:10.5px">' + clientLabel + '</span>' + esc(r.span_type) + modelPart + ' ' + warnPart + '</span><span class="track"><span class="bar ' + (r.blocked ? 'blocked' : '') + '" style="left:2%;width:' + w + '%"></span></span></div>';
         });
         $('spanTree').innerHTML = treeHTML || '<div class="empty">No spans</div>';
         $('excN').textContent = rows.filter(function(r) { return r.blocked; }).length;
         var excHTML = '';
         rows.filter(function(r) { return r.blocked; }).forEach(function(r, i) {
-            var checksFailed = (r.security_checks || []).filter(function(c) { return !c.passed; }).map(function(c) { return '  🚨 ' + c.check_name + ' — ' + c.details; }).join('\n');
+            var checksFailed = (r.security_checks || []).filter(function(c) { return !c.passed; }).map(function(c) { return '  [ERROR] ' + c.check_name + ' — ' + c.details; }).join('\n');
             excHTML += '<tr class="exc-row" onclick="this.nextElementSibling.hidden=!this.nextElementSibling.hidden"><td>▾</td><td class="mono">agentguard.SecurityException</td><td>' + esc(r.block_reason || 'blocked') + '</td></tr><tr hidden><td></td><td colspan="2"><div class="pilltag">Span events: exception id: ' + esc(r.span_id) + '</div><div class="codeblock"><b>Exception root cause:</b> ' + esc(r.block_reason || '') + '\n\nTraceback (most recent call last):\n  File "agentguard_sdk.py", in guard_' + esc(r.span_type) + '\n    raise SecurityException(...)\n' + checksFailed + '</div></td></tr>';
         });
-        $('excTable').innerHTML = excHTML || '<tr><td colspan="3" class="empty">No exceptions 🎉</td></tr>';
+        $('excTable').innerHTML = excHTML || '<tr><td colspan="3" class="empty">No exceptions</td></tr>';
         selectSpan(state.selSpan || 0);
     }).catch(function() {
         $('spanTree').innerHTML = '<div class="empty">Error loading trace</div>';
@@ -742,7 +830,7 @@ window.selectSpan = function(i) {
     var llmScore = r.llm_score != null ? (r.llm_score * 100).toFixed(1) + '%' : '—';
     var decision = r.blocked ? 'BLOCK' : 'ALLOW';
     var decisionClass = r.blocked ? 'pink' : '';
-    $('spanDetail').innerHTML = '<div class="card" style="margin-bottom:10px"><div style="display:flex;gap:10px;align-items:center"><span style="width:30px;height:30px;border-radius:6px;background:#3776ab;color:#fff;display:grid;place-items:center;font-weight:700">🐍</span><div><b>' + esc(r.span_type) + '</b><div class="dim" style="font-size:11px">Service: <a href="#">agentguard-collector</a></div></div></div><div style="margin:10px 0;color:var(--muted);font-size:12px">⏱ Duration: ' + Number(r.latency_ms || 0).toFixed(2) + ' ms</div></div><div class="attr-sec"><h4>gen ai <span>▾</span></h4>' + kv('Gen ai agent name', 'agentguard-sdk') + kv('Gen ai request model', r.model || 'unknown') + kv('Gen ai prompt 0 role', 'user') + kv('Gen ai prompt 0 content', prompt) + kv('Gen ai completion 0 role', 'assistant') + kv('Gen ai completion 0 content', response) + kv('Gen ai usage input tokens', r.input_tokens || 0, 'pink') + kv('Gen ai usage output tokens', r.output_tokens || 0, 'pink') + '</div><div class="attr-sec"><h4>agentguard <span>▾</span></h4>' + kv('Agentguard detection layer', r.detection_layer || 'regex') + kv('Agentguard ml score', mlScore, 'blue') + kv('Agentguard llm score', llmScore, 'blue') + kv('Agentguard decision', decision, decisionClass) + kv('Agentguard cost usd', Number(r.cost_usd || 0).toFixed(6), 'pink') + '</div>';
+    $('spanDetail').innerHTML = '<div class="card" style="margin-bottom:10px"><div style="display:flex;gap:10px;align-items:center"><span style="width:30px;height:30px;border-radius:6px;background:#3776ab;color:#fff;display:grid;place-items:center;font-weight:700">PY</span><div><b>' + esc(r.span_type) + '</b><div class="dim" style="font-size:11px">Service: <a href="#">agentguard-collector</a></div></div></div><div style="margin:10px 0;color:var(--muted);font-size:12px"><span class="ui-icon" data-icon="latency"></span> Duration: ' + Number(r.latency_ms || 0).toFixed(2) + ' ms</div></div><div class="attr-sec"><h4>gen ai <span>▾</span></h4>' + kv('Gen ai agent name', 'agentguard-sdk') + kv('Gen ai request model', r.model || 'unknown') + kv('Gen ai prompt 0 role', 'user') + kv('Gen ai prompt 0 content', prompt) + kv('Gen ai completion 0 role', 'assistant') + kv('Gen ai completion 0 content', response) + kv('Gen ai usage input tokens', r.input_tokens || 0, 'pink') + kv('Gen ai usage output tokens', r.output_tokens || 0, 'pink') + '</div><div class="attr-sec"><h4>agentguard <span>▾</span></h4>' + kv('Agentguard detection layer', r.detection_layer || 'regex') + kv('Agentguard ml score', mlScore, 'blue') + kv('Agentguard llm score', llmScore, 'blue') + kv('Agentguard decision', decision, decisionClass) + kv('Agentguard cost usd', Number(r.cost_usd || 0).toFixed(6), 'pink') + '</div>';
 };
 
 function renderAudit() {
@@ -777,6 +865,186 @@ function renderAudit() {
     });
     $('auTrail').innerHTML = trailHTML || '<tr><td colspan="9" class="empty">No audit events</td></tr>';
 }
+
+
+var CONNECT_INTEGRATIONS = {
+    python: {target:'connectPython', title:'Python SDK', description:'Native AgentGuard instrumentation. Wrap LLM calls with guard_llm_call and side-effecting tools with guard_tool_call.', code:`pip install agentguard
+
+from agentguard_sdk import AgentGuard
+
+guard = AgentGuard(
+    collector_url="https://YOUR_AGENTGUARD_HOST",
+    api_key="YOUR_AGENTGUARD_API_KEY",
+    agent_id="my-agent",
+)
+
+@guard.guard_llm_call
+def call_model(prompt, model="gpt-5"):
+    from openai import OpenAI
+    return OpenAI().responses.create(model=model, input=prompt)
+
+@guard.guard_tool_call("search_customer")
+def search_customer(query):
+    return your_search_function(query)`},
+    mcp: {target:'connectMcp', title:'MCP', description:'Use an AgentGuard MCP adapter at the execution boundary. The adapter authorizes the tool call before forwarding it to the MCP server.', code:`# MCP server-side boundary
+export AGENTGUARD_API_KEY="YOUR_AGENTGUARD_API_KEY"
+export AGENTGUARD_COLLECTOR_URL="https://YOUR_AGENTGUARD_HOST"
+
+# Request flow:
+# MCP client -> AgentGuard adapter -> policy decision
+#                         |-> deny / require approval
+#                         |-> allow -> MCP server/tool
+#                         |-> telemetry -> AgentGuard Collector
+
+# Keep the API key out of the browser and MCP client UI.`},
+    http: {target:'connectHttp', title:'HTTP Gateway', description:'Language-agnostic ingestion. Use this when the agent runtime cannot install the Python SDK. Verify the deployed API contract before production rollout.', code:`curl -X POST "https://YOUR_AGENTGUARD_HOST/api/spans" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: YOUR_AGENTGUARD_API_KEY" \\
+  -d '{
+    "agent_id": "my-agent",
+    "span_type": "tool_call",
+    "tool": "search_customer",
+    "input_data": {"query": "customer@example.com"}
+  }'`},
+    composio: {target:'connectComposio', title:'Composio', description:'Use AgentGuard immediately before Composio executes a tool. Keep both credentials server-side and treat the raw Composio tool as untrusted until authorized.', code:`from agentguard_sdk import AgentGuard
+
+guard = AgentGuard(
+    collector_url="https://YOUR_AGENTGUARD_HOST",
+    api_key="YOUR_AGENTGUARD_API_KEY",
+    agent_id="composio-agent",
+)
+
+@guard.guard_tool_call("composio_tool")
+def run_composio_tool(tool, arguments):
+    return composio_client.execute(tool, arguments)
+
+# Pass guarded tool functions to your agent, not raw side-effecting tools.`},
+    openai: {target:'connectOpenai', title:'OpenAI', description:'AgentGuard wraps the OpenAI call path while the existing SDK handles security checks, budgets and telemetry.', code:`from agentguard_sdk import AgentGuard
+from openai import OpenAI
+
+guard = AgentGuard(
+    collector_url="https://YOUR_AGENTGUARD_HOST",
+    api_key="YOUR_AGENTGUARD_API_KEY",
+    agent_id="openai-agent",
+)
+client = OpenAI()
+
+@guard.guard_llm_call
+def ask_openai(prompt, model="gpt-5"):
+    return client.responses.create(model=model, input=prompt)
+
+response = ask_openai("Summarize the latest customer request")`},
+    anthropic: {target:'connectAnthropic', title:'Anthropic', description:'Protect Claude requests with the same AgentGuard runtime boundary. Guard every side-effecting tool separately.', code:`from agentguard_sdk import AgentGuard
+from anthropic import Anthropic
+
+guard = AgentGuard(
+    collector_url="https://YOUR_AGENTGUARD_HOST",
+    api_key="YOUR_AGENTGUARD_API_KEY",
+    agent_id="claude-agent",
+)
+client = Anthropic()
+
+@guard.guard_llm_call
+def ask_claude(prompt, model="claude-sonnet-4-5"):
+    return client.messages.create(
+        model=model,
+        max_tokens=1024,
+        messages=[{"role":"user","content":prompt}],
+    )`},
+    langgraph: {target:'connectLanggraph', title:'LangGraph', description:'Framework integration through node and tool wrappers. AgentGuard remains the policy and runtime enforcement layer.', code:`from agentguard_sdk import AgentGuard
+
+guard = AgentGuard(
+    collector_url="https://YOUR_AGENTGUARD_HOST",
+    api_key="YOUR_AGENTGUARD_API_KEY",
+    agent_id="langgraph-agent",
+)
+
+@guard.guard_llm_call
+def model_node(state):
+    return your_model.invoke(state["messages"])
+
+@guard.guard_tool_call("search_customer")
+def search_node(query):
+    return your_search_function(query)
+
+# Add the guarded functions to your StateGraph nodes/edges.`},
+    crewai: {target:'connectCrewai', title:'CrewAI', description:'Framework integration through guarded task tools. Side-effecting operations must call AgentGuard before execution.', code:`from agentguard_sdk import AgentGuard
+
+guard = AgentGuard(
+    collector_url="https://YOUR_AGENTGUARD_HOST",
+    api_key="YOUR_AGENTGUARD_API_KEY",
+    agent_id="crewai-agent",
+)
+
+@guard.guard_tool_call("research_tool")
+def guarded_research(query):
+    return research_tool.run(query)
+
+# Give CrewAI the guarded tool rather than the raw tool.
+# Apply the same pattern to email, database, HTTP and payment tools.`}
+};
+
+function openConnectAgentModal() {
+    var modal = $('connectAgentModal');
+    if (!modal) return;
+    modal.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    showConnectChooser();
+    renderObservedAgents();
+}
+function closeConnectAgentModal() {
+    var modal = $('connectAgentModal');
+    if (!modal) return;
+    modal.classList.remove('open');
+    document.body.style.overflow = '';
+}
+function showConnectChooser() {
+    document.querySelectorAll('#connectAgentModal .connect-view').forEach(function(v){v.classList.remove('active');});
+    $('connectChooser').classList.add('active');
+}
+function showConnectDetail(kind) {
+    var cfg = CONNECT_INTEGRATIONS[kind];
+    if (!cfg) return;
+    document.querySelectorAll('#connectAgentModal .connect-view').forEach(function(v){v.classList.remove('active');});
+    var target = $(cfg.target);
+    target.innerHTML = '<button class="connect-back" type="button" onclick="showConnectChooser()"><span class="ui-icon" data-icon="back"></span> Back to integrations</button>' +
+        '<h3>' + esc(cfg.title) + '</h3><p>' + esc(cfg.description) + '</p>' +
+        '<div class="connect-code-wrap"><pre class="connect-code" id="connectCode-' + esc(kind) + '">' + esc(cfg.code) + '</pre><button class="connect-copy" type="button" onclick="copyConnectCode(\'' + esc(kind) + '\', this)">Copy</button></div>' +
+        '<div class="connect-note"><b>Next:</b> run the integration from your server, send one real event, then return to the dashboard. AgentGuard derives observed agents from telemetry and does not provision credentials from the browser.</div>';
+    target.classList.add('active');
+    renderIcons(target);
+}
+function copyConnectCode(kind, button) {
+    var cfg = CONNECT_INTEGRATIONS[kind];
+    if (!cfg) return;
+    var done = function(){var old=button.textContent;button.textContent='Copied';setTimeout(function(){button.textContent=old;},1400);};
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(cfg.code).then(done).catch(function(){toast('Copy failed');});
+        return;
+    }
+    var ta=document.createElement('textarea');ta.value=cfg.code;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();
+    try{document.execCommand('copy');done();}catch(e){toast('Copy failed');}document.body.removeChild(ta);
+}
+function extractObservedAgents() {
+    var candidates=[];
+    var add=function(value,timestamp){if(value===null||value===undefined)return;var id=String(value).trim();if(!id||id==='undefined'||id==='null')return;candidates.push({id:id,timestamp:timestamp||null});};
+    (state.recentEvents||[]).forEach(function(e){add(e.agent_id||e.agentId||e.org_id||e.orgId,e.created_at||e.timestamp||e.ts);});
+    (state.traces||[]).forEach(function(t){add(t.agent_id||t.agentId||t.org_id||t.orgId,t.created_at||t.timestamp||t.started_at);});
+    (state.spans||[]).forEach(function(s){add(s.agent_id||s.agentId||s.org_id||s.orgId,s.created_at||s.timestamp||s.ts);});
+    var byId={};candidates.forEach(function(item){var prev=byId[item.id];if(!prev||String(item.timestamp||'')>String(prev.timestamp||''))byId[item.id]=item;});
+    return Object.keys(byId).map(function(id){return byId[id];}).sort(function(a,b){return String(b.timestamp||'').localeCompare(String(a.timestamp||''));});
+}
+function observedAgentStatus(timestamp){
+    if(!timestamp)return {label:'Observed',cls:''};
+    var t=Date.parse(String(timestamp).replace(' ','T'));if(isNaN(t))return {label:'Observed',cls:''};
+    var age=Date.now()-t;if(age<5*60*1000)return {label:'Connected',cls:'connected'};if(age<60*60*1000)return {label:'Idle',cls:'idle'};return {label:'Offline',cls:''};
+}
+function renderObservedAgents(){
+    var el=$('connectAgentList');if(!el)return;var agents=extractObservedAgents();
+    if(!agents.length){el.innerHTML='<div class="empty" style="padding:18px 8px">No agent telemetry observed yet.</div>';return;}
+    el.innerHTML=agents.slice(0,10).map(function(agent){var status=observedAgentStatus(agent.timestamp);var when=agent.timestamp?String(agent.timestamp).replace('T',' ').slice(0,19):'recent telemetry';return '<div class="connect-agent-row"><span class="connect-agent-dot '+status.cls+'"></span><span class="connect-agent-name">'+esc(agent.id)+'</span><span class="connect-agent-status">'+esc(status.label)+' · '+esc(when)+'</span></div>';}).join('');
+}
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeConnectAgentModal();});
 
 function refreshAll() {
     Promise.all([
@@ -823,6 +1091,7 @@ function refreshAll() {
         state.audit = audit;
         state.checksDaily = checksDaily;
         state.modelsDaily = modelsDaily;
+        renderObservedAgents();
         var active = document.querySelector('.view.active').id.replace('view-', '');
         showView(active);
         toast('Dashboard refreshed');
