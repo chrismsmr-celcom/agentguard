@@ -1987,7 +1987,7 @@ SUPABASE_LOGIN_HTML = """
             color: var(--paper-dim);
             margin-bottom: 1.4rem;
         }
-        .visual-eyebrow img { width: 22px; height: 22px; border-radius: 5px; }
+        .visual-eyebrow img { width: 100px; height: 100px; border-radius: 5px; }
 
         .visual-copy h2 {
             font-family: 'Fraunces', Georgia, serif;
