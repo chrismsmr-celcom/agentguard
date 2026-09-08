@@ -35,19 +35,26 @@ import sqlite3
 import uuid
 from typing import Optional
 
-import jwt  # PyJWT — ajouté à requirements.txt
+import requests
 import structlog
-from flask import current_app
 
 from collector.db import _get_db_path, get_pg_conn, get_sqlite_conn, is_postgres
 
 logger = structlog.get_logger("agentguard.supabase_auth")
 
-SUPABASE_URL = os.environ.get("AGENTGUARD_SUPABASE_URL", "").strip()
+SUPABASE_URL = os.environ.get("AGENTGUARD_SUPABASE_URL", "").strip().rstrip("/")
 SUPABASE_ANON_KEY = os.environ.get("AGENTGUARD_SUPABASE_ANON_KEY", "").strip()
-SUPABASE_JWT_SECRET = os.environ.get("AGENTGUARD_SUPABASE_JWT_SECRET", "").strip()
 
-SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_ANON_KEY and SUPABASE_JWT_SECRET)
+# NOTE : AGENTGUARD_SUPABASE_JWT_SECRET n'est PLUS utilisé pour vérifier la
+# signature localement. Les projets Supabase créés avec le nouveau système
+# "JWT Signing Keys" (rotation de clés, chaque token porte un `kid`) rendent
+# le secret HS256 statique de Settings > API > JWT Secret obsolète dès la
+# première rotation -> tous les logins échouent avec "Signature verification
+# failed" alors que le token est parfaitement valide. On délègue donc la
+# vérification à Supabase lui-même via /auth/v1/user, qui reste correct quel
+# que soit le système de clés utilisé côté projet (legacy HS256 statique ou
+# nouvelles signing keys).
+SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_ANON_KEY)
 
 
 class SupabaseAuthError(Exception):
@@ -56,27 +63,45 @@ class SupabaseAuthError(Exception):
 
 def verify_supabase_jwt(token: str) -> dict:
     """
-    Vérifie la signature + expiration d'un access_token émis par Supabase Auth.
+    Fait vérifier l'access_token par Supabase lui-même (GET /auth/v1/user)
+    plutôt qu'une vérification de signature locale. Lève SupabaseAuthError
+    si le token est invalide, expiré, ou révoqué.
+
+    Retourne un payload dans le même format que l'ancien decode JWT local :
+    sub (= user_id Supabase), email, user_metadata, app_metadata — pour ne
+    rien changer à get_or_provision_user().
     """
-    if not SUPABASE_JWT_SECRET:
-        raise SupabaseAuthError("AGENTGUARD_SUPABASE_JWT_SECRET non configuré")
+    if not SUPABASE_ENABLED:
+        raise SupabaseAuthError("Supabase URL/anon key non configurés")
 
     try:
-        payload = jwt.decode(
-            token,
-            SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],  # <-- CETTE LIGNE EST CRUCIALE
-            audience="authenticated",
+        resp = requests.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "apikey": SUPABASE_ANON_KEY,
+            },
+            timeout=5.0,
         )
-    except jwt.ExpiredSignatureError:
-        raise SupabaseAuthError("token Supabase expiré")
-    except jwt.InvalidTokenError as exc:
-        raise SupabaseAuthError(f"token Supabase invalide: {exc}")
+    except requests.RequestException as exc:
+        raise SupabaseAuthError(f"Supabase injoignable : {exc}")
 
-    if not payload.get("sub"):
-        raise SupabaseAuthError("token Supabase sans sub (user_id)")
+    if resp.status_code != 200:
+        raise SupabaseAuthError(
+            f"token Supabase invalide (HTTP {resp.status_code})"
+        )
 
-    return payload
+    data = resp.json()
+    user_id = data.get("id")
+    if not user_id:
+        raise SupabaseAuthError("réponse Supabase sans user id")
+
+    return {
+        "sub": user_id,
+        "email": data.get("email", ""),
+        "user_metadata": data.get("user_metadata") or {},
+        "app_metadata": data.get("app_metadata") or {},
+    }
 
 
 def _db_execute(query: str, params=(), fetchone=False, fetchall=False):
@@ -247,4 +272,4 @@ def get_or_provision_user(payload: dict):
         provider=(payload.get("app_metadata") or {}).get("provider", "email"),
     )
 
-    return (user_id, org_id, tenant_id, email, display_name, "admin", True)
+    return (user_id, org_id, tenant_id, email, display_name, "admin", True) 
