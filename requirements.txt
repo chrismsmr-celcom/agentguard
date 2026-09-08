@@ -70,4 +70,3 @@ opentelemetry-instrumentation-requests>=0.43b0,<1.0.0
 #transformers>=4.40.0
 #torch>=2.0.0
 werkzeug>=2.3.0
-PyJWT>=2.8.0,<3.0.0
