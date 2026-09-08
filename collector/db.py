@@ -166,7 +166,7 @@ _SLACK_TOKEN_RE = re.compile(
 )
 
 _SLACK_WEBHOOK_RE = re.compile(
-    r"https\://hooks\.slack\.com/services/"
+    r"https://hooks\.slack\.com/services/"
     r"T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+"
 )
 
@@ -198,8 +198,10 @@ _PEM_KEY_RE = re.compile(
     r"-----END [A-Z0-9 ]*PRIVATE KEY-----"
 )
 
+# ✅ FIX: Python 3.14+ ne supporte pas (?:+srv)
+# On utilise (?:mongodb(?:\+srv)?) à la place
 _DB_URL_RE = re.compile(
-    r"\b(?:postgres|postgresql|mysql|mongodb(?:+srv)?|"
+    r"\b(?:postgres|postgresql|mysql|mongodb(?:\+srv)?|"
     r"redis|rediss|amqp|amqps)://"
     r"[^\s'\"<>]+"
 )
