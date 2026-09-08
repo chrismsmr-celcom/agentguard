@@ -14,7 +14,6 @@ logger = structlog.get_logger("agentguard.db")
 # CONFIG + CONNECTION HELPERS
 # ═══════════════════════════════════════════════════════════════
 
-
 def _get_db_config() -> Tuple[str, str]:
     """Get database type and URL from environment."""
     db_type = os.environ.get("AGENTGUARD_DB_TYPE", "sqlite")
@@ -40,7 +39,7 @@ def is_postgres() -> bool:
 
 
 def get_pg_conn():
-    """Get a PostgreSQL connection."""
+    """Get a PostgreSQL connection with timeout."""
     import psycopg
 
     _, database_url = _get_db_config()
@@ -48,7 +47,8 @@ def get_pg_conn():
     if not database_url:
         raise RuntimeError("DATABASE_URL not configured for PostgreSQL")
 
-    return psycopg.connect(database_url)
+    # ✅ FIX: explicit connection timeout (5 seconds)
+    return psycopg.connect(database_url, connect_timeout=5)
 
 
 def get_sqlite_conn():
@@ -62,7 +62,6 @@ def get_conn():
     """Get a DB connection (SQLite or PostgreSQL)."""
     if is_postgres():
         return get_pg_conn()
-
     return get_sqlite_conn()
 
 
@@ -74,6 +73,25 @@ def get_db():
 # Backward compatibility.
 # Deprecated — use _get_db_path() in new code.
 DB_SQLITE_PATH = "/tmp/agentguard.db"
+
+
+# ═══════════════════════════════════════════════════════════════
+# SQL HELPERS — avoids PostgreSQL/SQLite boolean confusion
+# ═══════════════════════════════════════════════════════════════
+
+def sql_true() -> str:
+    """Return the correct SQL literal for TRUE."""
+    return "TRUE" if is_postgres() else "1"
+
+
+def sql_false() -> str:
+    """Return the correct SQL literal for FALSE."""
+    return "FALSE" if is_postgres() else "0"
+
+
+def sql_placeholder() -> str:
+    """Return the correct placeholder for parameterized queries."""
+    return "%s" if is_postgres() else "?"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -148,7 +166,7 @@ _SLACK_TOKEN_RE = re.compile(
 )
 
 _SLACK_WEBHOOK_RE = re.compile(
-    r"https://hooks\.slack\.com/services/"
+    r"https\://hooks\.slack\.com/services/"
     r"T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+"
 )
 
@@ -181,7 +199,7 @@ _PEM_KEY_RE = re.compile(
 )
 
 _DB_URL_RE = re.compile(
-    r"\b(?:postgres|postgresql|mysql|mongodb(?:\+srv)?|"
+    r"\b(?:postgres|postgresql|mysql|mongodb(?:+srv)?|"
     r"redis|rediss|amqp|amqps)://"
     r"[^\s'\"<>]+"
 )
@@ -206,7 +224,6 @@ _GENERIC_SECRET_RE = re.compile(
 
 def _redact_string(text: str) -> str:
     """Redact PII and secrets from a single string."""
-
     # PII
     text = _EMAIL_RE.sub("[REDACTED_EMAIL]", text)
     text = _SSN_RE.sub("[REDACTED_SSN]", text)
@@ -253,7 +270,6 @@ def redact_pii(data: Any) -> Any:
       Google keys, private keys, DB URLs, etc.
     - other types: returns as-is
     """
-
     if data is None:
         return None
 
@@ -271,10 +287,8 @@ def redact_pii(data: Any) -> Any:
             redact_pii(item)
             for item in data
         ]
-
         if isinstance(data, tuple):
             return tuple(redacted)
-
         return redacted
 
     return data
@@ -283,7 +297,6 @@ def redact_pii(data: Any) -> Any:
 # ═══════════════════════════════════════════════════════════════
 # DB INITIALIZATION
 # ═══════════════════════════════════════════════════════════════
-
 
 def init_db():
     """Initialize all database tables.
@@ -298,11 +311,9 @@ def init_db():
     - identity_events
     - magic_link_tokens
     """
-
     if is_postgres():
         conn = get_pg_conn()
         cur = conn.cursor()
-
         cur.execute("SELECT pg_advisory_lock(727271)")
 
         try:
@@ -668,7 +679,6 @@ def init_db():
 # IDENTITY TABLES
 # ═══════════════════════════════════════════════════════════════
 
-
 def init_identity_tables():
     """Initialize identity tables.
 
@@ -679,7 +689,6 @@ def init_identity_tables():
     - agents
     - identity_events
     """
-
     if is_postgres():
         conn = get_pg_conn()
         cur = conn.cursor()
@@ -938,7 +947,6 @@ def init_identity_tables():
 # AGENT KEY RESOLUTION
 # ═══════════════════════════════════════════════════════════════
 
-
 def resolve_agent_identity(api_key: str) -> Optional[dict]:
     """Resolve an agent API key to its identity.
 
@@ -955,24 +963,20 @@ def resolve_agent_identity(api_key: str) -> Optional[dict]:
 
     Returns None when the key is invalid or inactive.
     """
-
     if not api_key or not api_key.startswith("ag_"):
         return None
 
     parts = api_key.split("_")
-
     if len(parts) != 5:
         return None
 
     _, tenant_id, org_id, agent_id, _ = parts
-
     key_hash = _hash_key(api_key)
 
     try:
         if is_postgres():
             conn = get_pg_conn()
             cur = conn.cursor()
-
             try:
                 cur.execute(
                     """
@@ -987,16 +991,12 @@ def resolve_agent_identity(api_key: str) -> Optional[dict]:
                     """,
                     (key_hash,),
                 )
-
                 row = cur.fetchone()
-
             finally:
                 conn.close()
-
         else:
             conn = sqlite3.connect(_get_db_path())
             cur = conn.cursor()
-
             try:
                 cur.execute(
                     """
@@ -1011,17 +1011,13 @@ def resolve_agent_identity(api_key: str) -> Optional[dict]:
                     """,
                     (key_hash,),
                 )
-
                 row = cur.fetchone()
-
             finally:
                 conn.close()
 
         if not row:
             return None
 
-        # The embedded key components are intentionally not trusted.
-        # The database record is authoritative.
         return {
             "agent_id": row[0],
             "org_id": row[1],
@@ -1048,13 +1044,11 @@ def _hash_key(key: str) -> str:
 # DATABASE ROW UTILITIES
 # ═══════════════════════════════════════════════════════════════
 
-
 def dict_from_row(row, cursor=None) -> dict:
     """Convert a database row to a dict.
 
     Works for both SQLite and PostgreSQL rows.
     """
-
     if row is None:
         return None
 
@@ -1089,7 +1083,6 @@ def dict_from_row(row, cursor=None) -> dict:
 # POSTGRES / PSYCOPG COMPATIBILITY
 # ═══════════════════════════════════════════════════════════════
 
-
 try:
     import psycopg2
 except ImportError:
@@ -1119,4 +1112,7 @@ __all__ = [
     "dict_from_row",
     "redact_pii",
     "psycopg2",
+    "sql_true",
+    "sql_false",
+    "sql_placeholder",
 ]
