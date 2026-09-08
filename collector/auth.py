@@ -29,6 +29,7 @@ from collector.db import (
     get_sqlite_conn,
     is_postgres,
     resolve_agent_identity,
+    sql_placeholder,
 )
 
 logger = structlog.get_logger("agentguard.auth")
@@ -52,6 +53,7 @@ MAGIC_LINK_ENABLED = (
     os.environ.get("AGENTGUARD_MAGIC_LINK_ENABLED", "true").lower()
     in {"1", "true", "yes", "on"}
 )
+
 
 def _env_first(*names: str, default: str = "") -> str:
     """Lit la première variable d'env définie parmi plusieurs alias.
@@ -265,12 +267,14 @@ def _user_by_email(email: str):
     if not email:
         return None
 
+    p = sql_placeholder()
+
     if is_postgres():
         conn = get_pg_conn()
         try:
             cur = conn.cursor()
             cur.execute(
-                """
+                f"""
                 SELECT
                     user_id,
                     org_id,
@@ -280,7 +284,7 @@ def _user_by_email(email: str):
                     role,
                     active
                 FROM users
-                WHERE LOWER(email) = %s
+                WHERE LOWER(email) = {p}
                 LIMIT 1
                 """,
                 (email,),
@@ -317,12 +321,14 @@ def _user_by_id(user_id: str):
     if not user_id:
         return None
 
+    p = sql_placeholder()
+
     if is_postgres():
         conn = get_pg_conn()
         try:
             cur = conn.cursor()
             cur.execute(
-                """
+                f"""
                 SELECT
                     user_id,
                     org_id,
@@ -332,7 +338,7 @@ def _user_by_id(user_id: str):
                     role,
                     active
                 FROM users
-                WHERE user_id = %s
+                WHERE user_id = {p}
                 LIMIT 1
                 """,
                 (user_id,),
@@ -464,15 +470,17 @@ def _ensure_magic_link_table():
 
 
 def _invalidate_existing_magic_links(user_id: str):
+    p = sql_placeholder()
+
     if is_postgres():
         conn = get_pg_conn()
         try:
             cur = conn.cursor()
             cur.execute(
-                """
+                f"""
                 UPDATE magic_link_tokens
                 SET used_at = CURRENT_TIMESTAMP
-                WHERE user_id = %s
+                WHERE user_id = {p}
                   AND used_at IS NULL
                 """,
                 (user_id,),
@@ -505,17 +513,19 @@ def _store_magic_link(
     token_hash: str,
     expires_at: datetime,
 ):
+    p = sql_placeholder()
+
     if is_postgres():
         conn = get_pg_conn()
         try:
             cur = conn.cursor()
 
             cur.execute(
-                """
+                f"""
                 INSERT INTO magic_link_tokens
                     (token_hash, user_id, expires_at)
                 VALUES
-                    (%s, %s, %s)
+                    ({p}, {p}, {p})
                 """,
                 (
                     token_hash,
@@ -564,6 +574,7 @@ def _consume_magic_link(token: str):
 
     token_hash = _hash_magic_token(token)
     now = _utcnow()
+    p = sql_placeholder()
 
     if is_postgres():
         conn = get_pg_conn()
@@ -572,14 +583,14 @@ def _consume_magic_link(token: str):
             cur = conn.cursor()
 
             cur.execute(
-                """
+                f"""
                 SELECT
                     token_hash,
                     user_id,
                     expires_at,
                     used_at
                 FROM magic_link_tokens
-                WHERE token_hash = %s
+                WHERE token_hash = {p}
                 FOR UPDATE
                 """,
                 (token_hash,),
@@ -609,10 +620,10 @@ def _consume_magic_link(token: str):
                 return None
 
             cur.execute(
-                """
+                f"""
                 UPDATE magic_link_tokens
                 SET used_at = CURRENT_TIMESTAMP
-                WHERE token_hash = %s
+                WHERE token_hash = {p}
                   AND used_at IS NULL
                 """,
                 (token_hash,),
@@ -623,7 +634,7 @@ def _consume_magic_link(token: str):
                 return None
 
             cur.execute(
-                """
+                f"""
                 SELECT
                     user_id,
                     org_id,
@@ -633,7 +644,7 @@ def _consume_magic_link(token: str):
                     role,
                     active
                 FROM users
-                WHERE user_id = %s
+                WHERE user_id = {p}
                 LIMIT 1
                 """,
                 (user_id,),
@@ -1005,6 +1016,7 @@ def _lookup_org_by_key(key: str):
         return None
 
     key_hash = hash_key(key)
+    p = sql_placeholder()
 
     if is_postgres():
         conn = get_pg_conn()
@@ -1012,10 +1024,10 @@ def _lookup_org_by_key(key: str):
         try:
             cur = conn.cursor()
             cur.execute(
-                """
+                f"""
                 SELECT org_id
                 FROM api_keys
-                WHERE key_hash = %s
+                WHERE key_hash = {p}
                   AND active = TRUE
                 LIMIT 1
                 """,
@@ -1140,76 +1152,49 @@ def _session_org_id(token: str):
         return None
 
     try:
-        payload = current_app.auth_serializer.loads(
-            token,
-            max_age=current_app.config.get(
-                "AUTH_SESSION_TTL",
-                3600,
-            ),
-        )
+        # ✅ FIX: use current_app.auth_session_ttl
+        ttl = getattr(current_app, "auth_session_ttl", 3600)
+        payload = current_app.auth_serializer.loads(token, max_age=ttl)
+    except Exception:
+        return None
 
-        if payload.get("type") not in {
-            None,
-            "api_key",
-        }:
-            return None
+    if payload.get("type") not in {
+        None,
+        "api_key",
+    }:
+        return None
 
-        org_id = payload.get("org_id")
-        key_hash = payload.get("key_hash")
+    org_id = payload.get("org_id")
+    key_hash = payload.get("key_hash")
 
-        if not org_id or not key_hash:
-            return None
+    if not org_id or not key_hash:
+        return None
 
-        if org_id == "default":
-            api_key = current_app.config.get("API_KEY")
+    if org_id == "default":
+        api_key = current_app.config.get("API_KEY")
 
-            if api_key and safe_compare(
-                key_hash,
-                hash_key(api_key),
-            ):
-                return "default"
+        if api_key and safe_compare(
+            key_hash,
+            hash_key(api_key),
+        ):
+            return "default"
 
-            return None
+        return None
 
-        if is_postgres():
-            conn = get_pg_conn()
+    p = sql_placeholder()
 
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT 1
-                    FROM api_keys
-                    WHERE org_id = %s
-                      AND key_hash = %s
-                      AND active = TRUE
-                    LIMIT 1
-                    """,
-                    (
-                        org_id,
-                        key_hash,
-                    ),
-                )
-
-                return (
-                    org_id
-                    if cur.fetchone()
-                    else None
-                )
-            finally:
-                conn.close()
-
-        conn = sqlite3.connect(_get_db_path())
+    if is_postgres():
+        conn = get_pg_conn()
 
         try:
             cur = conn.cursor()
             cur.execute(
-                """
+                f"""
                 SELECT 1
                 FROM api_keys
-                WHERE org_id = ?
-                  AND key_hash = ?
-                  AND active = 1
+                WHERE org_id = {p}
+                  AND key_hash = {p}
+                  AND active = TRUE
                 LIMIT 1
                 """,
                 (
@@ -1226,11 +1211,33 @@ def _session_org_id(token: str):
         finally:
             conn.close()
 
-    except Exception:
-        return None
+    conn = sqlite3.connect(_get_db_path())
 
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT 1
+            FROM api_keys
+            WHERE org_id = ?
+              AND key_hash = ?
+              AND active = 1
+            LIMIT 1
+            """,
+            (
+                org_id,
+                key_hash,
+            ),
+        )
 
-# ═══════════════════════════════════════════════════════════════
+        return (
+            org_id
+            if cur.fetchone()
+            else None
+        )
+    finally:
+        conn.close()
+  # ═══════════════════════════════════════════════════════════════
 # IDENTITY RESOLUTION
 # ═══════════════════════════════════════════════════════════════
 
@@ -3174,6 +3181,7 @@ def login():
             success=None,
         ), 500
 
+
 # ═══════════════════════════════════════════════════════════════
 # SIGN UP PAGE
 # ═══════════════════════════════════════════════════════════════
@@ -3398,57 +3406,59 @@ def signup():
     email = _normalize_email(request.form.get("email", ""))
     display_name = request.form.get("name", "").strip()
     company_name = request.form.get("company", "").strip()
-    
+
     if not _valid_email(email):
         return render_template_string(SIGNUP_HTML, error="Enter a valid work email address.", success=None), 400
-    
+
     if not display_name:
         return render_template_string(SIGNUP_HTML, error="Full name is required.", success=None), 400
 
     try:
         _ensure_magic_link_table()
-        
+
         # 1. Vérifier si l'utilisateur existe déjà
         existing_user = _user_by_email(email)
         if existing_user:
             return render_template_string(
-                SIGNUP_HTML, 
-                error="An account with this email already exists. Please log in.", 
+                SIGNUP_HTML,
+                error="An account with this email already exists. Please log in.",
                 success=None
             ), 400
 
         # 2. Générer les identifiants uniques pour la chaîne Tenant -> Org -> User
         user_id = str(uuid.uuid4())
         org_id = str(uuid.uuid4())
-        tenant_id = str(uuid.uuid4()) # On crée un nouveau tenant dédié pour cet inscrit
-        
+        tenant_id = str(uuid.uuid4())
+
         tenant_name = company_name or f"{display_name}'s Workspace"
         org_name = company_name or "Default Organization"
+
+        p = sql_placeholder()
 
         # 3. Insérer dans l'ordre des contraintes de clé étrangère (Foreign Keys)
         if is_postgres():
             conn = get_pg_conn()
             try:
                 cur = conn.cursor()
-                
+
                 # Étape A : Créer le Tenant
-                cur.execute("""
+                cur.execute(f"""
                     INSERT INTO tenants (tenant_id, name, created_at)
-                    VALUES (%s, %s, CURRENT_TIMESTAMP)
+                    VALUES ({p}, {p}, CURRENT_TIMESTAMP)
                 """, (tenant_id, tenant_name))
-                
+
                 # Étape B : Créer l'Organisation liée à ce Tenant
-                cur.execute("""
+                cur.execute(f"""
                     INSERT INTO orgs (org_id, tenant_id, name, created_at)
-                    VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                    VALUES ({p}, {p}, {p}, CURRENT_TIMESTAMP)
                 """, (org_id, tenant_id, org_name))
-                
+
                 # Étape C : Créer l'Utilisateur lié à ce Tenant et cette Organisation
-                cur.execute("""
+                cur.execute(f"""
                     INSERT INTO users (user_id, org_id, tenant_id, email, display_name, role, active, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, CURRENT_TIMESTAMP)
                 """, (user_id, org_id, tenant_id, email, display_name, "admin", True))
-                
+
                 conn.commit()
             finally:
                 conn.close()
@@ -3461,12 +3471,12 @@ def signup():
                     INSERT INTO tenants (tenant_id, name, created_at)
                     VALUES (?, ?, CURRENT_TIMESTAMP)
                 """, (tenant_id, tenant_name))
-                
+
                 cur.execute("""
                     INSERT INTO orgs (org_id, tenant_id, name, created_at)
                     VALUES (?, ?, ?, CURRENT_TIMESTAMP)
                 """, (org_id, tenant_id, org_name))
-                
+
                 cur.execute("""
                     INSERT INTO users (user_id, org_id, tenant_id, email, display_name, role, active, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -3485,8 +3495,8 @@ def signup():
         _send_magic_link_email(email, link)
 
         logger.info(
-            "user_registered_and_magic_link_sent", 
-            user_id=user_id, 
+            "user_registered_and_magic_link_sent",
+            user_id=user_id,
             email=email,
             ip=request.remote_addr,
         )
@@ -3500,10 +3510,11 @@ def signup():
     except Exception as exc:
         logger.error("signup_failed", error=str(exc), email=email)
         return render_template_string(
-            SIGNUP_HTML, 
-            error="Unable to create account. Please try again.", 
+            SIGNUP_HTML,
+            error="Unable to create account. Please try again.",
             success=None
         ), 500
+
 
 # ═══════════════════════════════════════════════════════════════
 # MAGIC LINK VERIFY
@@ -3773,10 +3784,7 @@ def auth_login():
             )
         ),
         samesite="Lax",
-        max_age=current_app.config.get(
-            "AUTH_SESSION_TTL",
-            3600,
-        ),
+        max_age=getattr(current_app, "auth_session_ttl", 3600),
         path="/",
     )
 
@@ -3925,3 +3933,4 @@ def dashboard():
             DASHBOARD_HTML
         )
     )
+  
