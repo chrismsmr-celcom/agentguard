@@ -1802,62 +1802,311 @@ SUPABASE_LOGIN_HTML = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cerbere — Secure Access</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        * { margin:0; padding:0; box-sizing:border-box; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --ink: #0b0b0c;
+            --panel: #131315;
+            --line: rgba(255,255,255,0.09);
+            --paper: #f3f1ec;
+            --paper-dim: #b9b6ad;
+            --ember: #d1502f;
+            --ember-soft: rgba(209,80,47,0.14);
+        }
+
         body {
-            font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-            background:#09090b; color:#fafafa; min-height:100vh;
-            display:flex; align-items:center; justify-content:center;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--ink);
+            color: var(--paper);
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
         }
-        .card { width:100%; max-width:400px; padding:2rem; }
-        h1 { font-size:24px; margin-bottom:.5rem; }
-        p.sub { color:#a1a1aa; font-size:14px; margin-bottom:2rem; }
-        input {
-            width:100%; padding:12px 14px; margin-bottom:12px;
-            background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08);
-            border-radius:8px; color:#fafafa; font-size:14px; outline:none;
+
+        .shell {
+            display: grid;
+            grid-template-columns: minmax(360px, 460px) 1fr;
+            min-height: 100vh;
         }
-        button {
-            width:100%; padding:12px; border:none; border-radius:8px;
-            font-size:14px; font-weight:600; cursor:pointer; margin-bottom:10px;
+
+        .pane-form {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 4vw 4.5vw;
+            border-right: 1px solid var(--line);
         }
-        .btn-primary { background:#fafafa; color:#09090b; }
-        .btn-oauth {
-            background:transparent; color:#fafafa;
-            border:1px solid rgba(255,255,255,.08);
-            display:flex; align-items:center; justify-content:center; gap:8px;
+
+        .mark {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 3.2rem;
         }
-        .divider {
-            text-align:center; color:#71717a; font-size:12px;
-            margin:20px 0; text-transform:uppercase; letter-spacing:.05em;
+
+        .mark img { width: 30px; height: 30px; border-radius: 6px; }
+
+        .mark span {
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.16em;
+            color: var(--paper);
         }
+
+        h1 {
+            font-family: 'Fraunces', Georgia, serif;
+            font-weight: 600;
+            font-size: 30px;
+            line-height: 1.15;
+            letter-spacing: -0.01em;
+            margin-bottom: 0.6rem;
+        }
+
+        .lede {
+            color: var(--paper-dim);
+            font-size: 14.5px;
+            line-height: 1.55;
+            margin-bottom: 2.2rem;
+            max-width: 34ch;
+        }
+
+        #alert-box:empty { display: none; }
+
         .alert {
-            padding:12px 14px; border-radius:8px; font-size:13px;
-            margin-bottom:16px; line-height:1.5;
+            padding: 11px 13px;
+            border-radius: 6px;
+            font-size: 13px;
+            line-height: 1.5;
+            margin-bottom: 1.3rem;
         }
-        .alert-error { background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.2); color:#f87171; }
-        .alert-success { background:rgba(16,185,129,.1); border:1px solid rgba(16,185,129,.2); color:#34d399; }
+        .alert-error   { background: rgba(209,80,47,0.12); border: 1px solid rgba(209,80,47,0.35); color: #f0917a; }
+        .alert-success { background: rgba(120,170,140,0.1); border: 1px solid rgba(120,170,140,0.3); color: #9bcbae; }
+
+        label {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--paper-dim);
+            margin-bottom: 7px;
+        }
+
+        input[type="email"] {
+            width: 100%;
+            padding: 12px 14px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--line);
+            border-radius: 7px;
+            color: var(--paper);
+            font-size: 14px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color .15s ease;
+        }
+        input[type="email"]:focus { border-color: rgba(209,80,47,0.5); }
+        input[type="email"]::placeholder { color: #6b6a66; }
+
+        .btn {
+            width: 100%;
+            padding: 12px;
+            border-radius: 7px;
+            font-size: 14px;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            border: none;
+            transition: filter .15s ease, background .15s ease;
+        }
+        .btn:disabled { opacity: 0.55; cursor: default; }
+
+        .btn-send {
+            background: var(--paper);
+            color: var(--ink);
+            margin-top: 14px;
+        }
+        .btn-send:hover:not(:disabled) { filter: brightness(0.92); }
+
+        .rule {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin: 1.7rem 0;
+            color: #6b6a66;
+            font-size: 11.5px;
+            letter-spacing: 0.04em;
+        }
+        .rule::before, .rule::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+
+        .oauth-row { display: flex; flex-direction: column; gap: 10px; }
+
+        .btn-oauth {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            background: transparent;
+            color: var(--paper);
+            border: 1px solid var(--line);
+        }
+        .btn-oauth:hover { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.18); }
+        .btn-oauth svg { width: 17px; height: 17px; flex-shrink: 0; }
+
+        .signup-note {
+            margin-top: 2rem;
+            padding-top: 1.4rem;
+            border-top: 1px solid var(--line);
+            font-size: 13px;
+            color: var(--paper-dim);
+            line-height: 1.6;
+        }
+        .signup-note strong { color: var(--paper); font-weight: 600; }
+
+        .pane-visual {
+            position: relative;
+            overflow: hidden;
+            background:
+                radial-gradient(ellipse 620px 420px at 78% 8%, var(--ember-soft), transparent 60%),
+                var(--panel);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .visual-copy {
+            padding: 4.4vw 4.4vw 0;
+            max-width: 640px;
+        }
+
+        .visual-eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--paper-dim);
+            margin-bottom: 1.4rem;
+        }
+        .visual-eyebrow img { width: 22px; height: 22px; border-radius: 5px; }
+
+        .visual-copy h2 {
+            font-family: 'Fraunces', Georgia, serif;
+            font-weight: 500;
+            font-size: clamp(30px, 3.1vw, 44px);
+            line-height: 1.16;
+            letter-spacing: -0.01em;
+            color: var(--paper);
+            max-width: 15ch;
+        }
+
+        .visual-copy h2 em {
+            font-style: normal;
+            color: var(--ember);
+        }
+
+        .preview-frame {
+            position: relative;
+            flex: 1;
+            margin-top: 3vw;
+            min-height: 0;
+        }
+
+        .preview-frame::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 140px;
+            background: linear-gradient(to bottom, var(--panel), transparent);
+            z-index: 2;
+        }
+
+        .preview-frame::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            box-shadow: inset 0 0 0 1px var(--line);
+            pointer-events: none;
+            z-index: 3;
+        }
+
+        .preview-frame img {
+            position: absolute;
+            top: 8%;
+            left: 6%;
+            width: 108%;
+            border-radius: 10px 0 0 0;
+            box-shadow: -18px -18px 60px rgba(0,0,0,0.45);
+            display: block;
+        }
+
+        @media (max-width: 980px) {
+            .shell { grid-template-columns: 1fr; }
+            .pane-visual { display: none; }
+            .pane-form { border-right: none; padding: 8vw 7vw; }
+        }
     </style>
 </head>
 <body>
-    <div class="card">
-        <h1>Welcome back</h1>
-        <p class="sub">Secure access to your AI runtime security console.</p>
-        <div id="alert-box"></div>
+    <div class="shell">
+        <section class="pane-form">
+            <div class="mark">
+                <img src="/static/logo.svg" alt="Cerbere">
+                <span>CERBERE</span>
+            </div>
 
-        <form id="otp-form">
-            <input type="email" id="email" placeholder="name@company.com" required autocomplete="email">
-            <button type="submit" class="btn-primary" id="otp-btn">Send Magic Link</button>
-        </form>
+            <h1>Welcome back</h1>
+            <p class="lede">Sign in to your runtime security console.</p>
 
-        <div class="divider">Or continue with</div>
+            <div id="alert-box"></div>
 
-        <button class="btn-oauth" id="btn-google">Continue with Google</button>
-        <button class="btn-oauth" id="btn-github">Continue with GitHub</button>
+            <form id="otp-form">
+                <label for="email">Work email</label>
+                <input type="email" id="email" placeholder="you@company.com" required autocomplete="email">
+                <button type="submit" class="btn btn-send" id="otp-btn">Send magic link</button>
+            </form>
+
+            <div class="rule">or continue with</div>
+
+            <div class="oauth-row">
+                <button class="btn btn-oauth" id="btn-google">
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                    </svg>
+                    Continue with Google
+                </button>
+                <button class="btn btn-oauth" id="btn-github">
+                    <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+                    </svg>
+                    Continue with GitHub
+                </button>
+            </div>
+
+            <p class="signup-note">
+                <strong>Not registered yet?</strong> There's no separate sign-up —
+                enter your email or use Google / GitHub above and Cerbere sets up
+                your workspace automatically.
+            </p>
+        </section>
+
+        <section class="pane-visual">
+            <div class="visual-copy">
+                <div class="visual-eyebrow">
+                    <img src="/static/logo.svg" alt="">
+                    Runtime security for AI agents
+                </div>
+                <h2>The Three-Headed <em>Guardian</em> of AI Agents</h2>
+            </div>
+            <div class="preview-frame">
+                <img src="/static/dashboard-preview-crop.png" alt="Cerbere dashboard preview">
+            </div>
+        </section>
     </div>
 
-       <script>
+    <script>
         const supabaseClient = window.supabase.createClient(
             "{{ supabase_url }}",
             "{{ supabase_anon_key }}"
@@ -1868,7 +2117,6 @@ SUPABASE_LOGIN_HTML = """
             if (box) box.innerHTML = `<div class="alert alert-${kind}">${msg}</div>`;
         }
 
-        // 1. Gérer l'envoi du Magic Link
         const otpForm = document.getElementById("otp-form");
         if (otpForm) {
             otpForm.addEventListener("submit", async (e) => {
@@ -1884,7 +2132,7 @@ SUPABASE_LOGIN_HTML = """
                 });
 
                 btn.disabled = false;
-                btn.textContent = "Send Magic Link";
+                btn.textContent = "Send magic link";
 
                 if (error) {
                     showAlert(error.message, "error");
@@ -1894,7 +2142,6 @@ SUPABASE_LOGIN_HTML = """
             });
         }
 
-        // 2. Gérer les boutons OAuth
         const btnGoogle = document.getElementById("btn-google");
         if (btnGoogle) {
             btnGoogle.addEventListener("click", () => {
@@ -1915,12 +2162,9 @@ SUPABASE_LOGIN_HTML = """
             });
         }
 
-        // 3. Gérer le retour du Magic Link (Le point crucial !)
         async function handleMagicLinkReturn() {
-            // On attend 150ms que Supabase parse l'URL (#access_token=...)
             await new Promise(resolve => setTimeout(resolve, 150));
-
-            const { data: { session }, error } = await supabaseClient.auth.getSession();
+            const { data: { session } } = await supabaseClient.auth.getSession();
 
             if (session && session.access_token) {
                 showAlert("Signing you in...", "success");
@@ -1934,12 +2178,10 @@ SUPABASE_LOGIN_HTML = """
                     });
 
                     if (resp.ok) {
-                        // Succès : on redirige vers le dashboard
                         window.location.href = "/";
                     } else {
                         const body = await resp.json().catch(() => ({}));
                         showAlert(body.error || "Sign-in failed.", "error");
-                        // Nettoyer l'URL pour enlever le token visible
                         window.history.replaceState({}, document.title, "/login");
                     }
                 } catch (err) {
@@ -1949,10 +2191,8 @@ SUPABASE_LOGIN_HTML = """
             }
         }
 
-        // Exécuter la vérification au chargement de la page
         handleMagicLinkReturn();
 
-        // Écouter les changements d'état (au cas où le parsing est asynchrone)
         supabaseClient.auth.onAuthStateChange((event, session) => {
             if (event === 'SIGNED_IN' && session) {
                 handleMagicLinkReturn();
