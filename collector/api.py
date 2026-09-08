@@ -1,13 +1,20 @@
-"""
-API endpoints : spans, traces, metrics, queries, signed decisions.
-"""
+"""API endpoints : spans, traces, metrics, queries, signed decisions."""
+
 import json
 import secrets
 import structlog
 from flask import Blueprint, request, jsonify, g, current_app, send_from_directory
 from collector.db import (
-    get_db, get_sqlite_conn, dict_from_row, is_postgres, 
-    redact_pii, psycopg2, _get_db_path
+    get_db,
+    get_sqlite_conn,
+    dict_from_row,
+    is_postgres,
+    redact_pii,
+    psycopg2,
+    _get_db_path,
+    sql_true,
+    sql_false,
+    sql_placeholder,
 )
 import sqlite3
 import os
@@ -19,10 +26,11 @@ api_bp = Blueprint("api", __name__)
 # ═══════════════════════════════════════════════════════════════
 # STATIC ASSETS (logo, favicon)
 # ═══════════════════════════════════════════════════════════════
+
 @api_bp.route("/logo.svg")
 def serve_logo():
     """Serve AgentGuard logo SVG.
-    
+
     Fixes dashboard 404 error on logo.svg resource.
     """
     static_path = os.path.join(os.path.dirname(__file__), "static")
@@ -58,7 +66,7 @@ def serve_favicon():
 def receive_span():
     """Ingestion de span (LLM call ou tool call)."""
     span_rate_limit = current_app.config["SPAN_RATE_LIMIT"]
-    
+
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "Body must be a JSON object"}), 400
@@ -136,17 +144,19 @@ def receive_span():
     model = data.get("input_data", {}).get("model") if isinstance(data.get("input_data"), dict) else None
 
     # DB insert — ✅ utilisation de _get_db_path() dynamique
+    p = sql_placeholder()
+
     if is_postgres():
         conn = get_db()
         cur = conn.cursor()
         try:
-            cur.execute("""
+            cur.execute(f"""
                 INSERT INTO spans (
                     trace_id, span_id, span_type, timestamp, latency_ms,
                     input_data, output_data, security_checks, blocked,
                     block_reason, cost_usd, input_tokens, output_tokens,
                     detection_layer, ml_score, llm_score, llm_reason, org_id, model
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})
             """, (
                 data["trace_id"], data["span_id"], data["span_type"],
                 data["timestamp"], data["latency_ms"],
@@ -161,17 +171,16 @@ def receive_span():
         finally:
             conn.close()
     else:
-        # ✅ DYNAMIC PATH LOOKUP (fix pour tests avec DB temporaire)
         conn = sqlite3.connect(_get_db_path())
         cur = conn.cursor()
         try:
-            cur.execute("""
+            cur.execute(f"""
                 INSERT INTO spans (
                     trace_id, span_id, span_type, timestamp, latency_ms,
                     input_data, output_data, security_checks, blocked,
                     block_reason, cost_usd, input_tokens, output_tokens,
                     detection_layer, ml_score, llm_score, llm_reason, org_id, model
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})
             """, (
                 data["trace_id"], data["span_id"], data["span_type"],
                 data["timestamp"], data["latency_ms"],
@@ -253,8 +262,10 @@ def receive_span():
 # ═══════════════════════════════════════════════════════════════
 # TRACES QUERIES
 # ═══════════════════════════════════════════════════════════════
+
 @api_bp.route("/api/traces")
 def list_traces():
+    p = sql_placeholder()
     if is_postgres():
         conn = get_db()
         cur = conn.cursor()
@@ -265,7 +276,7 @@ def list_traces():
                    SUM(cost_usd) as total_cost,
                    MAX(created_at) as last_seen,
                    {concat_fn} as detection_layers
-            FROM spans WHERE org_id = %s
+            FROM spans WHERE org_id = {p}
             GROUP BY trace_id
             ORDER BY last_seen DESC LIMIT 100
         """, (g.org_id,))
@@ -294,10 +305,11 @@ def list_traces():
 
 @api_bp.route("/api/traces/<trace_id>")
 def get_trace(trace_id):
+    p = sql_placeholder()
     if is_postgres():
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT * FROM spans WHERE trace_id = %s AND org_id = %s ORDER BY timestamp", (trace_id, g.org_id))
+        cur.execute(f"SELECT * FROM spans WHERE trace_id = {p} AND org_id = {p} ORDER BY timestamp", (trace_id, g.org_id))
         rows = [dict_from_row(r, cur) for r in cur.fetchall()]
         conn.close()
     else:
@@ -308,7 +320,7 @@ def get_trace(trace_id):
             rows = [dict_from_row(r, cur) for r in cur.fetchall()]
         finally:
             conn.close()
-    
+
     for r in rows:
         r["input_data"] = json.loads(r["input_data"] or "{}")
         r["output_data"] = json.loads(r["output_data"] or "{}")
@@ -320,10 +332,11 @@ def get_trace(trace_id):
 # ═══════════════════════════════════════════════════════════════
 # METRICS — ✅ ROBUST VERSION (fixes 500 errors)
 # ═══════════════════════════════════════════════════════════════
+
 @api_bp.route("/api/metrics")
 def get_metrics():
     """Metrics endpoint — robust with comprehensive error handling.
-    
+
     Fixes dashboard 500 error by:
     1. Guarding against missing g.org_id
     2. try/except around each DB query
@@ -345,48 +358,48 @@ def get_metrics():
         "detection_layers": {},
         "version": "v6.0.0",
     }
-    
+
     # ✅ Guard: ensure g.org_id is set
     org_id = getattr(g, "org_id", None)
     if not org_id:
         logger.warning("metrics_no_org_id", endpoint=request.endpoint)
         empty_metrics["error"] = "no_org_id"
         return jsonify(empty_metrics), 200
-    
+
+    p = sql_placeholder()
+
     try:
         if is_postgres():
             conn = get_db()
-            p = "%s"
         else:
             conn = sqlite3.connect(_get_db_path())
-            p = "?"
-        
+
         cur = conn.cursor()
         try:
             # Total spans
             cur.execute(f"SELECT COUNT(*) FROM spans WHERE org_id = {p}", (org_id,))
             total_spans = cur.fetchone()[0] or 0
-            
+
             # Total traces
             cur.execute(f"SELECT COUNT(DISTINCT trace_id) FROM spans WHERE org_id = {p}", (org_id,))
             total_traces = cur.fetchone()[0] or 0
-            
+
             # Blocked
             cur.execute(f"SELECT SUM(CASE WHEN blocked THEN 1 ELSE 0 END) FROM spans WHERE org_id = {p}", (org_id,))
             blocked = cur.fetchone()[0] or 0
-            
+
             # Total cost
             cur.execute(f"SELECT SUM(cost_usd) FROM spans WHERE org_id = {p}", (org_id,))
             total_cost = cur.fetchone()[0] or 0
-            
+
             # Total tokens
             cur.execute(f"SELECT COALESCE(SUM(input_tokens + output_tokens), 0) FROM spans WHERE org_id = {p}", (org_id,))
             total_tokens = cur.fetchone()[0] or 0
-            
+
             # Avg latency
             cur.execute(f"SELECT AVG(latency_ms) FROM spans WHERE latency_ms > 0 AND org_id = {p}", (org_id,))
             avg_latency = cur.fetchone()[0] or 0
-            
+
             # Detection layers
             try:
                 if is_postgres():
@@ -405,7 +418,7 @@ def get_metrics():
             except Exception as e:
                 logger.warning("metrics_detection_query_failed", error=str(e))
                 detection_stats = {}
-            
+
             # ML scores
             try:
                 cur.execute(f"SELECT AVG(ml_score) FROM spans WHERE ml_score IS NOT NULL AND org_id = {p}", (org_id,))
@@ -419,7 +432,7 @@ def get_metrics():
                 avg_ml_score = 0
                 avg_llm_score = 0
                 llm_count = 0
-            
+
             # Risk distribution
             risk_counts = {"low": 0, "medium": 0, "high": 0, "critical": 0}
             try:
@@ -449,22 +462,22 @@ def get_metrics():
                             pass
             except Exception as e:
                 logger.warning("metrics_risk_query_failed", error=str(e))
-            
+
             # Top threats
             try:
                 cur.execute(f"""
                     SELECT block_reason, COUNT(*) as count
-                    FROM spans WHERE blocked = 1 AND org_id = {p}
+                    FROM spans WHERE blocked = {sql_true()} AND org_id = {p}
                     GROUP BY block_reason ORDER BY count DESC LIMIT 5
                 """, (org_id,))
                 top_threats = [{"reason": r[0], "count": r[1]} for r in cur.fetchall()]
             except Exception as e:
                 logger.warning("metrics_threats_query_failed", error=str(e))
                 top_threats = []
-        
+
         finally:
             conn.close()
-        
+
         return jsonify({
             "total_spans": total_spans,
             "total_traces": total_traces,
@@ -480,7 +493,7 @@ def get_metrics():
             "detection_layers": detection_stats,
             "version": "v6.0.0",
         })
-    
+
     except Exception as e:
         logger.error("metrics_endpoint_failed", error=str(e), org_id=org_id)
         # Return empty metrics instead of 500 — dashboard stays functional
@@ -491,29 +504,35 @@ def get_metrics():
 # ═══════════════════════════════════════════════════════════════
 # DETECTION STATS
 # ═══════════════════════════════════════════════════════════════
+
 @api_bp.route("/api/detection/stats")
 def get_detection_stats():
+    org_id = getattr(g, "org_id", None)
+    if not org_id:
+        logger.warning("detection_stats_no_org_id")
+        return jsonify({"error": "no_org_id"}), 401
+
+    p = sql_placeholder()
+
     if is_postgres():
         conn = get_db()
-        p = "%s"
     else:
         conn = sqlite3.connect(_get_db_path())
-        p = "?"
-    
+
     cur = conn.cursor()
     try:
         cur.execute(f"""
             SELECT detection_layer, COUNT(*) as count
             FROM spans WHERE detection_layer IS NOT NULL AND org_id = {p}
             GROUP BY detection_layer ORDER BY count DESC
-        """, (g.org_id,))
+        """, (org_id,))
         layer_distribution = [{"layer": r[0], "count": r[1]} for r in cur.fetchall()]
 
         cur.execute(f"""
             SELECT detection_layer, COUNT(*) as total, SUM(CASE WHEN blocked THEN 1 ELSE 0 END) as blocked
             FROM spans WHERE detection_layer IS NOT NULL AND org_id = {p}
             GROUP BY detection_layer
-        """, (g.org_id,))
+        """, (org_id,))
         layer_accuracy = [
             {"layer": r[0], "total": r[1], "blocked": r[2],
              "block_rate": round((r[2] / r[1] * 100) if r[1] > 0 else 0, 2)}
@@ -532,7 +551,7 @@ def get_detection_stats():
                 END as score_range, COUNT(*) as count
             FROM spans WHERE ml_score IS NOT NULL AND org_id = {p}
             GROUP BY score_range ORDER BY score_range DESC
-        """, (g.org_id,))
+        """, (org_id,))
         ml_score_distribution = [{"range": r[0], "count": r[1]} for r in cur.fetchall()]
 
         cur.execute(f"""
@@ -544,11 +563,12 @@ def get_detection_stats():
                 END as risk_category, COUNT(*) as count
             FROM spans WHERE llm_score IS NOT NULL AND org_id = {p}
             GROUP BY risk_category
-        """, (g.org_id,))
+        """, (org_id,))
         llm_score_distribution = [{"category": r[0], "count": r[1]} for r in cur.fetchall()]
+
     finally:
         conn.close()
-    
+
     return jsonify({
         "layer_distribution": layer_distribution,
         "layer_accuracy": layer_accuracy,
@@ -560,13 +580,12 @@ def get_detection_stats():
 
 @api_bp.route("/api/llm/stats")
 def get_llm_stats():
+    p = sql_placeholder()
     if is_postgres():
         conn = get_db()
-        p = "%s"
     else:
         conn = sqlite3.connect(_get_db_path())
-        p = "?"
-    
+
     cur = conn.cursor()
     try:
         cur.execute(f"SELECT COUNT(*) FROM spans WHERE detection_layer = 'llm_judge' AND org_id = {p}", (g.org_id,))
@@ -587,9 +606,10 @@ def get_llm_stats():
             GROUP BY llm_reason ORDER BY count DESC LIMIT 5
         """, (g.org_id,))
         top_reasons = [{"reason": r[0], "count": r[1]} for r in cur.fetchall()]
+
     finally:
         conn.close()
-    
+
     return jsonify({
         "total_analyzed": total_llm,
         "block_rate": block_rate,
@@ -601,17 +621,17 @@ def get_llm_stats():
 # ═══════════════════════════════════════════════════════════════
 # MODELS
 # ═══════════════════════════════════════════════════════════════
+
 @api_bp.route("/api/models")
 def api_models():
+    p = sql_placeholder()
     if is_postgres():
         conn = get_db()
-        p = "%s"
         cur = conn.cursor()
     else:
         conn = sqlite3.connect(_get_db_path())
-        p = "?"
         cur = conn.cursor()
-    
+
     try:
         cur.execute(f"""
             SELECT model, COUNT(*) as requests, AVG(latency_ms) as avg_latency,
@@ -646,6 +666,7 @@ def api_models():
 # ═══════════════════════════════════════════════════════════════
 # HEATMAP + BREAKDOWN
 # ═══════════════════════════════════════════════════════════════
+
 @api_bp.route("/api/heatmap")
 def api_heatmap():
     if is_postgres():
@@ -679,13 +700,12 @@ def api_heatmap():
 
 @api_bp.route("/api/checks/breakdown")
 def api_checks_breakdown():
+    p = sql_placeholder()
     if is_postgres():
         conn = get_db()
-        p = "%s"
     else:
         conn = sqlite3.connect(_get_db_path())
-        p = "?"
-    
+
     cur = conn.cursor()
     try:
         cur.execute(f"SELECT security_checks FROM spans WHERE org_id = {p} AND security_checks IS NOT NULL", (g.org_id,))
@@ -755,9 +775,9 @@ def api_checks_daily():
 
 @api_bp.route("/api/models/daily")
 def api_models_daily():
+    p = sql_placeholder()
     if is_postgres():
         conn = get_db()
-        p = "%s"
         cur = conn.cursor()
         cur.execute(f"""
             SELECT DATE(created_at) as day, model, COUNT(*) as n
@@ -769,12 +789,11 @@ def api_models_daily():
         conn.close()
     else:
         conn = sqlite3.connect(_get_db_path())
-        p = "?"
         cur = conn.cursor()
         try:
             cur.execute(f"""
                 SELECT DATE(created_at) as day, model, COUNT(*) as n
-                FROM spans WHERE org_id = {p} AND model IS NOT NULL AND model != ''
+                FROM spans WHERE org_id = ? AND model IS NOT NULL AND model != ''
                   AND created_at > datetime('now', '-14 days')
                 GROUP BY day, model ORDER BY day
             """, (g.org_id,))
@@ -787,18 +806,20 @@ def api_models_daily():
 # ═══════════════════════════════════════════════════════════════
 # COST / LATENCY / TRENDS
 # ═══════════════════════════════════════════════════════════════
+
 @api_bp.route("/api/spans/expensive")
 def api_expensive_spans():
+    p = sql_placeholder()
     if is_postgres():
         conn = get_db()
         cur = conn.cursor()
         try:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT trace_id, span_id, span_type, model, cost_usd,
                        COALESCE(input_data->>'prompt', input_data->>'tool', '') AS prompt,
                        COALESCE(output_data->>'response', '') AS response,
                        input_tokens, output_tokens
-                FROM spans WHERE org_id = %s AND cost_usd > 0
+                FROM spans WHERE org_id = {p} AND cost_usd > 0
                 ORDER BY cost_usd DESC LIMIT 10
             """, (g.org_id,))
             rows = [
@@ -814,7 +835,7 @@ def api_expensive_spans():
         conn = sqlite3.connect(_get_db_path())
         cur = conn.cursor()
         try:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT trace_id, span_id, span_type, model, cost_usd,
                        COALESCE(json_extract(input_data, '$.prompt'), json_extract(input_data, '$.tool'), '') AS prompt,
                        COALESCE(json_extract(output_data, '$.response'), '') AS response,
@@ -837,13 +858,14 @@ def api_expensive_spans():
 
 @api_bp.route("/api/cost/trend")
 def api_cost_trend():
+    p = sql_placeholder()
     if is_postgres():
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("""
+        cur.execute(f"""
             SELECT DATE(created_at) as day, SUM(cost_usd) as cost,
                    COALESCE(SUM(input_tokens + output_tokens), 0) as tokens
-            FROM spans WHERE org_id = %s AND created_at > NOW() - INTERVAL '14 days'
+            FROM spans WHERE org_id = {p} AND created_at > NOW() - INTERVAL '14 days'
             GROUP BY day ORDER BY day
         """, (g.org_id,))
         rows = [{"day": str(r[0]), "cost": round(float(r[1] or 0), 6), "tokens": int(r[2] or 0)} for r in cur.fetchall()]
@@ -852,7 +874,7 @@ def api_cost_trend():
         conn = sqlite3.connect(_get_db_path())
         cur = conn.cursor()
         try:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT DATE(created_at) as day, SUM(cost_usd) as cost,
                        COALESCE(SUM(input_tokens + output_tokens), 0) as tokens
                 FROM spans WHERE org_id = ? AND created_at > datetime('now', '-14 days')
@@ -866,13 +888,12 @@ def api_cost_trend():
 
 @api_bp.route("/api/latency/distribution")
 def api_latency_distribution():
+    p = sql_placeholder()
     if is_postgres():
         conn = get_db()
-        p = "%s"
     else:
         conn = sqlite3.connect(_get_db_path())
-        p = "?"
-    
+
     cur = conn.cursor()
     try:
         cur.execute(f"SELECT latency_ms FROM spans WHERE org_id = {p} AND latency_ms > 0 ORDER BY latency_ms", (g.org_id,))
@@ -897,13 +918,12 @@ def api_latency_distribution():
 
 @api_bp.route("/api/events/recent")
 def api_recent_events():
+    p = sql_placeholder()
     if is_postgres():
         conn = get_db()
-        p = "%s"
     else:
         conn = sqlite3.connect(_get_db_path())
-        p = "?"
-    
+
     cur = conn.cursor()
     try:
         cur.execute(f"""
@@ -932,13 +952,14 @@ def api_recent_events():
 
 @api_bp.route("/api/trend/daily")
 def api_trend_daily():
+    p = sql_placeholder()
     if is_postgres():
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("""
+        cur.execute(f"""
             SELECT DATE(created_at) as day, COUNT(*) as total,
                    SUM(CASE WHEN blocked THEN 1 ELSE 0 END) as blocked
-            FROM spans WHERE org_id = %s AND created_at > NOW() - INTERVAL '14 days'
+            FROM spans WHERE org_id = {p} AND created_at > NOW() - INTERVAL '14 days'
             GROUP BY day ORDER BY day
         """, (g.org_id,))
         rows = [{"day": str(r[0]), "total": r[1], "blocked": r[2] or 0} for r in cur.fetchall()]
@@ -947,7 +968,7 @@ def api_trend_daily():
         conn = sqlite3.connect(_get_db_path())
         cur = conn.cursor()
         try:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT DATE(created_at) as day, COUNT(*) as total,
                        SUM(CASE WHEN blocked THEN 1 ELSE 0 END) as blocked
                 FROM spans WHERE org_id = ? AND created_at > datetime('now', '-14 days')
@@ -962,16 +983,18 @@ def api_trend_daily():
 # ═══════════════════════════════════════════════════════════════
 # AUDIT TRAIL (legacy, pour dashboard)
 # ═══════════════════════════════════════════════════════════════
+
 @api_bp.route("/api/audit/trail")
 def api_audit_trail():
     """Audit trail : 50 derniers événements avec prompt."""
+    p = sql_placeholder()
     if is_postgres():
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("""
+        cur.execute(f"""
             SELECT created_at, trace_id, span_id, span_type, detection_layer, model, blocked,
                    COALESCE(input_data->>'prompt', input_data->>'tool', '') AS prompt
-            FROM spans WHERE org_id = %s ORDER BY created_at DESC LIMIT 50
+            FROM spans WHERE org_id = {p} ORDER BY created_at DESC LIMIT 50
         """, (g.org_id,))
         rows = [
             {"timestamp": str(r[0]), "trace_id": r[1], "span_id": r[2],
@@ -984,7 +1007,7 @@ def api_audit_trail():
         conn = sqlite3.connect(_get_db_path())
         cur = conn.cursor()
         try:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT created_at, trace_id, span_id, span_type, detection_layer, model, blocked,
                        COALESCE(json_extract(input_data, '$.prompt'), json_extract(input_data, '$.tool'), '') AS prompt
                 FROM spans WHERE org_id = ? ORDER BY created_at DESC LIMIT 50
@@ -1003,6 +1026,7 @@ def api_audit_trail():
 # ═══════════════════════════════════════════════════════════════
 # SIGNED DECISIONS (Ed25519) — Zero-trust authority
 # ═══════════════════════════════════════════════════════════════
+
 @api_bp.route("/api/public-key")
 def public_key():
     """Retourne la clé publique (NON protégé, distribuable)."""
