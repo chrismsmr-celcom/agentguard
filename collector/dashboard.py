@@ -156,7 +156,7 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
     <button type="button" onclick="openConnectAgentModal()">AI Agents</button>
   </nav>
   <div class="tb-right">
-    <button class="btn" onclick="toast('Connections gérées via /admin/customers')">+ Connection</button>
+   <button class="btn" onclick="openConnectModal()">+ Connection</button>
     <span class="help">?</span>
   </div>
 </header>
@@ -986,32 +986,121 @@ def guarded_research(query):
 
 function openConnectAgentModal() {
     var modal = $('connectAgentModal');
-    if (!modal) return;
+    if (!modal) {
+        toast('Connection modal unavailable');
+        return;
+    }
+
     modal.classList.add('open');
     document.body.style.overflow = 'hidden';
+
     showConnectChooser();
     renderObservedAgents();
+    renderIcons(modal);
 }
+var connectModal = $('connectAgentModal');
+
+if (connectModal) {
+    connectModal.addEventListener('click', function(e) {
+        if (e.target === connectModal) {
+            closeConnectAgentModal();
+        }
+    });
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        var modal = $('connectAgentModal');
+
+        if (modal && modal.classList.contains('open')) {
+            closeConnectAgentModal();
+        }
+    }
+});
+/*
+ * Alias utilisé par le bouton "+ Connection".
+ * Cela évite d'avoir deux systèmes différents pour la même action.
+ */
+function openConnectModal() {
+    openConnectAgentModal();
+}
+
 function closeConnectAgentModal() {
     var modal = $('connectAgentModal');
     if (!modal) return;
+
     modal.classList.remove('open');
     document.body.style.overflow = '';
 }
-function showConnectChooser() {
-    document.querySelectorAll('#connectAgentModal .connect-view').forEach(function(v){v.classList.remove('active');});
-    $('connectChooser').classList.add('active');
+
+/*
+ * Alias éventuel pour les boutons Close/X.
+ */
+function closeConnectModal() {
+    closeConnectAgentModal();
 }
+
+function showConnectChooser() {
+    document
+        .querySelectorAll('#connectAgentModal .connect-view')
+        .forEach(function(v) {
+            v.classList.remove('active');
+        });
+
+    var chooser = $('connectChooser');
+    if (chooser) {
+        chooser.classList.add('active');
+    }
+}
+
 function showConnectDetail(kind) {
     var cfg = CONNECT_INTEGRATIONS[kind];
     if (!cfg) return;
-    document.querySelectorAll('#connectAgentModal .connect-view').forEach(function(v){v.classList.remove('active');});
+
+    document
+        .querySelectorAll('#connectAgentModal .connect-view')
+        .forEach(function(v) {
+            v.classList.remove('active');
+        });
+
     var target = $(cfg.target);
-    target.innerHTML = '<button class="connect-back" type="button" onclick="showConnectChooser()"><span class="ui-icon" data-icon="back"></span> Back to integrations</button>' +
-        '<h3>' + esc(cfg.title) + '</h3><p>' + esc(cfg.description) + '</p>' +
-        '<div class="connect-code-wrap"><pre class="connect-code" id="connectCode-' + esc(kind) + '">' + esc(cfg.code) + '</pre><button class="connect-copy" type="button" onclick="copyConnectCode(\'' + esc(kind) + '\', this)">Copy</button></div>' +
-        '<div class="connect-note"><b>Next:</b> run the integration from your server, send one real event, then return to the dashboard. AgentGuard derives observed agents from telemetry and does not provision credentials from the browser.</div>';
+    if (!target) {
+        toast('Integration view unavailable');
+        return;
+    }
+
+    target.innerHTML =
+        '<button class="connect-back" type="button" onclick="showConnectChooser()">' +
+            '<span class="ui-icon" data-icon="back"></span>' +
+            ' Back to integrations' +
+        '</button>' +
+
+        '<h3>' + esc(cfg.title) + '</h3>' +
+        '<p>' + esc(cfg.description) + '</p>' +
+
+        '<div class="connect-code-wrap">' +
+            '<pre class="connect-code" id="connectCode-' +
+                esc(kind) +
+            '">' +
+                esc(cfg.code) +
+            '</pre>' +
+
+            '<button class="connect-copy" type="button" ' +
+                'onclick="copyConnectCode(\'' +
+                    esc(kind) +
+                    '\', this)">' +
+                'Copy' +
+            '</button>' +
+        '</div>' +
+
+        '<div class="connect-note">' +
+            '<b>Next:</b> run the integration from your server, send one real event, ' +
+            'then return to the dashboard. AgentGuard derives observed agents from ' +
+            'telemetry and does not provision credentials from the browser.' +
+        '</div>';
+
     target.classList.add('active');
+
     renderIcons(target);
 }
 function copyConnectCode(kind, button) {
@@ -1044,7 +1133,6 @@ function renderObservedAgents(){
     if(!agents.length){el.innerHTML='<div class="empty" style="padding:18px 8px">No agent telemetry observed yet.</div>';return;}
     el.innerHTML=agents.slice(0,10).map(function(agent){var status=observedAgentStatus(agent.timestamp);var when=agent.timestamp?String(agent.timestamp).replace('T',' ').slice(0,19):'recent telemetry';return '<div class="connect-agent-row"><span class="connect-agent-dot '+status.cls+'"></span><span class="connect-agent-name">'+esc(agent.id)+'</span><span class="connect-agent-status">'+esc(status.label)+' · '+esc(when)+'</span></div>';}).join('');
 }
-document.addEventListener('keydown',function(e){if(e.key==='Escape')closeConnectAgentModal();});
 
 function refreshAll() {
     Promise.all([
