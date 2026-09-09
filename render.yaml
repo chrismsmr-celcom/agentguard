@@ -4,7 +4,10 @@ services:
     runtime: python
     plan: free
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn --bind 0.0.0.0:$PORT wsgi:app"
+    # ✅ FIX perf : --threads 4 permet de traiter plusieurs requetes
+    # I/O-bound (attente reseau DB) en concurrence sans multiplier la
+    # RAM comme le ferait plusieurs --workers (important sur le plan free).
+    startCommand: "gunicorn --workers 1 --threads 4 --timeout 30 --bind 0.0.0.0:$PORT wsgi:app"
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
