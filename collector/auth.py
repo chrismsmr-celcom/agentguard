@@ -56,16 +56,7 @@ MAGIC_LINK_ENABLED = (
 
 
 def _env_first(*names: str, default: str = "") -> str:
-    """Lit la première variable d'env définie parmi plusieurs alias.
-
-    BUG CORRIGÉ : auth.py lisait SMTP_HOST/SMTP_PORT/SMTP_USERNAME/...
-    alors que env.example et render.yaml documentent AGENTGUARD_SMTP_HOST/
-    AGENTGUARD_SMTP_PORT/AGENTGUARD_SMTP_USER/AGENTGUARD_SMTP_PASS.
-    Résultat : même correctement configuré, le SMTP n'était JAMAIS
-    détecté -> aucun magic link n'était réellement envoyé par email.
-    On accepte maintenant les deux formes, en priorisant le préfixe
-    AGENTGUARD_ (celui documenté et déployé).
-    """
+    """Lit la première variable d'env définie parmi plusieurs alias."""
     for name in names:
         value = os.environ.get(name)
         if value:
@@ -130,6 +121,9 @@ PROTECTED_ENDPOINTS = {
     "identity.revoke_agent",
     "identity.list_agents",
     "identity.get_me",
+    "auth.create_api_key",
+    "auth.list_api_keys",
+    "auth.revoke_api_key",
 }
 
 
@@ -151,6 +145,7 @@ def safe_compare(a: str, b: str) -> bool:
 
 
 def hash_key(key: str) -> str:
+    """Hash a key using SHA-256. Used for api_keys.key_hash."""
     return hashlib.sha256(
         str(key).encode("utf-8")
     ).hexdigest()
@@ -221,12 +216,7 @@ def _valid_email(email: str) -> bool:
 # ═══════════════════════════════════════════════════════════════
 
 def _db_execute(query: str, params=(), fetchone=False, fetchall=False):
-    """
-    Execute a SELECT query against PostgreSQL or SQLite.
-
-    This helper deliberately keeps connection handling local so
-    authentication does not leak database connections.
-    """
+    """Execute a SELECT query against PostgreSQL or SQLite."""
     if is_postgres():
         conn = get_pg_conn()
         try:
@@ -385,14 +375,7 @@ def _user_is_active(user_id: str) -> bool:
 # ═══════════════════════════════════════════════════════════════
 
 def _ensure_magic_link_table():
-    """
-    Defensive migration.
-
-    collector/db.py should create this table during normal startup.
-    This fallback prevents authentication from breaking if an older
-    database was created before the migration.
-    """
-
+    """Defensive migration for magic_link_tokens table."""
     if is_postgres():
         conn = get_pg_conn()
         try:
@@ -468,8 +451,9 @@ def _ensure_magic_link_table():
     finally:
         conn.close()
 
+
 def _ensure_api_keys_table():
-    """Crée la table api_keys si elle n'existe pas encore."""
+    """Create api_keys table if it doesn't exist (canonical schema)."""
     if is_postgres():
         conn = get_pg_conn()
         try:
@@ -480,8 +464,8 @@ def _ensure_api_keys_table():
                     org_id TEXT NOT NULL,
                     key_hash TEXT NOT NULL UNIQUE,
                     name TEXT NOT NULL,
-                    active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             conn.commit()
@@ -497,13 +481,14 @@ def _ensure_api_keys_table():
                     org_id TEXT NOT NULL,
                     key_hash TEXT NOT NULL UNIQUE,
                     name TEXT NOT NULL,
-                    active INTEGER DEFAULT 1,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             conn.commit()
         finally:
-            conn.close()    
+            conn.close()
+
 
 def _invalidate_existing_magic_links(user_id: str):
     p = sql_placeholder()
@@ -600,11 +585,7 @@ def _store_magic_link(
 
 
 def _consume_magic_link(token: str):
-    """
-    Atomically validates and consumes a magic link.
-
-    Returns the user row or None.
-    """
+    """Atomically validates and consumes a magic link. Returns the user row or None."""
     if not token:
         return None
 
@@ -956,11 +937,7 @@ If you did not request this email, you can safely ignore it.
 # ═══════════════════════════════════════════════════════════════
 
 def _human_session_token(user_id: str) -> str:
-    """
-    Signed server-generated session.
-
-    The signing serializer is configured by collector/app.py.
-    """
+    """Signed server-generated session."""
     payload = {
         "type": "human",
         "user_id": user_id,
@@ -1047,7 +1024,7 @@ def _clear_human_session(response):
 # ═══════════════════════════════════════════════════════════════
 
 def _lookup_org_by_key(key: str):
-    """Legacy lookup in api_keys."""
+    """Lookup org_id from api_keys table using hashed key."""
     if not key:
         return None
 
@@ -1102,7 +1079,7 @@ def resolve_org_id(key: str):
       - agp_* platform identity
       - configured legacy system key
       - ag_* agent key
-      - legacy api_keys table
+      - organizational api_keys table
     """
     if not key:
         return None
@@ -1162,12 +1139,12 @@ def resolve_org_id(key: str):
         g.agent_identity = identity
         return identity["org_id"]
 
-    # Legacy api_keys table
+    # Organizational api_keys table
     try:
         return _lookup_org_by_key(key)
     except Exception as exc:
         logger.warning(
-            "legacy_api_key_lookup_failed",
+            "api_key_lookup_failed",
             error=str(exc),
         )
         return None
@@ -1188,7 +1165,6 @@ def _session_org_id(token: str):
         return None
 
     try:
-        # ✅ FIX: use current_app.auth_session_ttl
         ttl = getattr(current_app, "auth_session_ttl", 3600)
         payload = current_app.auth_serializer.loads(token, max_age=ttl)
     except Exception:
@@ -1273,7 +1249,9 @@ def _session_org_id(token: str):
         )
     finally:
         conn.close()
-  # ═══════════════════════════════════════════════════════════════
+
+
+# ═══════════════════════════════════════════════════════════════
 # IDENTITY RESOLUTION
 # ═══════════════════════════════════════════════════════════════
 
@@ -1363,9 +1341,7 @@ def _build_user_identity(user):
 
 
 def resolve_full_identity():
-    """
-    Resolve the complete identity for the current request.
-    """
+    """Resolve the complete identity for the current request."""
     try:
         from identity import (
             IdentityType,
@@ -1823,11 +1799,6 @@ def _audit_login(
 # ═══════════════════════════════════════════════════════════════
 # SUPABASE AUTH — magic link + Google + GitHub
 # ═══════════════════════════════════════════════════════════════
-#
-# Remplace l'ancien envoi d'email fait à la main. Supabase gère l'OTP
-# et les deux providers OAuth ; ce backend ne fait que vérifier le JWT
-# et poser le même cookie de session que l'ancien flow (voir
-# collector/supabase_auth.py pour le detail).
 
 from collector.supabase_auth import (
     SUPABASE_ANON_KEY,
@@ -2249,7 +2220,7 @@ SUPABASE_LOGIN_HTML = """
 
 @auth_bp.get("/api/auth/config")
 def supabase_public_config():
-    """Expose la config publique (URL + anon key) au front — jamais le JWT secret."""
+    """Expose public config (URL + anon key) to frontend."""
     return jsonify({
         "supabase_enabled": SUPABASE_ENABLED,
         "supabase_url": SUPABASE_URL,
@@ -2259,11 +2230,7 @@ def supabase_public_config():
 
 @auth_bp.post("/api/auth/supabase-session")
 def supabase_session():
-    """
-    Échange un access_token Supabase (vérifié côté serveur) contre le
-    cookie de session httpOnly existant. Provisionne tenant/org/user
-    au premier login. Endpoint public (avant login, forcément).
-    """
+    """Exchange Supabase access_token for httpOnly session cookie."""
     if not SUPABASE_ENABLED:
         return jsonify({"error": "Supabase auth not configured"}), 503
 
@@ -2299,7 +2266,7 @@ def supabase_session():
 
 
 # ═══════════════════════════════════════════════════════════════
-# LOGIN PAGE — LEGACY (fallback si Supabase non configuré)
+# LOGIN PAGE — LEGACY (fallback if Supabase not configured)
 # ═══════════════════════════════════════════════════════════════
 
 LOGIN_HTML = """
@@ -3085,7 +3052,6 @@ def login():
                 supabase_anon_key=SUPABASE_ANON_KEY,
             )
 
-        # Secours : Supabase pas encore configuré -> ancien flow SMTP maison.
         return render_template_string(
             LOGIN_HTML,
             error=None,
@@ -3115,7 +3081,6 @@ def login():
 
         user = _user_by_email(email)
 
-        # Do not reveal whether an email belongs to an account.
         if not user:
             logger.info(
                 "magic_link_requested_unknown_email",
@@ -3150,7 +3115,6 @@ def login():
 
         user_id = user[0]
 
-        # Invalidate previous links.
         _invalidate_existing_magic_links(
             user_id
         )
@@ -3233,7 +3197,6 @@ SIGNUP_HTML = """
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        /* Mêmes variables et styles que la page de login pour une cohérence totale */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         :root {
             --bg-primary: #09090b; --bg-secondary: #18181b;
@@ -3297,7 +3260,6 @@ SIGNUP_HTML = """
         .alert-success { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); color: #34d399; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
         
-        /* Hero Section (identique à login) */
         .hero-section {
             position: relative; display: flex; flex-direction: column; justify-content: center;
             align-items: center; padding: 3rem; background: var(--bg-secondary);
@@ -3452,7 +3414,6 @@ def signup():
     try:
         _ensure_magic_link_table()
 
-        # 1. Vérifier si l'utilisateur existe déjà
         existing_user = _user_by_email(email)
         if existing_user:
             return render_template_string(
@@ -3461,7 +3422,6 @@ def signup():
                 success=None
             ), 400
 
-        # 2. Générer les identifiants uniques pour la chaîne Tenant -> Org -> User
         user_id = str(uuid.uuid4())
         org_id = str(uuid.uuid4())
         tenant_id = str(uuid.uuid4())
@@ -3471,25 +3431,21 @@ def signup():
 
         p = sql_placeholder()
 
-        # 3. Insérer dans l'ordre des contraintes de clé étrangère (Foreign Keys)
         if is_postgres():
             conn = get_pg_conn()
             try:
                 cur = conn.cursor()
 
-                # Étape A : Créer le Tenant
                 cur.execute(f"""
                     INSERT INTO tenants (tenant_id, name, created_at)
                     VALUES ({p}, {p}, CURRENT_TIMESTAMP)
                 """, (tenant_id, tenant_name))
 
-                # Étape B : Créer l'Organisation liée à ce Tenant
                 cur.execute(f"""
                     INSERT INTO orgs (org_id, tenant_id, name, created_at)
                     VALUES ({p}, {p}, {p}, CURRENT_TIMESTAMP)
                 """, (org_id, tenant_id, org_name))
 
-                # Étape C : Créer l'Utilisateur lié à ce Tenant et cette Organisation
                 cur.execute(f"""
                     INSERT INTO users (user_id, org_id, tenant_id, email, display_name, role, active, created_at)
                     VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, CURRENT_TIMESTAMP)
@@ -3499,7 +3455,6 @@ def signup():
             finally:
                 conn.close()
         else:
-            # Fallback SQLite pour le développement local
             conn = sqlite3.connect(_get_db_path())
             try:
                 cur = conn.cursor()
@@ -3521,7 +3476,6 @@ def signup():
             finally:
                 conn.close()
 
-        # 4. Générer et envoyer automatiquement le Magic Link pour une connexion immédiate
         raw_token = secrets.token_urlsafe(MAGIC_LINK_TOKEN_BYTES)
         token_hash = _hash_magic_token(raw_token)
         expires_at = _utcnow() + timedelta(seconds=MAGIC_LINK_TTL_SECONDS)
@@ -3644,15 +3598,7 @@ def verify_magic_link():
 
 @auth_bp.post("/api/auth-login")
 def auth_login():
-    """
-    JSON authentication endpoint.
-
-    Preferred:
-        {"email": "user@company.com"}
-
-    Legacy compatibility:
-        {"api_key": "..."}
-    """
+    """JSON authentication endpoint."""
     data = request.get_json(
         silent=True
     ) or {}
@@ -3660,8 +3606,6 @@ def auth_login():
     email = _normalize_email(
         data.get("email", "")
     )
-
-    # ── Magic link ──────────────────────────────────────────
 
     if email:
         if not MAGIC_LINK_ENABLED:
@@ -3748,8 +3692,6 @@ def auth_login():
                     "Unable to process sign-in request"
                 }
             ), 500
-
-    # ── Legacy API key compatibility ───────────────────────
 
     key = str(
         data.get(
@@ -3969,73 +3911,32 @@ def dashboard():
             DASHBOARD_HTML
         )
     )
-# ═══════════════════════════════════════════════════════════════
-# API KEY MANAGEMENT (Version Blindée avec Logs)
-# ═══════════════════════════════════════════════════════════════
 
-def _ensure_api_keys_table_safe():
-    """Crée la table api_keys si elle n'existe pas, de manière sécurisée."""
-    try:
-        if is_postgres():
-            conn = get_pg_conn()
-            try:
-                cur = conn.cursor()
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS api_keys (
-                        id TEXT PRIMARY KEY,
-                        org_id TEXT NOT NULL,
-                        key_hash TEXT NOT NULL UNIQUE,
-                        name TEXT NOT NULL,
-                        active BOOLEAN DEFAULT TRUE,
-                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-                conn.commit()
-            finally:
-                conn.close()
-        else:
-            conn = sqlite3.connect(_get_db_path())
-            try:
-                cur = conn.cursor()
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS api_keys (
-                        id TEXT PRIMARY KEY,
-                        org_id TEXT NOT NULL,
-                        key_hash TEXT NOT NULL UNIQUE,
-                        name TEXT NOT NULL,
-                        active INTEGER DEFAULT 1,
-                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-                conn.commit()
-            finally:
-                conn.close()
-    except Exception as e:
-        logger.error("api_keys_table_creation_failed", error=str(e))
 
+# ═══════════════════════════════════════════════════════════════
+# API KEY MANAGEMENT (Organizational)
+# ═══════════════════════════════════════════════════════════════
 
 @auth_bp.post("/api/keys")
 def create_api_key():
+    """Generate a new organizational API key. Returns raw key only once."""
     try:
         if not require_auth():
             return jsonify({"error": "Unauthorized"}), 401
 
         org_id = getattr(g, "org_id", None)
         if not org_id:
-            return jsonify({"error": "Organization ID not found in session. Please log in again."}), 403
+            return jsonify({"error": "Organization ID not found"}), 403
 
         data = request.get_json(silent=True) or {}
         name = data.get("name", "Default API Key").strip() or "Default API Key"
 
-        # 1. Générer et hasher
         raw_key = "ag_live_" + secrets.token_urlsafe(32)
         key_hash = hash_key(raw_key)
         key_id = str(uuid.uuid4())
 
-        # 2. S'assurer que la table existe (appel unique et sûr)
-        _ensure_api_keys_table_safe()
+        _ensure_api_keys_table()
 
-        # 3. Insérer en base
         p = sql_placeholder()
         if is_postgres():
             conn = get_pg_conn()
@@ -4067,25 +3968,26 @@ def create_api_key():
             "key": raw_key,
             "key_id": key_id,
             "name": name,
-            "message": "⚠️ IMPORTANT : Copiez cette clé maintenant. Elle ne sera plus jamais affichée."
+            "message": "Copy this key now. It will not be shown again."
         }), 201
 
     except Exception as e:
-        logger.error("create_api_key_crashed", error=str(e), exc_info=True)
-        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+        logger.error("create_api_key_failed", error=str(e))
+        return jsonify({"error": "Unable to create API key"}), 500
 
 
 @auth_bp.get("/api/keys")
 def list_api_keys():
+    """List API keys for the authenticated organization only."""
     try:
         if not require_auth():
             return jsonify({"error": "Unauthorized"}), 401
 
         org_id = getattr(g, "org_id", None)
         if not org_id:
-            return jsonify({"error": "Organization ID not found in session."}), 403
+            return jsonify({"error": "Organization ID not found"}), 403
 
-        _ensure_api_keys_table_safe()
+        _ensure_api_keys_table()
 
         p = sql_placeholder()
         if is_postgres():
@@ -4128,19 +4030,20 @@ def list_api_keys():
         return jsonify({"keys": keys}), 200
 
     except Exception as e:
-        logger.error("list_api_keys_crashed", error=str(e), exc_info=True)
-        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+        logger.error("list_api_keys_failed", error=str(e))
+        return jsonify({"error": "Unable to list API keys"}), 500
 
 
 @auth_bp.delete("/api/keys/<key_id>")
 def revoke_api_key(key_id):
+    """Revoke (deactivate) an API key. Scoped by org_id."""
     try:
         if not require_auth():
             return jsonify({"error": "Unauthorized"}), 401
 
         org_id = getattr(g, "org_id", None)
         if not org_id:
-            return jsonify({"error": "Organization ID not found in session."}), 403
+            return jsonify({"error": "Organization ID not found"}), 403
 
         p = sql_placeholder()
         if is_postgres():
@@ -4168,8 +4071,8 @@ def revoke_api_key(key_id):
             finally:
                 conn.close()
 
-        return jsonify({"status": "success", "message": "Clé révoquée avec succès"}), 200
+        return jsonify({"status": "success", "message": "API key revoked"}), 200
 
     except Exception as e:
-        logger.error("revoke_api_key_crashed", error=str(e), exc_info=True)
-        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+        logger.error("revoke_api_key_failed", error=str(e))
+        return jsonify({"error": "Unable to revoke API key"}), 500
