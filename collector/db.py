@@ -53,8 +53,11 @@ def _get_pg_pool():
 
 
 class _PooledConnProxy:
-    """Enveloppe une connexion poolee : close() la rend au pool au lieu
-    de la fermer, tout le reste (cursor, commit, ...) passe tel quel."""
+    """Proxy d'une connexion psycopg provenant d'un pool.
+
+    close() ne ferme pas physiquement la connexion :
+    elle est nettoyée puis rendue au pool.
+    """
 
     __slots__ = ("_conn", "_pool", "_returned")
 
@@ -64,11 +67,41 @@ class _PooledConnProxy:
         object.__setattr__(self, "_returned", False)
 
     def close(self):
-        if not self._returned:
+        if self._returned:
+            return
+
+        try:
+            # Une connexion ne doit JAMAIS être rendue au pool
+            # avec une transaction ouverte ou en état FAILED.
+            if not self._conn.closed:
+                try:
+                    self._conn.rollback()
+                except Exception:
+                    logger.warning(
+                        "pg_connection_rollback_failed",
+                        exc_info=True,
+                    )
+
+            self._pool.putconn(self._conn)
+
+        except Exception:
+            logger.warning(
+                "pg_pool_putconn_failed",
+                exc_info=True,
+            )
+
+            # Si le retour au pool échoue, on ferme réellement
+            # la connexion pour éviter une fuite.
             try:
-                self._pool.putconn(self._conn)
+                if not self._conn.closed:
+                    self._conn.close()
             except Exception:
-                logger.warning("pg_pool_putconn_failed", exc_info=True)
+                logger.warning(
+                    "pg_connection_close_failed",
+                    exc_info=True,
+                )
+
+        finally:
             object.__setattr__(self, "_returned", True)
 
     def __getattr__(self, name):
@@ -78,7 +111,17 @@ class _PooledConnProxy:
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        if exc_type is not None:
+            try:
+                self._conn.rollback()
+            except Exception:
+                logger.warning(
+                    "pg_connection_context_rollback_failed",
+                    exc_info=True,
+                )
+
         self.close()
+        return False
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -110,16 +153,21 @@ def is_postgres() -> bool:
 
 
 def get_pg_conn():
-    """Get a PostgreSQL connection from the pool.
-
-    ✅ FIX: was `psycopg.connect(...)` on every call (nouvelle connexion
-    TCP+TLS a chaque requete, ~1-2s d'overhead). Passe maintenant par un
-    pool reutilisable ; conn.close() rend la connexion au pool au lieu
-    de la fermer (voir _PooledConnProxy plus haut). Convention d'appel
-    inchangee pour tous les sites d'appel existants.
-    """
+    """Get a clean PostgreSQL connection from the pool."""
     pool = _get_pg_pool()
+
     conn = pool.getconn(timeout=10)
+
+    try:
+        # Sécurité : toujours récupérer une connexion propre.
+        conn.rollback()
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        raise
+
     return _PooledConnProxy(conn, pool)
 
 
