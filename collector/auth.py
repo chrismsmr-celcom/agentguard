@@ -468,6 +468,42 @@ def _ensure_magic_link_table():
     finally:
         conn.close()
 
+def _ensure_api_keys_table():
+    """Crée la table api_keys si elle n'existe pas encore."""
+    if is_postgres():
+        conn = get_pg_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id TEXT PRIMARY KEY,
+                    org_id TEXT NOT NULL,
+                    key_hash TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+    else:
+        conn = sqlite3.connect(_get_db_path())
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id TEXT PRIMARY KEY,
+                    org_id TEXT NOT NULL,
+                    key_hash TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    active INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+        finally:
+            conn.close()    
 
 def _invalidate_existing_magic_links(user_id: str):
     p = sql_placeholder()
@@ -3933,4 +3969,156 @@ def dashboard():
             DASHBOARD_HTML
         )
     )
-  
+# ═══════════════════════════════════════════════════════════════
+# API KEY MANAGEMENT (Pour les clients)
+# ═══════════════════════════════════════════════════════════════
+
+@auth_bp.before_request
+def ensure_api_keys_table_exists():
+    """S'assure que la table existe avant toute requête."""
+    _ensure_api_keys_table()
+
+
+@auth_bp.post("/api/keys")
+def create_api_key():
+    """Génère une nouvelle clé API. La clé en clair n'est renvoyée qu'UNE SEULE FOIS."""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    org_id = getattr(g, "org_id", None)
+    if not org_id:
+        return jsonify({"error": "Organization not found"}), 403
+
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "Default API Key").strip() or "Default API Key"
+
+    # 1. Générer la clé brute (commençant par ag_live_ pour la prod)
+    raw_key = "ag_live_" + secrets.token_urlsafe(32)
+    
+    # 2. Hasher la clé pour le stockage sécurisé
+    key_hash = hash_key(raw_key)
+    key_id = str(uuid.uuid4())
+
+    # 3. Sauvegarder en base de données
+    p = sql_placeholder()
+    if is_postgres():
+        conn = get_pg_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"""
+                INSERT INTO api_keys (id, org_id, key_hash, name, active, created_at)
+                VALUES ({p}, {p}, {p}, {p}, TRUE, CURRENT_TIMESTAMP)
+            """, (key_id, org_id, key_hash, name))
+            conn.commit()
+        finally:
+            conn.close()
+    else:
+        conn = sqlite3.connect(_get_db_path())
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO api_keys (id, org_id, key_hash, name, active, created_at)
+                VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+            """, (key_id, org_id, key_hash, name))
+            conn.commit()
+        finally:
+            conn.close()
+
+    # 4. Renvoyer la clé en clair (UNIQUEMENT ici !)
+    return jsonify({
+        "status": "success",
+        "key": raw_key,
+        "key_id": key_id,
+        "name": name,
+        "message": "⚠️ IMPORTANT : Copiez cette clé maintenant. Elle ne sera plus jamais affichée."
+    }), 201
+
+
+@auth_bp.get("/api/keys")
+def list_api_keys():
+    """Liste les clés de l'organisation (masquées pour la sécurité)."""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    org_id = getattr(g, "org_id", None)
+    if not org_id:
+        return jsonify({"error": "Organization not found"}), 403
+
+    p = sql_placeholder()
+    if is_postgres():
+        conn = get_pg_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"""
+                SELECT id, name, active, created_at
+                FROM api_keys
+                WHERE org_id = {p}
+                ORDER BY created_at DESC
+            """, (org_id,))
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+    else:
+        conn = sqlite3.connect(_get_db_path())
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, name, active, created_at
+                FROM api_keys
+                WHERE org_id = ?
+                ORDER BY created_at DESC
+            """, (org_id,))
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+
+    keys = []
+    for row in rows:
+        keys.append({
+            "id": row[0],
+            "name": row[1],
+            "active": bool(row[2]),
+            "created_at": row[3],
+            "key_preview": "ag_live_..." + (row[0][-4:] if row[0] else "????")
+        })
+    
+    return jsonify({"keys": keys}), 200
+
+
+@auth_bp.delete("/api/keys/<key_id>")
+def revoke_api_key(key_id):
+    """Révoque (désactive) une clé API."""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    org_id = getattr(g, "org_id", None)
+    if not org_id:
+        return jsonify({"error": "Organization not found"}), 403
+
+    p = sql_placeholder()
+    if is_postgres():
+        conn = get_pg_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"""
+                UPDATE api_keys
+                SET active = FALSE
+                WHERE id = {p} AND org_id = {p}
+            """, (key_id, org_id))
+            conn.commit()
+        finally:
+            conn.close()
+    else:
+        conn = sqlite3.connect(_get_db_path())
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE api_keys
+                SET active = 0
+                WHERE id = ? AND org_id = ?
+            """, (key_id, org_id))
+            conn.commit()
+        finally:
+            conn.close()
+
+    return jsonify({"status": "success", "message": "Clé révoquée avec succès"}), 200
