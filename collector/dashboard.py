@@ -4,7 +4,7 @@ DASHBOARD_HTML = r'''
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>AgentGuard — AI Observability</title>
+<title>Cerbere — AI Observability & Security</title>
 <style>
 :root{--bg:#0d0f17;--bg2:#10121a;--card:#151722;--card2:#1a1d2a;--border:#262a3a;--border2:#303448;--text:#e6e8f2;--muted:#9298ab;--dim:#5d6375;--purple:#8b5cf6;--purple2:#a78bfa;--green:#4cc38a;--red:#e0525f;--red2:#ff5d73;--blue:#4c8dff;--cyan:#38bdf8;--orange:#fb923c;--teal:#3ecfb2;--yellow:#f5b84b;--val:#6ee7b7;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
 *{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif}
@@ -113,7 +113,6 @@ tr:hover td{background:#191c29}
 .toast{position:fixed;right:20px;bottom:20px;background:var(--card2);border:1px solid var(--border2);padding:10px 14px;border-radius:8px;font-size:12px;z-index:100;opacity:0;transition:.2s}
 .toast.show{opacity:1}
 
-/* ── Professional icon and agent connection system ─────────────────── */
 .ui-icon{width:14px;height:14px;display:inline-block;vertical-align:-2px;flex:0 0 14px;color:currentColor}
 .ui-icon svg{display:block;width:100%;height:100%}
 .logo-fallback{display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:10px;font-weight:800;letter-spacing:-.04em;color:var(--text);background:var(--card2);border:1px solid var(--border2);border-radius:7px}
@@ -139,6 +138,24 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
 .connect-code-wrap{position:relative;margin:10px 0 16px}.connect-code{background:#0a0c12;border:1px solid var(--border);border-radius:8px;padding:14px 62px 14px 14px;font-family:var(--mono);font-size:11px;color:#aeb6c8;white-space:pre-wrap;word-break:break-word;line-height:1.55;overflow:auto}
 .connect-copy{position:absolute;right:9px;top:9px;border:1px solid var(--border2);background:var(--card2);color:var(--muted);border-radius:5px;padding:4px 8px;font-size:10px}.connect-copy:hover{color:var(--text);border-color:#454a63}
 .connect-agents{margin-top:20px;border-top:1px solid var(--border);padding-top:14px}.connect-agent-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)}.connect-agent-row:last-child{border-bottom:0}.connect-agent-dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:0 0 8px}.connect-agent-dot.connected{background:var(--green)}.connect-agent-dot.idle{background:var(--yellow)}.connect-agent-name{font-family:var(--mono);font-size:11px}.connect-agent-status{margin-left:auto;font-size:10px;color:var(--muted)}
+
+/* API Key Specific Styles */
+.key-row{display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:8px}
+.key-info{display:flex;flex-direction:column;gap:4px}
+.key-name{font-weight:600;font-size:13px}
+.key-preview{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.key-status{font-size:10px;padding:2px 8px;border-radius:4px;font-weight:600}
+.key-status.active{background:rgba(76,195,138,0.15);color:var(--green);border:1px solid rgba(76,195,138,0.3)}
+.key-status.revoked{background:rgba(224,82,95,0.15);color:var(--red);border:1px solid rgba(224,82,95,0.3)}
+.btn-revoke{background:transparent;border:1px solid var(--red);color:var(--red);padding:4px 10px;border-radius:5px;font-size:11px}
+.btn-revoke:hover{background:var(--red);color:white}
+.new-key-box{margin-top:16px;padding:16px;background:rgba(245,184,75,0.08);border:1px solid var(--yellow);border-radius:8px}
+.new-key-box p{color:var(--yellow);font-size:12px;margin:0 0 10px 0;font-weight:600}
+.new-key-input{display:flex;gap:8px}
+.new-key-input input{flex:1;background:var(--bg);color:var(--green);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-family:var(--mono);font-size:12px;outline:none}
+.btn-copy{background:var(--blue);color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:600}
+.btn-copy:hover{filter:brightness(1.1)}
+
 @media(max-width:760px){.connect-modal{padding:12px}.connect-panel{max-height:calc(100vh - 24px)}.connect-grid{grid-template-columns:1fr}.connect-body{padding:14px}}
 @media(max-width:1200px){.g5{grid-template-columns:repeat(3,1fr)}.g4,.g3{grid-template-columns:repeat(2,1fr)}.tr-body{grid-template-columns:1fr}.fside{display:none}}
 @media(max-width:760px){.g5,.g4,.g3,.g2{grid-template-columns:1fr}.tabs{overflow-x:auto}}
@@ -146,22 +163,23 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
 </head>
 <body>
 <header class="topbar">
-  <div class="logo-box"><img src="/static/logo.svg" alt="AgentGuard" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="logo-fallback" aria-hidden="true">AG</span></div>
-  <span class="prod">AgentGuard <small>AI Observability</small></span>
+  <div class="logo-box"><img src="/static/logo.svg" alt="Cerbere" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="logo-fallback" aria-hidden="true">CB</span></div>
+  <span class="prod">Cerbere <small>AI Security & Observability</small></span>
   <nav class="tabs" id="topTabs">
     <button data-view="overview">Overview</button>
-    <button data-view="health" class="active">Service Health (Preview)</button>
-    <button data-view="tracing">Explorer (Preview)</button>
+    <button data-view="health" class="active">Service Health</button>
+    <button data-view="tracing">Explorer</button>
     <button data-view="audit">Compliance Audit</button>
     <button type="button" onclick="openConnectAgentModal()">AI Agents</button>
   </nav>
   <div class="tb-right">
-   <button class="btn" onclick="openConnectModal()">+ Connection</button>
+    <button class="btn" onclick="openApiKeyModal()">🔑 API Keys</button>
+    <button class="btn" onclick="openConnectModal()">+ Connection</button>
     <span class="help">?</span>
   </div>
 </header>
 <div class="toolbar">
-  <div class="filter-pill"><span class="ui-icon" data-icon="filter"></span><span>Service in (<b>agentguard-collector</b>)</span><span class="x" title="clear">✕</span></div>
+  <div class="filter-pill"><span class="ui-icon" data-icon="filter"></span><span>Service in (<b>cerbere-collector</b>)</span><span class="x" title="clear">✕</span></div>
   <div class="right">
     <span class="pill">Last 14 days ▾</span>
     <button class="btn" onclick="refreshAll()"><span class="ui-icon" data-icon="refresh"></span> Refresh</button>
@@ -175,7 +193,7 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
 <section id="view-overview" class="view">
   <div class="sec">Service Health &amp; Performance</div>
   <div class="grid" style="grid-template-columns:170px 1fr 1fr 1fr;gap:12px">
-    <div class="card logo-card" style="background:#000;border:0;border-radius:18px"><div class="logo-box"><img src="/static/logo.svg" alt="AgentGuard" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'" style="width:100%;height:100%;object-fit:cover;border-radius:18px"><span class="logo-fallback" aria-hidden="true">AG</span></div></div>
+    <div class="card logo-card" style="background:#000;border:0;border-radius:18px"><div class="logo-box"><img src="/static/logo.svg" alt="Cerbere" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'" style="width:100%;height:100%;object-fit:cover;border-radius:18px"><span class="logo-fallback" aria-hidden="true">CB</span></div></div>
     <div class="card"><div class="clabel">Open Problems</div><div class="hero mid" id="ovProblems" style="color:var(--red2)">0</div></div>
     <div class="card"><div class="clabel"># of Total Requests</div><div class="hero mid" id="ovRequests">0</div><div class="trend" id="ovRequestsT"></div></div>
     <div class="card"><div class="clabel">Cost</div><div class="hero mid" id="ovCost">$0</div><div class="trend" id="ovCostT"></div></div>
@@ -184,7 +202,7 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
     <div class="card"><div class="clabel">Service Health</div><div id="ovDonut" style="height:170px"></div></div>
     <div class="card"><div class="clabel">AVG Request Duration</div><div class="hero mid" id="ovAvg">—</div><div class="trend" id="ovAvgT"></div></div>
     <div class="card"><div class="clabel">P99 Request Duration</div><div class="hero mid" id="ovP99">—</div><div class="trend" id="ovP99T"></div></div>
-    <div class="card"><div class="clabel">AgentGuard AI Forecast</div><div class="chart" id="ovForecast" style="height:170px"></div></div>
+    <div class="card"><div class="clabel">Cerbere AI Forecast</div><div class="chart" id="ovForecast" style="height:170px"></div></div>
   </div>
   <div class="sec">Service Quality &amp; Guardrails</div>
   <div class="grid g5" id="gqBig"></div>
@@ -219,7 +237,7 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
 
 <section id="view-tracing" class="view">
   <div class="tr-head">
-    <span>⇄</span><span class="name">AgentGuard.workflow</span>
+    <span>⇄</span><span class="name">Cerbere.workflow</span>
     <select id="traceSelect" class="pill" style="background:var(--card);color:var(--text);border:1px solid var(--border2)"></select>
     <span id="trDate" class="dim"></span>
     <span><span class="ui-icon" data-icon="latency"></span> Duration: <b id="trDur">—</b></span>
@@ -253,7 +271,7 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
     <div>
       <div class="sec" style="margin-top:0">Auditing Events</div>
       <div class="qblock"><div class="ln">1<br>2<br>3<br>4</div><div class="code">fetch spans
-| filter matchesValue(event.type, "agentguard.security")
+| filter matchesValue(event.type, "cerbere.security")
 | summarize count() by: { gen_ai.model }
 | filter gen_ai.model != ""</div><span class="copy" onclick="toast('Query copied')">⧉</span></div>
       <div class="card" style="margin-top:12px;padding:6px 0">
@@ -271,6 +289,37 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
 </main>
 </div>
 
+<!-- MODALE DE GESTION DES CLÉS API -->
+<div id="apiKeyModal" class="connect-modal" role="dialog" aria-modal="true" onclick="if(event.target===this)closeApiKeyModal()">
+  <div class="connect-panel">
+    <div class="connect-head">
+      <div>
+        <div class="title">API Keys Management</div>
+        <div class="subtitle">Manage credentials for your AI agents. Keep them secure.</div>
+        <button class="connect-close" type="button" aria-label="Close" title="Close" onclick="closeApiKeyModal()">×</button>
+      </div>
+    </div>
+    <div class="connect-body">
+      <div id="apiKeyListContainer">
+        <div class="empty" style="padding:20px">Loading keys...</div>
+      </div>
+      
+      <button class="btn" onclick="generateApiKey()" style="width:100%; margin-top:12px; background:var(--green); color:#000; font-weight:600; border:none; padding:10px;">
+        + Generate New API Key
+      </button>
+
+      <div id="newKeyDisplay" style="display:none;" class="new-key-box">
+        <p>⚠️ Copy this key now. It will never be shown again.</p>
+        <div class="new-key-input">
+          <input type="text" id="newKeyValue" readonly>
+          <button class="btn-copy" onclick="copyNewKey()">Copy</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODALE DE CONNEXION AGENT -->
 <div id="connectAgentModal" class="connect-modal" role="dialog" aria-modal="true" aria-labelledby="connectAgentTitle" aria-describedby="connectAgentSubtitle" onclick="if(event.target===this)closeConnectAgentModal()">
   <div class="connect-panel">
     <div class="connect-head">
@@ -282,34 +331,18 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
     </div>
     <div class="connect-body">
       <div id="connectChooser" class="connect-view active">
-        <div class="connect-section">AgentGuard integrations</div>
+        <div class="connect-section">Cerbere integrations</div>
         <div class="connect-grid">
           <button class="connect-card" type="button" onclick="showConnectDetail('python')"><span class="brand-mark python"><img src="https://cdn.jsdelivr.net/gh/glincker/thesvg@main/public/icons/python/default.svg" alt="Python" style="width:23px;height:23px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><span class="brand-fallback">PY</span></span><span><span class="name">Python SDK</span><span class="desc">Native runtime instrumentation for LLM calls and tool execution.</span></span></button>
           <button class="connect-card" type="button" onclick="showConnectDetail('mcp')"><span class="brand-mark mcp"><img src="https://cdn.jsdelivr.net/gh/glincker/thesvg@main/public/icons/model-context-protocol/default.svg" alt="MCP" style="width:23px;height:23px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><span class="brand-fallback">MCP</span></span><span><span class="name">MCP</span><span class="desc">Security boundary for MCP clients, servers and tool calls.</span></span></button>
           <button class="connect-card" type="button" onclick="showConnectDetail('http')"><span class="brand-mark http">HTTP</span><span><span class="name">HTTP Gateway</span><span class="desc">Language-agnostic telemetry and policy boundary.</span></span></button>
-          <button class="connect-card" type="button" onclick="showConnectDetail('composio')"><span class="brand-mark composio"><img src="https://cdn.jsdelivr.net/gh/glincker/thesvg@main/public/icons/composio/default.svg" alt="Composio" style="width:23px;height:23px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><span class="brand-fallback">C</span></span><span><span class="name">Composio</span><span class="desc">Guard Composio tool execution with AgentGuard policy enforcement.</span></span></button>
         </div>
-        <div class="connect-section">AI providers</div>
-        <div class="connect-grid">
-          <button class="connect-card" type="button" onclick="showConnectDetail('openai')"><span class="brand-mark openai"><img src="https://cdn.jsdelivr.net/gh/glincker/thesvg@main/public/icons/openai/default.svg" alt="OpenAI" style="width:23px;height:23px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><span class="brand-fallback">O</span></span><span><span class="name">OpenAI</span><span class="desc">Protect Responses and Chat Completions through the SDK.</span></span></button>
-          <button class="connect-card" type="button" onclick="showConnectDetail('anthropic')"><span class="brand-mark anthropic"><img src="https://cdn.jsdelivr.net/gh/glincker/thesvg@main/public/icons/claude-code/color.svg" alt="Claude" style="width:23px;height:23px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><span class="brand-fallback">A</span></span><span><span class="name">Anthropic</span><span class="desc">Protect Claude requests and tool-use workflows.</span></span></button>
-        </div>
-        <div class="connect-section">Agent frameworks</div>
-        <div class="connect-grid">
-          <button class="connect-card" type="button" onclick="showConnectDetail('langgraph')"><span class="brand-mark langgraph"><img src="https://cdn.jsdelivr.net/gh/glincker/thesvg@main/public/icons/langgraph/default.svg" alt="LangGraph" style="width:23px;height:23px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><span class="brand-fallback">LG</span></span><span><span class="name">LangGraph</span><span class="desc">Instrument graph nodes and side-effecting tool edges.</span></span></button>
-          <button class="connect-card" type="button" onclick="showConnectDetail('crewai')"><span class="brand-mark crewai"><img src="https://cdn.jsdelivr.net/gh/glincker/thesvg@main/public/icons/crewai/default.svg" alt="CrewAI" style="width:23px;height:23px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><span class="brand-fallback">CA</span></span><span><span class="name">CrewAI</span><span class="desc">Guard CrewAI tools and agent execution paths.</span></span></button>
-        </div>
-        <div class="connect-note"><b>Security:</b> keep <span class="mono">AGENTGUARD_API_KEY</span> in the agent environment or secret manager. Never expose it in browser code. The admin secret remains server-side and is not used by this onboarding flow.</div>
+        <div class="connect-note"><b>Security:</b> keep <span class="mono">AGENTGUARD_API_KEY</span> in the agent environment or secret manager. Never expose it in browser code.</div>
         <div class="connect-agents"><div class="connect-section" style="margin-top:0">Recently observed agents</div><div id="connectAgentList"><div class="empty" style="padding:18px 8px">No agent telemetry observed yet.</div></div></div>
       </div>
       <div id="connectPython" class="connect-view connect-detail"></div>
       <div id="connectMcp" class="connect-view connect-detail"></div>
       <div id="connectHttp" class="connect-view connect-detail"></div>
-      <div id="connectComposio" class="connect-view connect-detail"></div>
-      <div id="connectOpenai" class="connect-view connect-detail"></div>
-      <div id="connectAnthropic" class="connect-view connect-detail"></div>
-      <div id="connectLanggraph" class="connect-view connect-detail"></div>
-      <div id="connectCrewai" class="connect-view connect-detail"></div>
     </div>
   </div>
 </div>
@@ -318,7 +351,6 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
 
 <script>
 var state = { modelFilter: new Set(), selTrace: null, selSpan: 0, latStat: 'avg' };
-
 var $ = function(id) { return document.getElementById(id); };
 
 var ICON_PATHS = {
@@ -337,43 +369,16 @@ function renderIcons(root) {
 }
 renderIcons(document);
 
-var esc = function(v) {
-    return String(v || '').replace(/[&<>'"]/g, function(c) {
-        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c];
-    });
-};
-
-var fmt = function(n) {
-    return Number(n || 0).toLocaleString('en-US').replace(/,/g, ' ');
-};
-
-var fmtK = function(n) {
-    n = Number(n || 0);
-    return n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(Math.round(n));
-};
-
-var money = function(n) {
-    return '$' + Number(n || 0).toFixed(4);
-};
-
+var esc = function(v) { return String(v || '').replace(/[&<>'"]/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c]; }); };
+var fmt = function(n) { return Number(n || 0).toLocaleString('en-US').replace(/,/g, ' '); };
+var fmtK = function(n) { n = Number(n || 0); return n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(Math.round(n)); };
+var money = function(n) { return '$' + Number(n || 0).toFixed(4); };
 var P = ['#a78bfa', '#fb923c', '#4cc38a', '#e0525f', '#38bdf8', '#f5b84b', '#8b5cf6', '#4ade80', '#22d3ee', '#f472b6', '#facc15', '#94a3b8', '#6ee7b7', '#fda4af', '#c084fc'];
-
-var CHECKS = [
-    ['prompt_injection', '#a78bfa'],
-    ['pii_detection', '#fb923c'],
-    ['tool_policy', '#3ecfb2'],
-    ['dangerous_params', '#e0525f'],
-    ['budget_policy', '#4c8dff']
-];
+var CHECKS = [['prompt_injection', '#a78bfa'], ['pii_detection', '#fb923c'], ['tool_policy', '#3ecfb2'], ['dangerous_params', '#e0525f'], ['budget_policy', '#4c8dff']];
 
 function toast(m) {
-    var t = $('toast');
-    t.textContent = m;
-    t.classList.add('show');
-    clearTimeout(window._t);
-    window._t = setTimeout(function() {
-        t.classList.remove('show');
-    }, 2200);
+    var t = $('toast'); t.textContent = m; t.classList.add('show');
+    clearTimeout(window._t); window._t = setTimeout(function() { t.classList.remove('show'); }, 2200);
 }
 
 function api(u) {
@@ -383,240 +388,115 @@ function api(u) {
     });
 }
 
-function trendPct(s) {
-    if (!s || s.length < 2) return null;
-    var a = s[0],
-        b = s[s.length - 1];
-    if (!a && !b) return null;
-    var p = a === 0 ? 100 : (b - a) / a * 100;
-    return p;
+// ==========================================
+// GESTION DES CLÉS API
+// ==========================================
+function openApiKeyModal() {
+    $('apiKeyModal').classList.add('open');
+    document.body.style.overflow = 'hidden';
+    $('newKeyDisplay').style.display = 'none';
+    loadApiKeys();
 }
 
-function trendHTML(p, invert) {
-    if (p === null || isNaN(p)) return '<span class="dim">—</span>';
-    var up = p >= 0;
-    var good = invert ? !up : up;
-    return '<span class="trend ' + (good ? 'up' : 'down') + '">' + (up ? '↗' : '↘') + ' ' + Math.abs(p).toFixed(2) + '%</span>';
+function closeApiKeyModal() {
+    $('apiKeyModal').classList.remove('open');
+    document.body.style.overflow = '';
 }
 
-function areaChart(el, data, labels, color) {
-    color = color || '#a78bfa';
-    if (!data.length) {
-        el.innerHTML = '<div class="empty">No data</div>';
-        return;
+async function loadApiKeys() {
+    const container = $('apiKeyListContainer');
+    container.innerHTML = '<div class="empty" style="padding:20px">Loading...</div>';
+    try {
+        const res = await fetch('/api/keys', { credentials: 'include' });
+        const data = await res.json();
+        
+        if (data.keys && data.keys.length > 0) {
+            container.innerHTML = data.keys.map(k => `
+                <div class="key-row">
+                    <div class="key-info">
+                        <span class="key-name">${esc(k.name)}</span>
+                        <span class="key-preview">${esc(k.key_preview)}</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:12px">
+                        <span class="key-status ${k.active ? 'active' : 'revoked'}">${k.active ? 'Active' : 'Revoked'}</span>
+                        ${k.active ? `<button class="btn-revoke" onclick="revokeApiKey('${k.id}')">Revoke</button>` : ''}
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            container.innerHTML = '<div class="empty" style="padding:20px">No API keys generated yet.</div>';
+        }
+    } catch (e) {
+        container.innerHTML = '<div class="empty" style="padding:20px;color:var(--red)">Error loading keys.</div>';
     }
-    var W = el.clientWidth || 600,
-        H = el.clientHeight || 200,
-        pad = { l: 8, r: 44, t: 14, b: 22 },
-        cw = W - pad.l - pad.r,
-        ch = H - pad.t - pad.b;
-    var max = Math.max.apply(null, [1].concat(data));
-    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '">';
-    var pt = function(v, i) {
-        return [pad.l + (i / Math.max(1, data.length - 1)) * cw, pad.t + ch - (v / max) * ch];
-    };
-    var line = '';
-    data.forEach(function(v, i) {
-        var xy = pt(v, i);
-        line += (i ? 'L' : 'M') + xy[0] + ',' + xy[1];
-    });
-    s += '<path d="' + line + ' L' + (pad.l + cw) + ',' + (pad.t + ch) + ' L' + pad.l + ',' + (pad.t + ch) + ' Z" fill="' + color + '" opacity=".14"/>';
-    s += '<path d="' + line + '" fill="none" stroke="' + color + '" stroke-width="1.6"/>';
-    (labels || []).forEach(function(l, i) {
-        if (i % Math.ceil((labels.length || 1) / 6)) return;
-        var x = pad.l + (i / Math.max(1, labels.length - 1)) * cw;
-        s += '<text x="' + x + '" y="' + (H - 6) + '" fill="#5d6375" font-size="9.5" text-anchor="middle">' + esc(l) + '</text>';
-    });
-    s += '<text x="' + (W - 4) + '" y="' + (pad.t + 8) + '" fill="#9298ab" font-size="9.5" text-anchor="end">' + fmtK(max) + '</text></svg>';
-    el.innerHTML = s;
 }
 
-function hbarsLegend(el, items, valKey, fmtFn) {
-    if (!items.length) {
-        el.innerHTML = '<div class="empty">No model data yet</div>';
-        return;
-    }
-    var max = Math.max.apply(null, items.map(function(i) { return Number(i[valKey]) || 0; }).concat([1e-9]));
-    var s = '<div style="display:flex;gap:14px;height:100%"><div style="flex:1;display:flex;flex-direction:column;justify-content:space-around">';
-    items.forEach(function(m, i) {
-        s += '<div style="display:flex;align-items:center;gap:8px"><span style="width:170px;text-align:right;font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(m.name) + '</span><div style="flex:1;height:10px;background:#101320;border-radius:2px"><div style="width:' + (Number(m[valKey]) / max * 100).toFixed(1) + '%;height:100%;background:' + P[i % P.length] + ';border-radius:2px"></div></div></div>';
-    });
-    s += '<div style="display:flex;justify-content:space-between;color:var(--dim);font-size:9.5px;margin-left:178px"><span>0</span><span>' + fmtFn(max / 2) + '</span><span>' + fmtFn(max) + '</span></div></div>';
-    s += '<div style="width:190px;overflow:auto;display:flex;flex-direction:column;gap:5px;font-size:10.5px;color:var(--muted)">';
-    items.forEach(function(m, i) {
-        s += '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + P[i % P.length] + ';margin-right:6px"></i>' + esc(m.name) + '</span>';
-    });
-    s += '</div></div>';
-    el.innerHTML = s;
-}
-
-function stackedTime(el, days, map) {
-    if (!days.length) {
-        el.innerHTML = '<div class="empty">No guardrail data yet</div>';
-        return;
-    }
-    var W = el.clientWidth || 600,
-        H = el.clientHeight || 250,
-        pad = { l: 30, r: 8, t: 10, b: 20 },
-        cw = W - pad.l - pad.r,
-        ch = H - pad.t - pad.b;
-    var totals = days.map(function(d) {
-        return CHECKS.reduce(function(a, arr) {
-            return a + (map[d + '|' + arr[0]] || 0);
-        }, 0);
-    });
-    var max = Math.max.apply(null, [1].concat(totals));
-    var bw = Math.max(2, cw / days.length - 2);
-    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '">';
-    [0, .5, 1].forEach(function(t) {
-        var y = pad.t + ch - t * ch;
-        s += '<line x1="' + pad.l + '" y1="' + y + '" x2="' + (W - pad.r) + '" y2="' + y + '" stroke="#20243a" stroke-width=".5"/><text x="' + (pad.l - 5) + '" y="' + (y + 3) + '" fill="#5d6375" font-size="9" text-anchor="end">' + Math.round(max * t) + '</text>';
-    });
-    days.forEach(function(d, i) {
-        var y = pad.t + ch;
-        CHECKS.forEach(function(arr) {
-            var n = arr[0],
-                c = arr[1];
-            var v = map[d + '|' + n] || 0;
-            if (!v) return;
-            var h = (v / max) * ch;
-            y -= h;
-            s += '<rect x="' + (pad.l + i * (cw / days.length)) + '" y="' + y + '" width="' + bw + '" height="' + h + '" fill="' + c + '"/>';
+async function generateApiKey() {
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = 'Generating...';
+    
+    try {
+        const res = await fetch('/api/keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ name: 'Dashboard Generated Key' })
         });
-    });
-    days.forEach(function(d, i) {
-        if (i % Math.ceil(days.length / 6)) return;
-        s += '<text x="' + (pad.l + i * (cw / days.length)) + '" y="' + (H - 5) + '" fill="#5d6375" font-size="9">' + esc(d.slice(5)) + '</text>';
-    });
-    el.innerHTML = s + '</svg>';
+        const data = await res.json();
+        
+        if (data.key) {
+            $('newKeyValue').value = data.key;
+            $('newKeyDisplay').style.display = 'block';
+            await loadApiKeys();
+            toast('Key generated successfully!');
+        } else {
+            toast('Error: ' + (data.error || 'Failed to generate key'));
+        }
+    } catch (e) {
+        toast('Network error while generating key');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '+ Generate New API Key';
+    }
 }
 
-function multiLine(el, days, series) {
-    if (!series.length) {
-        el.innerHTML = '<div class="empty">No data</div>';
-        return;
-    }
-    var W = el.clientWidth || 600,
-        H = el.clientHeight || 300,
-        pad = { l: 36, r: 8, t: 10, b: 20 },
-        cw = W - pad.l - pad.r,
-        ch = H - pad.t - pad.b;
-    var allVals = [];
-    series.forEach(function(sr) {
-        allVals = allVals.concat(sr.values);
-    });
-    var max = Math.max.apply(null, [1].concat(allVals));
-    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '">';
-    [0, .25, .5, .75, 1].forEach(function(t) {
-        var y = pad.t + ch - t * ch;
-        s += '<line x1="' + pad.l + '" y1="' + y + '" x2="' + (W - pad.r) + '" y2="' + y + '" stroke="#20243a" stroke-width=".5"/><text x="' + (pad.l - 5) + '" y="' + (y + 3) + '" fill="#5d6375" font-size="9" text-anchor="end">' + fmtK(max * t) + '</text>';
-    });
-    series.forEach(function(sr) {
-        var p = '';
-        sr.values.forEach(function(v, i) {
-            var x = pad.l + (i / Math.max(1, sr.values.length - 1)) * cw,
-                y = pad.t + ch - (v / max) * ch;
-            p += (i ? 'L' : 'M') + x + ',' + y;
+async function revokeApiKey(keyId) {
+    if (!confirm('Are you sure you want to revoke this key? It will stop working immediately.')) return;
+    try {
+        const res = await fetch(`/api/keys/${keyId}`, {
+            method: 'DELETE',
+            credentials: 'include'
         });
-        s += '<path d="' + p + '" fill="none" stroke="' + sr.color + '" stroke-width="1.2"/>';
-    });
-    days.forEach(function(d, i) {
-        if (i % Math.ceil(days.length / 5)) return;
-        var x = pad.l + (i / Math.max(1, days.length - 1)) * cw;
-        s += '<text x="' + x + '" y="' + (H - 5) + '" fill="#5d6375" font-size="9" text-anchor="middle">' + esc(d.slice(5)) + '</text>';
-    });
-    el.innerHTML = s + '</svg><div class="legend">';
-    series.forEach(function(sr) {
-        s += '<span><i style="background:' + sr.color + '"></i>' + esc(sr.name) + '</span>';
-    });
-    el.innerHTML = s + '</div>';
+        if (res.ok) {
+            toast('Key revoked successfully');
+            await loadApiKeys();
+        } else {
+            toast('Failed to revoke key');
+        }
+    } catch (e) {
+        toast('Network error while revoking key');
+    }
 }
 
-function donut(el, okPct, okN, failN) {
-    var r1 = 75 + 56 * Math.sin(Math.max(.02, (1 - okPct / 100) * 6.283));
-    var r2 = 75 - 56 * Math.cos(Math.max(.02, (1 - okPct / 100) * 6.283));
-    el.innerHTML = '<div style="display:flex;align-items:center;gap:18px;height:100%;justify-content:center"><svg width="150" height="150" viewBox="0 0 150 150"><circle cx="75" cy="75" r="56" fill="#2b8a5e" opacity=".9"/><path d="M75 19 A56 56 0 0 1 ' + r1 + ' ' + r2 + '" stroke="var(--red2)" stroke-width="3" fill="none"/><circle cx="75" cy="75" r="34" fill="var(--card)"/><text x="75" y="72" text-anchor="middle" fill="var(--dim)" font-size="9">' + (100 - okPct).toFixed(0) + '%</text><text x="75" y="86" text-anchor="middle" fill="var(--dim)" font-size="9">' + okPct.toFixed(0) + '%</text></svg><div style="font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:6px"><span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--red2);margin-right:6px"></i>Failed Requests</span><span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#2b8a5e;margin-right:6px"></i>Successful Requests</span></div></div>';
+function copyNewKey() {
+    const input = $('newKeyValue');
+    input.select();
+    navigator.clipboard.writeText(input.value).then(() => {
+        toast('API Key copied to clipboard!');
+    }).catch(() => {
+        document.execCommand('copy');
+        toast('API Key copied!');
+    });
 }
-
-function forecastBand(el, hist) {
-    if (!hist || hist.length < 2) {
-        el.innerHTML = '<div class="empty">Not enough history</div>';
-        return;
-    }
-    var W = el.clientWidth || 500,
-        H = el.clientHeight || 170,
-        pad = { l: 26, r: 6, t: 10, b: 16 },
-        cw = W - pad.l - pad.r,
-        ch = H - pad.t - pad.b;
-    var delta = (hist[hist.length - 1] - hist[0]) / (hist.length - 1);
-    var fc = [];
-    for (var i = 0; i < 6; i++) {
-        fc.push(Math.max(0, hist[hist.length - 1] + delta * (i + 1)));
-    }
-    var histMax = Math.max.apply(null, [1].concat(hist));
-    var band = fc.map(function(v) {
-        return Math.max(v * .25, histMax * .06);
-    });
-    var fcWithBand = fc.map(function(v, i) {
-        return v + band[i];
-    });
-    var max = Math.max.apply(null, hist.concat(fcWithBand)) * 1.1;
-    var X = function(i) {
-        return pad.l + (i / (hist.length - 1)) * cw * .62;
-    };
-    var XF = function(i) {
-        return pad.l + cw * .62 + (i / 6) * cw * .38;
-    };
-    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '">';
-    var p = '';
-    hist.forEach(function(v, i) {
-        var y = pad.t + ch - (v / max) * ch;
-        p += (i ? 'L' : 'M') + X(i) + ',' + y;
-    });
-    s += '<path d="' + p + '" fill="none" stroke="#e6e8f2" stroke-width="1"/>';
-    var ly = pad.t + ch - (hist[hist.length - 1] / max) * ch,
-        lx = X(hist.length - 1);
-    var up = '',
-        lo = '';
-    fc.forEach(function(v, i) {
-        up += 'L' + XF(i + 1) + ',' + (pad.t + ch - ((v + band[i]) / max) * ch) + ' ';
-    });
-    for (var j = fc.length - 1; j >= 0; j--) {
-        lo += 'L' + XF(j + 1) + ',' + (pad.t + ch - (Math.max(0, fc[j] - band[j]) / max) * ch) + ' ';
-    }
-    s += '<path d="M' + lx + ',' + ly + ' ' + up + lo + ' Z" fill="#4c8dff" opacity=".25"/>';
-    var fl = 'M' + lx + ',' + ly;
-    fc.forEach(function(v, i) {
-        fl += ' L' + XF(i + 1) + ',' + (pad.t + ch - (v / max) * ch);
-    });
-    s += '<path d="' + fl + '" fill="none" stroke="#7aa7ff" stroke-width="1"/></svg>';
-    el.innerHTML = s;
-}
-
-function spark(el, data, color) {
-    color = color || '#4c8dff';
-    if (!data || data.length < 2) {
-        el.innerHTML = '';
-        return;
-    }
-    var W = el.clientWidth || 180,
-        H = 40,
-        max = Math.max.apply(null, [1].concat(data));
-    var p = '';
-    data.forEach(function(v, i) {
-        p += (i ? 'L' : 'M') + (i / (data.length - 1)) * W + ',' + (H - 4 - (v / max) * (H - 8));
-    });
-    el.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:40px"><path d="' + p + '" fill="none" stroke="' + color + '" stroke-width="1"/></svg>';
-}
+// ==========================================
+// FIN GESTION DES CLÉS API
+// ==========================================
 
 function showView(n) {
-    document.querySelectorAll('.view').forEach(function(v) {
-        v.classList.remove('active');
-    });
+    document.querySelectorAll('.view').forEach(function(v) { v.classList.remove('active'); });
     $('view-' + n).classList.add('active');
-    document.querySelectorAll('#topTabs button').forEach(function(b) {
-        b.classList.toggle('active', b.dataset.view === n);
-    });
+    document.querySelectorAll('#topTabs button').forEach(function(b) { b.classList.toggle('active', b.dataset.view === n); });
     $('fside').style.display = (n === 'health') ? '' : 'none';
     if (n === 'health') renderHealth();
     if (n === 'overview') renderOverview();
@@ -625,19 +505,13 @@ function showView(n) {
 }
 
 document.querySelectorAll('#topTabs button').forEach(function(b) {
-    b.addEventListener('click', function() {
-        if (b.dataset.view) showView(b.dataset.view);
-    });
+    b.addEventListener('click', function() { if (b.dataset.view) showView(b.dataset.view); });
 });
 
 document.querySelectorAll('#latTabs button').forEach(function(b) {
     b.addEventListener('click', function() {
-        document.querySelectorAll('#latTabs button').forEach(function(x) {
-            x.classList.remove('active');
-        });
-        b.classList.add('active');
-        state.latStat = b.dataset.s;
-        renderLatency();
+        document.querySelectorAll('#latTabs button').forEach(function(x) { x.classList.remove('active'); });
+        b.classList.add('active'); state.latStat = b.dataset.s; renderLatency();
     });
 });
 
@@ -657,16 +531,12 @@ function buildSidebar() {
     var noop = 'noop';
     window.noop = function() {};
     window.toggleModel = function(el, name) {
-        if (el.checked) {
-            state.modelFilter.add(name);
-        } else {
-            state.modelFilter.delete(name);
-        }
+        if (el.checked) { state.modelFilter.add(name); } else { state.modelFilter.delete(name); }
         renderHealth();
     };
 
     var modelItems = models.length ? models.map(function(m) { return makeItem(state.modelFilter.has(m), 'toggleModel', m); }).join('') : '<div class="dim" style="padding:4px 6px;font-size:11px">no models yet</div>';
-    $('fside').innerHTML = makeGroup('Provider', ['agentguard'], new Set(['agentguard']), noop) + '<div class="fgroup"><div>▾ Model</div><div class="fitems">' + modelItems + '</div></div>' + makeGroup('Service', ['agentguard-collector'], new Set(['agentguard-collector']), noop) + makeGroup('Agent', ['sdk-agent'], new Set(), noop);
+    $('fside').innerHTML = makeGroup('Provider', ['cerbere'], new Set(['cerbere']), noop) + '<div class="fgroup"><div>▾ Model</div><div class="fitems">' + modelItems + '</div></div>' + makeGroup('Service', ['cerbere-collector'], new Set(['cerbere-collector']), noop) + makeGroup('Agent', ['sdk-agent'], new Set(), noop);
 }
 
 function filteredModels() {
@@ -698,8 +568,7 @@ function renderHealth() {
 }
 
 function renderLatency() {
-    var m = state.metrics || {},
-        lat = state.latencyDist || {};
+    var m = state.metrics || {}, lat = state.latencyDist || {};
     var val = state.latStat === 'avg' ? m.avg_latency_ms : lat[state.latStat];
     $('ttrHero').innerHTML = val ? (Number(val) / 1000).toFixed(2) + '<span class="unit">s</span>' : '—';
     areaChart($('ttrChart'), (state.dailyTrend || []).map(function(d) { return d.total; }), (state.dailyTrend || []).map(function(d) { return (d.day || '').slice(5); }));
@@ -709,15 +578,13 @@ function renderLatency() {
 }
 
 function renderOverview() {
-    var m = state.metrics || {},
-        r = m.risk_distribution || {};
+    var m = state.metrics || {}, r = m.risk_distribution || {};
     $('ovProblems').textContent = Number(r.high || 0) + Number(r.critical || 0);
     $('ovRequests').textContent = fmtK(m.total_spans || 0);
     $('ovRequestsT').innerHTML = trendHTML(trendPct((state.dailyTrend || []).map(function(d) { return d.total; })));
     $('ovCost').textContent = '$' + (m.total_cost_usd || 0).toFixed(2);
     $('ovCostT').innerHTML = trendHTML(trendPct((state.costTrend || []).map(function(d) { return d.cost; })), true);
-    var total = Math.max(1, m.total_spans || 0),
-        blk = m.blocked_operations || 0;
+    var total = Math.max(1, m.total_spans || 0), blk = m.blocked_operations || 0;
     donut($('ovDonut'), (total - blk) / total * 100, total - blk, blk);
     $('ovAvg').innerHTML = (Number(m.avg_latency_ms || 0) / 1000).toFixed(2) + '<span class="unit">s</span>';
     $('ovAvgT').innerHTML = trendHTML(trendPct((state.dailyTrend || []).map(function(d) { return d.total; })), true);
@@ -728,10 +595,7 @@ function renderOverview() {
     forecastBand($('ovForecast'), (state.costTrend || []).map(function(d) { return d.cost; }));
     var cb = state.checksBreakdown || [];
     var get = function(n) { return cb.find(function(c) { return c.check_name === n; }); };
-    var inj = get('prompt_injection'),
-        pii = get('pii_detection'),
-        tool = get('tool_policy') || get('dangerous_params'),
-        bud = get('budget_policy');
+    var inj = get('prompt_injection'), pii = get('pii_detection'), tool = get('tool_policy') || get('dangerous_params'), bud = get('budget_policy');
 
     function bigCard(t, v) {
         return '<div class="card"><div class="hero mid" style="font-size:34px">' + esc(v) + '</div><div class="clabel" style="text-align:center;margin-top:4px">' + esc(t) + '</div></div>';
@@ -803,7 +667,7 @@ function loadTrace() {
         var excHTML = '';
         rows.filter(function(r) { return r.blocked; }).forEach(function(r, i) {
             var checksFailed = (r.security_checks || []).filter(function(c) { return !c.passed; }).map(function(c) { return '  [ERROR] ' + c.check_name + ' — ' + c.details; }).join('\n');
-            excHTML += '<tr class="exc-row" onclick="this.nextElementSibling.hidden=!this.nextElementSibling.hidden"><td>▾</td><td class="mono">agentguard.SecurityException</td><td>' + esc(r.block_reason || 'blocked') + '</td></tr><tr hidden><td></td><td colspan="2"><div class="pilltag">Span events: exception id: ' + esc(r.span_id) + '</div><div class="codeblock"><b>Exception root cause:</b> ' + esc(r.block_reason || '') + '\n\nTraceback (most recent call last):\n  File "agentguard_sdk.py", in guard_' + esc(r.span_type) + '\n    raise SecurityException(...)\n' + checksFailed + '</div></td></tr>';
+            excHTML += '<tr class="exc-row" onclick="this.nextElementSibling.hidden=!this.nextElementSibling.hidden"><td>▾</td><td class="mono">cerbere.SecurityException</td><td>' + esc(r.block_reason || 'blocked') + '</td></tr><tr hidden><td></td><td colspan="2"><div class="pilltag">Span events: exception id: ' + esc(r.span_id) + '</div><div class="codeblock"><b>Exception root cause:</b> ' + esc(r.block_reason || '') + '\n\nTraceback (most recent call last):\n  File "agentguard_sdk.py", in guard_' + esc(r.span_type) + '\n    raise SecurityException(...)\n' + checksFailed + '</div></td></tr>';
         });
         $('excTable').innerHTML = excHTML || '<tr><td colspan="3" class="empty">No exceptions</td></tr>';
         selectSpan(state.selSpan || 0);
@@ -830,7 +694,7 @@ window.selectSpan = function(i) {
     var llmScore = r.llm_score != null ? (r.llm_score * 100).toFixed(1) + '%' : '—';
     var decision = r.blocked ? 'BLOCK' : 'ALLOW';
     var decisionClass = r.blocked ? 'pink' : '';
-    $('spanDetail').innerHTML = '<div class="card" style="margin-bottom:10px"><div style="display:flex;gap:10px;align-items:center"><span style="width:30px;height:30px;border-radius:6px;background:#3776ab;color:#fff;display:grid;place-items:center;font-weight:700">PY</span><div><b>' + esc(r.span_type) + '</b><div class="dim" style="font-size:11px">Service: <a href="#">agentguard-collector</a></div></div></div><div style="margin:10px 0;color:var(--muted);font-size:12px"><span class="ui-icon" data-icon="latency"></span> Duration: ' + Number(r.latency_ms || 0).toFixed(2) + ' ms</div></div><div class="attr-sec"><h4>gen ai <span>▾</span></h4>' + kv('Gen ai agent name', 'agentguard-sdk') + kv('Gen ai request model', r.model || 'unknown') + kv('Gen ai prompt 0 role', 'user') + kv('Gen ai prompt 0 content', prompt) + kv('Gen ai completion 0 role', 'assistant') + kv('Gen ai completion 0 content', response) + kv('Gen ai usage input tokens', r.input_tokens || 0, 'pink') + kv('Gen ai usage output tokens', r.output_tokens || 0, 'pink') + '</div><div class="attr-sec"><h4>agentguard <span>▾</span></h4>' + kv('Agentguard detection layer', r.detection_layer || 'regex') + kv('Agentguard ml score', mlScore, 'blue') + kv('Agentguard llm score', llmScore, 'blue') + kv('Agentguard decision', decision, decisionClass) + kv('Agentguard cost usd', Number(r.cost_usd || 0).toFixed(6), 'pink') + '</div>';
+    $('spanDetail').innerHTML = '<div class="card" style="margin-bottom:10px"><div style="display:flex;gap:10px;align-items:center"><span style="width:30px;height:30px;border-radius:6px;background:#3776ab;color:#fff;display:grid;place-items:center;font-weight:700">PY</span><div><b>' + esc(r.span_type) + '</b><div class="dim" style="font-size:11px">Service: <a href="#">cerbere-collector</a></div></div></div><div style="margin:10px 0;color:var(--muted);font-size:12px"><span class="ui-icon" data-icon="latency"></span> Duration: ' + Number(r.latency_ms || 0).toFixed(2) + ' ms</div></div><div class="attr-sec"><h4>gen ai <span>▾</span></h4>' + kv('Gen ai agent name', 'cerbere-sdk') + kv('Gen ai request model', r.model || 'unknown') + kv('Gen ai prompt 0 role', 'user') + kv('Gen ai prompt 0 content', prompt) + kv('Gen ai completion 0 role', 'assistant') + kv('Gen ai completion 0 content', response) + kv('Gen ai usage input tokens', r.input_tokens || 0, 'pink') + kv('Gen ai usage output tokens', r.output_tokens || 0, 'pink') + '</div><div class="attr-sec"><h4>cerbere <span>▾</span></h4>' + kv('Cerbere detection layer', r.detection_layer || 'regex') + kv('Cerbere ml score', mlScore, 'blue') + kv('Cerbere llm score', llmScore, 'blue') + kv('Cerbere decision', decision, decisionClass) + kv('Cerbere cost usd', Number(r.cost_usd || 0).toFixed(6), 'pink') + '</div>';
 };
 
 function renderAudit() {
@@ -861,248 +725,107 @@ function renderAudit() {
     multiLine($('auTrend'), days, series);
     var trailHTML = '';
     (state.audit || []).forEach(function(r) {
-        trailHTML += '<tr><td class="dim">' + esc(String(r.timestamp).replace(' ', ' , ').slice(0, 20)) + '</td><td class="mono">' + esc(r.trace_id) + esc((r.span_id || '').slice(0, 4)) + '</td><td>agentguard</td><td class="mono">agentguard.security</td><td>' + esc(r.model) + '</td><td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(r.prompt) + '">' + esc(r.prompt || '—') + '</td><td>' + esc(r.span_type) + '</td><td>' + esc(r.layer) + '</td><td class="mono">' + (r.blocked ? 'PromptType.BLOCKED' : 'PromptType.INPUT') + '</td></tr>';
+        trailHTML += '<tr><td class="dim">' + esc(String(r.timestamp).replace(' ', ' , ').slice(0, 20)) + '</td><td class="mono">' + esc(r.trace_id) + esc((r.span_id || '').slice(0, 4)) + '</td><td>cerbere</td><td class="mono">cerbere.security</td><td>' + esc(r.model) + '</td><td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(r.prompt) + '">' + esc(r.prompt || '—') + '</td><td>' + esc(r.span_type) + '</td><td>' + esc(r.layer) + '</td><td class="mono">' + (r.blocked ? 'PromptType.BLOCKED' : 'PromptType.INPUT') + '</td></tr>';
     });
     $('auTrail').innerHTML = trailHTML || '<tr><td colspan="9" class="empty">No audit events</td></tr>';
 }
 
-
 var CONNECT_INTEGRATIONS = {
-    python: {target:'connectPython', title:'Python SDK', description:'Native AgentGuard instrumentation. Wrap LLM calls with guard_llm_call and side-effecting tools with guard_tool_call.', code:`pip install agentguard
+    python: {target:'connectPython', title:'Python SDK', description:'Native Cerbere instrumentation. Wrap LLM calls with guard_llm_call and side-effecting tools with guard_tool_call.', code:`pip install agentguard
 
 from agentguard_sdk import AgentGuard
 
 guard = AgentGuard(
-    collector_url="https://YOUR_AGENTGUARD_HOST",
-    api_key="YOUR_AGENTGUARD_API_KEY",
+    collector_url="https://YOUR_CERBERE_HOST",
+    api_key="YOUR_CERBERE_API_KEY",
     agent_id="my-agent",
 )
 
 @guard.guard_llm_call
-def call_model(prompt, model="gpt-5"):
+def call_model(prompt, model="gpt-4o"):
     from openai import OpenAI
-    return OpenAI().responses.create(model=model, input=prompt)
+    return OpenAI().chat.completions.create(model=model, messages=[{"role":"user","content":prompt}])
 
 @guard.guard_tool_call("search_customer")
 def search_customer(query):
     return your_search_function(query)`},
-    mcp: {target:'connectMcp', title:'MCP', description:'Use an AgentGuard MCP adapter at the execution boundary. The adapter authorizes the tool call before forwarding it to the MCP server.', code:`# MCP server-side boundary
-export AGENTGUARD_API_KEY="YOUR_AGENTGUARD_API_KEY"
-export AGENTGUARD_COLLECTOR_URL="https://YOUR_AGENTGUARD_HOST"
+    mcp: {target:'connectMcp', title:'MCP', description:'Use a Cerbere MCP adapter at the execution boundary. The adapter authorizes the tool call before forwarding it to the MCP server.', code:`# MCP server-side boundary
+export AGENTGUARD_API_KEY="YOUR_CERBERE_API_KEY"
+export AGENTGUARD_COLLECTOR_URL="https://YOUR_CERBERE_HOST"
 
 # Request flow:
-# MCP client -> AgentGuard adapter -> policy decision
+# MCP client -> Cerbere adapter -> policy decision
 #                         |-> deny / require approval
 #                         |-> allow -> MCP server/tool
-#                         |-> telemetry -> AgentGuard Collector
-
-# Keep the API key out of the browser and MCP client UI.`},
-    http: {target:'connectHttp', title:'HTTP Gateway', description:'Language-agnostic ingestion. Use this when the agent runtime cannot install the Python SDK. Verify the deployed API contract before production rollout.', code:`curl -X POST "https://YOUR_AGENTGUARD_HOST/api/spans" \\
+#                         |-> telemetry -> Cerbere Collector`},
+    http: {target:'connectHttp', title:'HTTP Gateway', description:'Language-agnostic ingestion. Use this when the agent runtime cannot install the Python SDK.', code:`curl -X POST "https://YOUR_CERBERE_HOST/api/spans" \\
   -H "Content-Type: application/json" \\
-  -H "X-API-Key: YOUR_AGENTGUARD_API_KEY" \\
+  -H "X-API-Key: YOUR_CERBERE_API_KEY" \\
   -d '{
     "agent_id": "my-agent",
     "span_type": "tool_call",
     "tool": "search_customer",
     "input_data": {"query": "customer@example.com"}
-  }'`},
-    composio: {target:'connectComposio', title:'Composio', description:'Use AgentGuard immediately before Composio executes a tool. Keep both credentials server-side and treat the raw Composio tool as untrusted until authorized.', code:`from agentguard_sdk import AgentGuard
-
-guard = AgentGuard(
-    collector_url="https://YOUR_AGENTGUARD_HOST",
-    api_key="YOUR_AGENTGUARD_API_KEY",
-    agent_id="composio-agent",
-)
-
-@guard.guard_tool_call("composio_tool")
-def run_composio_tool(tool, arguments):
-    return composio_client.execute(tool, arguments)
-
-# Pass guarded tool functions to your agent, not raw side-effecting tools.`},
-    openai: {target:'connectOpenai', title:'OpenAI', description:'AgentGuard wraps the OpenAI call path while the existing SDK handles security checks, budgets and telemetry.', code:`from agentguard_sdk import AgentGuard
-from openai import OpenAI
-
-guard = AgentGuard(
-    collector_url="https://YOUR_AGENTGUARD_HOST",
-    api_key="YOUR_AGENTGUARD_API_KEY",
-    agent_id="openai-agent",
-)
-client = OpenAI()
-
-@guard.guard_llm_call
-def ask_openai(prompt, model="gpt-5"):
-    return client.responses.create(model=model, input=prompt)
-
-response = ask_openai("Summarize the latest customer request")`},
-    anthropic: {target:'connectAnthropic', title:'Anthropic', description:'Protect Claude requests with the same AgentGuard runtime boundary. Guard every side-effecting tool separately.', code:`from agentguard_sdk import AgentGuard
-from anthropic import Anthropic
-
-guard = AgentGuard(
-    collector_url="https://YOUR_AGENTGUARD_HOST",
-    api_key="YOUR_AGENTGUARD_API_KEY",
-    agent_id="claude-agent",
-)
-client = Anthropic()
-
-@guard.guard_llm_call
-def ask_claude(prompt, model="claude-sonnet-4-5"):
-    return client.messages.create(
-        model=model,
-        max_tokens=1024,
-        messages=[{"role":"user","content":prompt}],
-    )`},
-    langgraph: {target:'connectLanggraph', title:'LangGraph', description:'Framework integration through node and tool wrappers. AgentGuard remains the policy and runtime enforcement layer.', code:`from agentguard_sdk import AgentGuard
-
-guard = AgentGuard(
-    collector_url="https://YOUR_AGENTGUARD_HOST",
-    api_key="YOUR_AGENTGUARD_API_KEY",
-    agent_id="langgraph-agent",
-)
-
-@guard.guard_llm_call
-def model_node(state):
-    return your_model.invoke(state["messages"])
-
-@guard.guard_tool_call("search_customer")
-def search_node(query):
-    return your_search_function(query)
-
-# Add the guarded functions to your StateGraph nodes/edges.`},
-    crewai: {target:'connectCrewai', title:'CrewAI', description:'Framework integration through guarded task tools. Side-effecting operations must call AgentGuard before execution.', code:`from agentguard_sdk import AgentGuard
-
-guard = AgentGuard(
-    collector_url="https://YOUR_AGENTGUARD_HOST",
-    api_key="YOUR_AGENTGUARD_API_KEY",
-    agent_id="crewai-agent",
-)
-
-@guard.guard_tool_call("research_tool")
-def guarded_research(query):
-    return research_tool.run(query)
-
-# Give CrewAI the guarded tool rather than the raw tool.
-# Apply the same pattern to email, database, HTTP and payment tools.`}
+  }'`}
 };
 
 function openConnectAgentModal() {
     var modal = $('connectAgentModal');
-    if (!modal) {
-        toast('Connection modal unavailable');
-        return;
-    }
-
+    if (!modal) { toast('Connection modal unavailable'); return; }
     modal.classList.add('open');
     document.body.style.overflow = 'hidden';
-
     showConnectChooser();
     renderObservedAgents();
     renderIcons(modal);
 }
-var connectModal = $('connectAgentModal');
 
+var connectModal = $('connectAgentModal');
 if (connectModal) {
     connectModal.addEventListener('click', function(e) {
-        if (e.target === connectModal) {
-            closeConnectAgentModal();
-        }
+        if (e.target === connectModal) { closeConnectAgentModal(); }
     });
 }
-
 document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
         var modal = $('connectAgentModal');
-
-        if (modal && modal.classList.contains('open')) {
-            closeConnectAgentModal();
-        }
+        if (modal && modal.classList.contains('open')) { closeConnectAgentModal(); }
     }
 });
-/*
- * Alias utilisé par le bouton "+ Connection".
- * Cela évite d'avoir deux systèmes différents pour la même action.
- */
-function openConnectModal() {
-    openConnectAgentModal();
-}
 
+function openConnectModal() { openConnectAgentModal(); }
 function closeConnectAgentModal() {
     var modal = $('connectAgentModal');
     if (!modal) return;
-
     modal.classList.remove('open');
     document.body.style.overflow = '';
 }
-
-/*
- * Alias éventuel pour les boutons Close/X.
- */
-function closeConnectModal() {
-    closeConnectAgentModal();
-}
+function closeConnectModal() { closeConnectAgentModal(); }
 
 function showConnectChooser() {
-    document
-        .querySelectorAll('#connectAgentModal .connect-view')
-        .forEach(function(v) {
-            v.classList.remove('active');
-        });
-
+    document.querySelectorAll('#connectAgentModal .connect-view').forEach(function(v) { v.classList.remove('active'); });
     var chooser = $('connectChooser');
-    if (chooser) {
-        chooser.classList.add('active');
-    }
+    if (chooser) { chooser.classList.add('active'); }
 }
 
 function showConnectDetail(kind) {
     var cfg = CONNECT_INTEGRATIONS[kind];
     if (!cfg) return;
-
-    document
-        .querySelectorAll('#connectAgentModal .connect-view')
-        .forEach(function(v) {
-            v.classList.remove('active');
-        });
-
+    document.querySelectorAll('#connectAgentModal .connect-view').forEach(function(v) { v.classList.remove('active'); });
     var target = $(cfg.target);
-    if (!target) {
-        toast('Integration view unavailable');
-        return;
-    }
-
+    if (!target) { toast('Integration view unavailable'); return; }
     target.innerHTML =
-        '<button class="connect-back" type="button" onclick="showConnectChooser()">' +
-            '<span class="ui-icon" data-icon="back"></span>' +
-            ' Back to integrations' +
-        '</button>' +
-
+        '<button class="connect-back" type="button" onclick="showConnectChooser()"><span class="ui-icon" data-icon="back"></span> Back to integrations</button>' +
         '<h3>' + esc(cfg.title) + '</h3>' +
         '<p>' + esc(cfg.description) + '</p>' +
-
         '<div class="connect-code-wrap">' +
-            '<pre class="connect-code" id="connectCode-' +
-                esc(kind) +
-            '">' +
-                esc(cfg.code) +
-            '</pre>' +
-
-            '<button class="connect-copy" type="button" ' +
-                'onclick="copyConnectCode(\'' +
-                    esc(kind) +
-                    '\', this)">' +
-                'Copy' +
-            '</button>' +
+            '<pre class="connect-code" id="connectCode-' + esc(kind) + '">' + esc(cfg.code) + '</pre>' +
+            '<button class="connect-copy" type="button" onclick="copyConnectCode(\'' + esc(kind) + '\', this)">Copy</button>' +
         '</div>' +
-
-        '<div class="connect-note">' +
-            '<b>Next:</b> run the integration from your server, send one real event, ' +
-            'then return to the dashboard. AgentGuard derives observed agents from ' +
-            'telemetry and does not provision credentials from the browser.' +
-        '</div>';
-
+        '<div class="connect-note"><b>Next:</b> run the integration from your server, send one real event, then return to the dashboard.</div>';
     target.classList.add('active');
-
     renderIcons(target);
 }
+
 function copyConnectCode(kind, button) {
     var cfg = CONNECT_INTEGRATIONS[kind];
     if (!cfg) return;
@@ -1114,6 +837,7 @@ function copyConnectCode(kind, button) {
     var ta=document.createElement('textarea');ta.value=cfg.code;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();
     try{document.execCommand('copy');done();}catch(e){toast('Copy failed');}document.body.removeChild(ta);
 }
+
 function extractObservedAgents() {
     var candidates=[];
     var add=function(value,timestamp){if(value===null||value===undefined)return;var id=String(value).trim();if(!id||id==='undefined'||id==='null')return;candidates.push({id:id,timestamp:timestamp||null});};
@@ -1123,11 +847,13 @@ function extractObservedAgents() {
     var byId={};candidates.forEach(function(item){var prev=byId[item.id];if(!prev||String(item.timestamp||'')>String(prev.timestamp||''))byId[item.id]=item;});
     return Object.keys(byId).map(function(id){return byId[id];}).sort(function(a,b){return String(b.timestamp||'').localeCompare(String(a.timestamp||''));});
 }
+
 function observedAgentStatus(timestamp){
     if(!timestamp)return {label:'Observed',cls:''};
     var t=Date.parse(String(timestamp).replace(' ','T'));if(isNaN(t))return {label:'Observed',cls:''};
     var age=Date.now()-t;if(age<5*60*1000)return {label:'Connected',cls:'connected'};if(age<60*60*1000)return {label:'Idle',cls:'idle'};return {label:'Offline',cls:''};
 }
+
 function renderObservedAgents(){
     var el=$('connectAgentList');if(!el)return;var agents=extractObservedAgents();
     if(!agents.length){el.innerHTML='<div class="empty" style="padding:18px 8px">No agent telemetry observed yet.</div>';return;}
@@ -1136,50 +862,17 @@ function renderObservedAgents(){
 
 function refreshAll() {
     Promise.all([
-        api('/api/metrics'),
-        api('/api/traces'),
-        api('/api/detection/stats'),
-        api('/api/models'),
-        api('/api/checks/breakdown'),
-        api('/api/heatmap'),
-        api('/api/spans/expensive'),
-        api('/api/cost/trend'),
-        api('/api/latency/distribution'),
-        api('/api/events/recent'),
-        api('/api/trend/daily'),
-        api('/api/audit/trail'),
-        api('/api/checks/daily'),
-        api('/api/models/daily')
+        api('/api/metrics'), api('/api/traces'), api('/api/detection/stats'),
+        api('/api/models'), api('/api/checks/breakdown'), api('/api/heatmap'),
+        api('/api/spans/expensive'), api('/api/cost/trend'), api('/api/latency/distribution'),
+        api('/api/events/recent'), api('/api/trend/daily'), api('/api/audit/trail'),
+        api('/api/checks/daily'), api('/api/models/daily')
     ]).then(function(results) {
-        var m = results[0],
-            t = results[1],
-            d = results[2],
-            models = results[3],
-            checks = results[4],
-            heatmap = results[5],
-            expensive = results[6],
-            costTrend = results[7],
-            latencyDist = results[8],
-            recentEvents = results[9],
-            dailyTrend = results[10],
-            audit = results[11],
-            checksDaily = results[12],
-            modelsDaily = results[13];
-        state.metrics = m;
-        state.traces = t;
-        state.detection = d;
-        state.models = models;
-        state.checksBreakdown = checks;
-        state.heatmap = heatmap;
-        state.expensive = expensive;
-        state.costTrend = costTrend;
-        state.latencyDist = latencyDist;
-        state.recentEvents = recentEvents;
-        state.dailyTrend = dailyTrend;
-        state.audit = audit;
-        state.checksDaily = checksDaily;
-        state.modelsDaily = modelsDaily;
-        renderObservedAgents();
+        state.metrics = results[0]; state.traces = results[1]; state.detection = results[2];
+        state.models = results[3]; state.checksBreakdown = results[4]; state.heatmap = results[5];
+        state.expensive = results[6]; state.costTrend = results[7]; state.latencyDist = results[8];
+        state.recentEvents = results[9]; state.dailyTrend = results[10]; state.audit = results[11];
+        state.checksDaily = results[12]; state.modelsDaily = results[13];
         var active = document.querySelector('.view.active').id.replace('view-', '');
         showView(active);
         toast('Dashboard refreshed');
@@ -1189,36 +882,19 @@ function refreshAll() {
 }
 
 refreshAll();
-// ✅ FIX perf : ne pas taper le backend en continu quand l'onglet n'est
-// pas regarde (l'ancien setInterval tournait 24/7 des qu'un onglet
-// restait ouvert, meme en arriere-plan, ce qui pouvait saturer un
-// service Render free-tier mono-worker).
 var _refreshTimer = null;
-
 function startRefreshLoop() {
     if (_refreshTimer) return;
     refreshAll();
     _refreshTimer = setInterval(refreshAll, 30000);
 }
-
 function stopRefreshLoop() {
-    if (_refreshTimer) {
-        clearInterval(_refreshTimer);
-        _refreshTimer = null;
-    }
+    if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null; }
 }
-
 document.addEventListener('visibilitychange', function() {
-    if (document.hidden) {
-        stopRefreshLoop();
-    } else {
-        startRefreshLoop();
-    }
+    if (document.hidden) { stopRefreshLoop(); } else { startRefreshLoop(); }
 });
-
-if (!document.hidden) {
-    startRefreshLoop();
-}
+if (!document.hidden) { startRefreshLoop(); }
 </script>
 </body>
 </html>
