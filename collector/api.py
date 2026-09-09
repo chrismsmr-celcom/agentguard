@@ -1042,10 +1042,13 @@ def public_key():
 @api_bp.route("/api/decide", methods=["POST"])
 def decide():
     """Décision de sécurité signée (autorité zero-trust)."""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+
     data = request.get_json(silent=True) or {}
     tool_name = str(data.get("tool_name", ""))
     params = data.get("params", {}) or {}
-    agent_id = str(data.get("agent_id", g.org_id))
+    agent_id = str(data.get("agent_id") or g.org_id)
 
     try:
         from policy import PolicyEngine
