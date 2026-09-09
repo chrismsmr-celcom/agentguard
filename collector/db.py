@@ -4,10 +4,81 @@ import hashlib
 import os
 import re
 import sqlite3
+import threading
 import structlog
 from typing import Tuple, Optional, Any
 
 logger = structlog.get_logger("agentguard.db")
+
+# ═══════════════════════════════════════════════════════════════
+# POSTGRES CONNECTION POOL
+# ═══════════════════════════════════════════════════════════════
+# ✅ FIX (perf) : avant ce patch, get_pg_conn() ouvrait une NOUVELLE
+# connexion TCP+TLS+auth a Postgres a CHAQUE appel (~1-2s d'overhead
+# sur Render). Avec 14 endpoints tapes par le dashboard toutes les
+# 20s et un seul worker gunicorn, ca serialise ~28-30s de latence
+# par cycle de refresh et fait deborder la file d'attente en continu.
+#
+# On garde exactement la meme convention d'appel partout ailleurs
+# dans le code (`conn = get_pg_conn(); ...; conn.close()`) : le proxy
+# ci-dessous rend juste la connexion au pool au lieu de la fermer.
+
+_PG_POOL = None
+_PG_POOL_LOCK = threading.Lock()
+
+
+def _get_pg_pool():
+    global _PG_POOL
+    if _PG_POOL is None:
+        with _PG_POOL_LOCK:
+            if _PG_POOL is None:
+                from psycopg_pool import ConnectionPool
+
+                _, database_url = _get_db_config()
+                if not database_url:
+                    raise RuntimeError("DATABASE_URL not configured for PostgreSQL")
+
+                _PG_POOL = ConnectionPool(
+                    database_url,
+                    min_size=1,
+                    max_size=int(os.environ.get("AGENTGUARD_DB_POOL_MAX", "5")),
+                    timeout=10,
+                    open=True,
+                )
+                logger.info(
+                    "pg_pool_initialized",
+                    max_size=int(os.environ.get("AGENTGUARD_DB_POOL_MAX", "5")),
+                )
+    return _PG_POOL
+
+
+class _PooledConnProxy:
+    """Enveloppe une connexion poolee : close() la rend au pool au lieu
+    de la fermer, tout le reste (cursor, commit, ...) passe tel quel."""
+
+    __slots__ = ("_conn", "_pool", "_returned")
+
+    def __init__(self, conn, pool):
+        object.__setattr__(self, "_conn", conn)
+        object.__setattr__(self, "_pool", pool)
+        object.__setattr__(self, "_returned", False)
+
+    def close(self):
+        if not self._returned:
+            try:
+                self._pool.putconn(self._conn)
+            except Exception:
+                logger.warning("pg_pool_putconn_failed", exc_info=True)
+            object.__setattr__(self, "_returned", True)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -39,16 +110,17 @@ def is_postgres() -> bool:
 
 
 def get_pg_conn():
-    """Get a PostgreSQL connection with timeout."""
-    import psycopg
+    """Get a PostgreSQL connection from the pool.
 
-    _, database_url = _get_db_config()
-
-    if not database_url:
-        raise RuntimeError("DATABASE_URL not configured for PostgreSQL")
-
-    # ✅ FIX: explicit connection timeout (5 seconds)
-    return psycopg.connect(database_url, connect_timeout=5)
+    ✅ FIX: was `psycopg.connect(...)` on every call (nouvelle connexion
+    TCP+TLS a chaque requete, ~1-2s d'overhead). Passe maintenant par un
+    pool reutilisable ; conn.close() rend la connexion au pool au lieu
+    de la fermer (voir _PooledConnProxy plus haut). Convention d'appel
+    inchangee pour tous les sites d'appel existants.
+    """
+    pool = _get_pg_pool()
+    conn = pool.getconn(timeout=10)
+    return _PooledConnProxy(conn, pool)
 
 
 def get_sqlite_conn():
