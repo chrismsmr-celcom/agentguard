@@ -1189,7 +1189,36 @@ function refreshAll() {
 }
 
 refreshAll();
-setInterval(refreshAll, 20000);
+// ✅ FIX perf : ne pas taper le backend en continu quand l'onglet n'est
+// pas regarde (l'ancien setInterval tournait 24/7 des qu'un onglet
+// restait ouvert, meme en arriere-plan, ce qui pouvait saturer un
+// service Render free-tier mono-worker).
+var _refreshTimer = null;
+
+function startRefreshLoop() {
+    if (_refreshTimer) return;
+    refreshAll();
+    _refreshTimer = setInterval(refreshAll, 30000);
+}
+
+function stopRefreshLoop() {
+    if (_refreshTimer) {
+        clearInterval(_refreshTimer);
+        _refreshTimer = null;
+    }
+}
+
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        stopRefreshLoop();
+    } else {
+        startRefreshLoop();
+    }
+});
+
+if (!document.hidden) {
+    startRefreshLoop();
+}
 </script>
 </body>
 </html>
