@@ -154,13 +154,13 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
     <button data-view="tracing">Explorer (Preview)</button>
     <button data-view="audit">Compliance Audit</button>
     <button type="button" onclick="openConnectAgentModal()">AI Agents</button>
-  </nav>
-  <button onclick="openApiKeyModal()" style="display: inline-flex; align-items: center; padding: 8px 16px; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; font-size: 14px; transition: background 0.2s;">
+    <button onclick="openApiKeyModal()" style="display: inline-flex; align-items: center; padding: 8px 16px; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; font-size: 14px; transition: background 0.2s;">
   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px;">
     <path d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z" />
   </svg>
   Gérer mes Clés API
 </button>
+  </nav>
   <div class="tb-right">
    <button class="btn" onclick="openConnectModal()">+ Connection</button>
     <span class="help">?</span>
@@ -320,8 +320,6 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
   </div>
 </div>
 
-<div id="toast" class="toast"></div>
-<!-- 2. Ajoute cette modale en bas de ta page HTML (avant la fermeture </body>) -->
 <div id="apiKeyModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;">
   <div style="background: #1a1a1a; color: white; padding: 24px; border-radius: 12px; width: 500px; max-width: 90%; border: 1px solid #333;">
     <h3 style="margin-top: 0;">Gestion des Clés API</h3>
@@ -345,6 +343,8 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
     <button onclick="closeApiKeyModal()" style="margin-top: 20px; width: 100%; padding: 10px; background: transparent; color: #aaa; border: 1px solid #444; border-radius: 6px; cursor: pointer;">Fermer</button>
   </div>
 </div>
+<div id="toast" class="toast"></div>
+
 <script>
 var state = { modelFilter: new Set(), selTrace: null, selSpan: 0, latStat: 'avg' };
 
@@ -1327,4 +1327,3 @@ if (!document.hidden) {
 </body>
 </html>
 '''
-
