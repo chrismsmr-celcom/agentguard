@@ -51,8 +51,46 @@ _last_sent = {}
 
 
 def enabled():
-    """True si au moins un canal est configuré."""
-    return bool(SLACK_WEBHOOK or GENERIC_WEBHOOK or (EMAIL_TO and SMTP_HOST))
+    """True si au moins un canal est configuré. SMTP_HOST seul suffit
+    desormais : les destinataires peuvent venir de la table users (par org)
+    meme si EMAIL_TO (global) n'est pas defini."""
+    return bool(SLACK_WEBHOOK or GENERIC_WEBHOOK or SMTP_HOST)
+
+
+def _resolve_org_emails(org_id):
+    """Emails des utilisateurs actifs de l'org (ceux avec qui ils se sont
+    connectes au dashboard) -> alerte envoyee a l'org concernee elle-meme,
+    pas seulement a un inbox admin global."""
+    if not org_id:
+        return []
+    try:
+        from collector.db import is_postgres, get_pg_conn, get_sqlite_conn
+        if is_postgres():
+            conn = get_pg_conn()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT DISTINCT email FROM users WHERE org_id = %s AND active = TRUE",
+                    (org_id,),
+                )
+                rows = cur.fetchall()
+            finally:
+                conn.close()
+        else:
+            conn = get_sqlite_conn()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT DISTINCT email FROM users WHERE org_id = ? AND active = 1",
+                    (org_id,),
+                )
+                rows = cur.fetchall()
+            finally:
+                conn.close()
+        return [r[0] for r in rows if r and r[0]]
+    except Exception as exc:
+        logger.warning("alerting.resolve_org_emails failed: %s", exc)
+        return []
 
 
 def _should_send(key):
@@ -91,7 +129,7 @@ def _dispatch(event):
         _send_slack(event)
     if GENERIC_WEBHOOK:
         _send_webhook(event)
-    if EMAIL_TO and SMTP_HOST:
+    if SMTP_HOST:
         _send_email(event)
 
 
@@ -157,12 +195,29 @@ def _send_email(event):
         import smtplib
         from email.mime.text import MIMEText
 
+        org_id = event.get("org_id", "")
+        recipients = _resolve_org_emails(org_id)
+
+        # EMAIL_TO reste un destinataire "admin plateforme" optionnel,
+        # ajoute en plus des emails de l'org (pas a sa place).
+        if EMAIL_TO:
+            for addr in [a.strip() for a in EMAIL_TO.split(",") if a.strip()]:
+                if addr not in recipients:
+                    recipients.append(addr)
+
+        if not recipients:
+            logger.warning(
+                "email alert skipped: no recipient resolved for org_id=%s "
+                "and no AGENTGUARD_ALERT_EMAIL_TO fallback set", org_id,
+            )
+            return
+
         risk = event.get("risk_level", "high")
         msg = MIMEText(_human_text(event), "plain", "utf-8")
         msg["Subject"] = (f"🚨 [AgentGuard] {str(risk).upper()} — "
                           f"{event.get('check_name', 'unknown')} bloqué")
         msg["From"] = SMTP_USER or "agentguard@localhost"
-        msg["To"] = EMAIL_TO
+        msg["To"] = ", ".join(recipients)
 
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
             server.ehlo()
@@ -174,6 +229,8 @@ def _send_email(event):
             if SMTP_USER and SMTP_PASS:
                 server.login(SMTP_USER, SMTP_PASS)
             server.send_message(msg)
+
+        logger.info("email alert sent to %d recipient(s) for org_id=%s", len(recipients), org_id)
     except Exception as exc:
         logger.warning("email alert error: %s", exc)
 
@@ -201,3 +258,4 @@ if __name__ == "__main__":
         })
         time.sleep(3)  # laisse le thread envoyer
         print("✅ Alerte de test envoyée — vérifie ton canal")
+
