@@ -5,6 +5,7 @@ Signature Ed25519 : aucun client ne peut forger une décision ALLOW.
 import base64
 import json
 import time
+import os
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
@@ -16,12 +17,38 @@ class DecisionSigner:
     """Côté COLLECTOR : signe les décisions de sécurité."""
 
     def __init__(self, private_key_pem: str = None):
-        if private_key_pem:
-            self._key = serialization.load_pem_private_key(
-                private_key_pem.encode(), password=None
-            )
-        else:
-            self._key = Ed25519PrivateKey.generate()
+    """
+    Initialize the signing key.
+
+    Production MUST provide a persistent private key.
+    Automatic key generation is allowed only when explicitly
+    requested for local development.
+    """
+
+    allow_ephemeral = (
+        os.getenv(
+            "AGENTGUARD_ALLOW_EPHEMERAL_SIGNING_KEY",
+            "false",
+        ).lower()
+        in {"1", "true", "yes", "on"}
+    )
+
+    if private_key_pem:
+        self._key = serialization.load_pem_private_key(
+            private_key_pem.encode(),
+            password=None,
+        )
+
+    elif allow_ephemeral:
+        self._key = Ed25519PrivateKey.generate()
+
+    else:
+        raise RuntimeError(
+            "Persistent signing key is required. "
+            "Set CERBERE_SIGNING_KEY or explicitly enable "
+            "AGENTGUARD_ALLOW_EPHEMERAL_SIGNING_KEY=true "
+            "for local development only."
+        )
 
         self._public_pem = self._key.public_key().public_bytes(
             serialization.Encoding.PEM,
