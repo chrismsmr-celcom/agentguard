@@ -1,16 +1,19 @@
 """
 AgentGuard Triple Judge System
-Trois juges spécialisés pour éliminer les hallucinations de modération.
 
-Architecture :
-  1. Prompt Guard (Meta)  — injection detection, ultra-rapide
-  2. Llama Guard 3 (Meta) — content safety, taxonomie OWASP
-  3. DeepSeek             — analyse contextuelle (cas ambigus)
+Architecture:
+  1. Prompt Guard — prompt injection detection
+  2. Llama Guard — content safety
+  3. DeepSeek — contextual analysis
 
-Vote logic :
-  - ANY judge says ATTACK → DENY (defense in depth)
-  - ALL judges safe → ALLOW
-  - Disagreement → REVIEW (human escalation)
+Decision policy:
+  - ANY judge says ATTACK → DENY
+  - UNCERTAIN / disagreement → REVIEW
+  - ALL available judges say SAFE → ALLOW
+  - ALL judges unavailable → REVIEW
+
+IMPORTANT:
+  UNAVAILABLE is never equivalent to SAFE.
 """
 import os
 import time
