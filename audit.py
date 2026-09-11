@@ -19,6 +19,7 @@ import json
 import time
 import hashlib
 import secrets
+import threading
 from datetime import datetime
 from dataclasses import dataclass, asdict
 from typing import Optional, Dict, Any, List
@@ -140,6 +141,7 @@ class ImmutableAuditLog:
         )
         self.sign_every = sign_every
         self._entry_counter = 0
+        self._write_lock = threading.RLock()
         
         # Signing (optionnel)
         self._signer = None
@@ -255,45 +257,59 @@ class ImmutableAuditLog:
             }
         
         # Récupère le hash précédent
-        prev_hash = self._get_last_hash()
-        
-        # Crée l'entrée
-        entry = AuditEntry(
-            event_id=secrets.token_hex(16),
-            timestamp=time.time(),
-            event_type=event_type.value if isinstance(event_type, AuditEventType) else str(event_type),
-            org_id=str(org_id),
-            actor=str(actor),
-            resource=str(resource),
-            action=str(action),
-            details=details,
-            risk_level=risk_level,
-            prev_hash=prev_hash,
-        )
-        
-        # Calcule le hash
-        entry.entry_hash = entry.compute_hash()
-        
-        # Signature périodique
-        self._entry_counter += 1
-        if self._signer and self.sign_every > 0 and self._entry_counter % self.sign_every == 0:
-            try:
-                payload = {
-                    "request_id": entry.event_id,
-                    "action": "audit_checkpoint",
-                    "policy_name": "audit_chain",
-                    "policy_version": 1,
-                    "reason": f"Checkpoint at entry {self._entry_counter}",
-                }
-                signed = self._signer.sign_decision(payload)
-                entry.signature = signed.get("signature")
-            except Exception as e:
-                print(f"[AuditLog] Signing failed: {e}")
-        
-        # Persiste (Postgres + backup file)
-        self._persist(entry)
-        
-        return entry
+        with self._write_lock:
+    prev_hash = self._get_last_hash()
+
+    entry = AuditEntry(
+        event_id=secrets.token_hex(16),
+        timestamp=time.time(),
+        event_type=(
+            event_type.value
+            if isinstance(event_type, AuditEventType)
+            else str(event_type)
+        ),
+        org_id=str(org_id),
+        actor=str(actor),
+        resource=str(resource),
+        action=str(action),
+        details=details,
+        risk_level=risk_level,
+        prev_hash=prev_hash,
+    )
+
+    entry.entry_hash = entry.compute_hash()
+
+    self._entry_counter += 1
+
+    if (
+        self._signer
+        and self.sign_every > 0
+        and self._entry_counter % self.sign_every == 0
+    ):
+        try:
+            payload = {
+                "request_id": entry.event_id,
+                "action": "audit_checkpoint",
+                "policy_name": "audit_chain",
+                "policy_version": 1,
+                "reason": (
+                    f"Checkpoint at entry "
+                    f"{self._entry_counter}"
+                ),
+            }
+
+            signed = self._signer.sign_decision(payload)
+
+            entry.signature = signed.get("signature")
+
+        except Exception as exc:
+            print(
+                f"[AuditLog] Signing failed: {exc}"
+            )
+
+    self._persist(entry)
+
+return entry
     
     def _persist(self, entry: AuditEntry):
         """Persiste l'entrée dans Postgres ET backup file."""
