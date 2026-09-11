@@ -25,12 +25,15 @@ from collector.approvals import (
 import sqlite3
 import os
 
+from collector.auth import require_auth
+
 logger = structlog.get_logger("agentguard.api")
-api_bp = Blueprint("api", __name__)
+
 from decision_engine import (
     DecisionEngine,
     DecisionRequest,
 )
+
 api_bp = Blueprint("api", __name__)
 # Single authoritative runtime decision engine.
 #
@@ -39,6 +42,56 @@ api_bp = Blueprint("api", __name__)
 # Policies should be registered here or loaded through a dedicated
 # policy provider in production.
 decision_engine = DecisionEngine()
+
+
+def get_decision_signer():
+    """Return the process-wide signer used for authoritative decisions.
+
+    A persistent signing key is mandatory in production. The signer is cached
+    in the Flask application extensions so /api/decide and /api/public-key
+    always expose the same public key.
+    """
+    signer = current_app.extensions.get("agentguard_decision_signer")
+    if signer is not None:
+        return signer
+
+    from signing import DecisionSigner
+
+    signing_key = (
+        os.environ.get("CERBERE_SIGNING_KEY")
+        or os.environ.get("AGENTGUARD_SIGNING_KEY")
+    )
+
+    if not signing_key:
+        raise RuntimeError(
+            "CERBERE_SIGNING_KEY or AGENTGUARD_SIGNING_KEY is required"
+        )
+
+    signer = DecisionSigner(signing_key)
+    current_app.extensions["agentguard_decision_signer"] = signer
+    return signer
+
+
+def is_server_registered_tool(tool_name):
+    """Check tool registration from server-side policy state only.
+
+    Client supplied `tool_registered` values are never trusted. A tool is
+    considered registered only when an active server-side policy explicitly
+    lists it in `allowed_tools`.
+    """
+    tool_name = str(tool_name or "").strip()
+    if not tool_name:
+        return False
+
+    for policy in decision_engine.policies.values():
+        if tool_name in getattr(policy, "blocked_tools", set()):
+            continue
+
+        allowed_tools = getattr(policy, "allowed_tools", None)
+        if allowed_tools is not None and tool_name in allowed_tools:
+            return True
+
+    return False
 # ═══════════════════════════════════════════════════════════════
 # STATIC ASSETS (logo, favicon)
 # ═══════════════════════════════════════════════════════════════
@@ -1047,12 +1100,11 @@ def api_audit_trail():
 def public_key():
     """Retourne la clé publique (NON protégé, distribuable)."""
     try:
-        from signing import DecisionSigner
-        signing_key = os.environ.get("CERBERE_SIGNING_KEY") or os.environ.get("AGENTGUARD_SIGNING_KEY", "")
-        signer = DecisionSigner(signing_key or None)
-        return jsonify({"public_key_pem": signer.public_key_pem()})
+        signer = get_decision_signer()
+        return jsonify({"public_key_pem": signer.public_key_pem()}), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error("public_key_unavailable", error=str(e))
+        return jsonify({"error": "signing key is not configured"}), 503
 
 
 @api_bp.route("/api/decide", methods=["POST"])
@@ -1149,9 +1201,9 @@ def decide():
         irreversible=bool(
             data.get("irreversible", False)
         ),
-        tool_registered=bool(
-            data.get("tool_registered", True)
-        ),
+        # SECURITY: tool registration is authoritative server-side.
+        # Never trust `tool_registered` from the client.
+        tool_registered=is_server_registered_tool(tool_name),
         metadata=metadata,
     )
 
@@ -1176,19 +1228,7 @@ def decide():
         result = None
 
         try:
-            from signing import DecisionSigner
-
-            signing_key = (
-                os.environ.get("CERBERE_SIGNING_KEY")
-                or os.environ.get("AGENTGUARD_SIGNING_KEY")
-            )
-
-            if not signing_key:
-                return jsonify({
-                    "error": "decision engine unavailable"
-                }), 503
-
-            signer = DecisionSigner(signing_key)
+            signer = get_decision_signer()
 
             signed = signer.sign_decision({
                 "request_id": secrets.token_hex(16),
@@ -1210,23 +1250,7 @@ def decide():
     # ──────────────────────────────────────────────
 
     try:
-        from signing import DecisionSigner
-
-        signing_key = (
-            os.environ.get("CERBERE_SIGNING_KEY")
-            or os.environ.get("AGENTGUARD_SIGNING_KEY")
-        )
-
-        if not signing_key:
-            logger.error(
-                "signing_key_missing_in_production"
-            )
-
-            return jsonify({
-                "error": "security signing key is not configured"
-            }), 503
-
-        signer = DecisionSigner(signing_key)
+        signer = get_decision_signer()
 
         signed = signer.sign_decision({
             "request_id": secrets.token_hex(16),
@@ -1540,3 +1564,4 @@ def api_reject_approval(approval_id):
             org_id=org_id,
         )
         return jsonify({"error": "Failed to reject request"}), 500
+
