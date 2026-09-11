@@ -27,8 +27,18 @@ import os
 
 logger = structlog.get_logger("agentguard.api")
 api_bp = Blueprint("api", __name__)
-
-
+from decision_engine import (
+    DecisionEngine,
+    DecisionRequest,
+)
+api_bp = Blueprint("api", __name__)
+# Single authoritative runtime decision engine.
+#
+# IMPORTANT:
+# This engine is intentionally created once per collector process.
+# Policies should be registered here or loaded through a dedicated
+# policy provider in production.
+decision_engine = DecisionEngine()
 # ═══════════════════════════════════════════════════════════════
 # STATIC ASSETS (logo, favicon)
 # ═══════════════════════════════════════════════════════════════
@@ -1047,45 +1057,202 @@ def public_key():
 
 @api_bp.route("/api/decide", methods=["POST"])
 def decide():
-    """Décision de sécurité signée (autorité zero-trust)."""
+    """
+    Authoritative zero-trust runtime decision endpoint.
+
+    The client may REQUEST a decision, but it never supplies
+    the decision itself.
+
+    Flow:
+
+        authenticated request
+                ↓
+        server-side DecisionEngine
+                ↓
+        ALLOW / BLOCK / REQUIRE_APPROVAL
+                ↓
+        Ed25519 signature
+    """
+
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
-    data = request.get_json(silent=True) or {}
-    tool_name = str(data.get("tool_name", ""))
-    params = data.get("params", {}) or {}
-    agent_id = str(data.get("agent_id") or g.org_id)
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({
+            "error": "Body must be a JSON object"
+        }), 400
+
+    tool_name = str(data.get("tool_name", "")).strip()
+
+    if not tool_name:
+        return jsonify({
+            "error": "tool_name is required"
+        }), 400
+
+    params = data.get("params")
+
+    if params is None:
+        params = {}
+
+    if not isinstance(params, dict):
+        return jsonify({
+            "error": "params must be an object"
+        }), 400
+
+    # IMPORTANT:
+    # Do NOT trust an arbitrary agent_id supplied by the client.
+    #
+    # The authenticated organization is the security boundary.
+    #
+    # If your auth middleware exposes a verified agent identity,
+    # use it. Otherwise fall back to the organization identity.
+    authenticated_agent_id = (
+        getattr(g, "agent_id", None)
+        or getattr(g, "api_key_id", None)
+        or f"org:{g.org_id}"
+    )
+
+    requested_policy = data.get("policy")
+
+    metadata = {
+        "org_id": g.org_id,
+        "source": "api_decide",
+    }
+
+    if requested_policy:
+        metadata["policy"] = str(requested_policy)
+
+    # Server-side decision request.
+    decision_request = DecisionRequest(
+        agent_id=str(authenticated_agent_id),
+        tool_name=tool_name,
+        tool_category=str(
+            data.get("tool_category", "read")
+        ),
+        identity_trusted=True,
+        model_score=float(data.get("model_score", 0.0) or 0.0),
+        anomaly_score=float(data.get("anomaly_score", 0.0) or 0.0),
+        taint_level=str(
+            data.get("taint_level", "PUBLIC")
+        ).upper(),
+        trajectory_length=int(
+            data.get("trajectory_length", 0) or 0
+        ),
+        previous_risky_actions=int(
+            data.get("previous_risky_actions", 0) or 0
+        ),
+        external_side_effect=bool(
+            data.get("external_side_effect", False)
+        ),
+        irreversible=bool(
+            data.get("irreversible", False)
+        ),
+        tool_registered=bool(
+            data.get("tool_registered", True)
+        ),
+        metadata=metadata,
+    )
+
+    # ──────────────────────────────────────────────
+    # AUTHORITATIVE SERVER-SIDE DECISION
+    # ──────────────────────────────────────────────
 
     try:
-        from policy import PolicyEngine
-        engine = PolicyEngine(policies_dir=os.environ.get("CERBERE_POLICIES_DIR", "./policies"))
-        pd = engine.evaluate_tool_call(agent_id, tool_name, params)
-        action = pd.action.value
-        reason = pd.reason
-        policy_name = pd.policy_name
-        policy_version = pd.policy_version
-    except Exception as e:
-        # Fail-closed
-        action = "DENY"
-        reason = f"policy_engine_error: {e}"
-        policy_name = "fail_closed"
-        policy_version = 0
+        result = decision_engine.evaluate(decision_request)
+
+    except Exception as exc:
+        logger.exception(
+            "decision_engine_failed",
+            error=str(exc),
+            org_id=g.org_id,
+            tool_name=tool_name,
+        )
+
+        # SECURITY:
+        # If the decision engine itself fails,
+        # NEVER return ALLOW.
+        result = None
+
+        try:
+            from signing import DecisionSigner
+
+            signing_key = (
+                os.environ.get("CERBERE_SIGNING_KEY")
+                or os.environ.get("AGENTGUARD_SIGNING_KEY")
+            )
+
+            if not signing_key:
+                return jsonify({
+                    "error": "decision engine unavailable"
+                }), 503
+
+            signer = DecisionSigner(signing_key)
+
+            signed = signer.sign_decision({
+                "request_id": secrets.token_hex(16),
+                "action": "DENY",
+                "policy_name": "fail_closed",
+                "policy_version": 0,
+                "reason": "Decision engine failure",
+            })
+
+            return jsonify(signed), 503
+
+        except Exception:
+            return jsonify({
+                "error": "security decision unavailable"
+            }), 503
+
+    # ──────────────────────────────────────────────
+    # SIGN SERVER DECISION
+    # ──────────────────────────────────────────────
 
     try:
         from signing import DecisionSigner
-        signing_key = os.environ.get("CERBERE_SIGNING_KEY") or os.environ.get("AGENTGUARD_SIGNING_KEY", "")
-        signer = DecisionSigner(signing_key or None)
+
+        signing_key = (
+            os.environ.get("CERBERE_SIGNING_KEY")
+            or os.environ.get("AGENTGUARD_SIGNING_KEY")
+        )
+
+        if not signing_key:
+            logger.error(
+                "signing_key_missing_in_production"
+            )
+
+            return jsonify({
+                "error": "security signing key is not configured"
+            }), 503
+
+        signer = DecisionSigner(signing_key)
+
         signed = signer.sign_decision({
-            "request_id": secrets.token_hex(8),
-            "action": action,
-            "policy_name": policy_name,
-            "policy_version": policy_version,
-            "reason": reason,
+            "request_id": secrets.token_hex(16),
+            "action": result.decision.value.upper(),
+            "policy_name": result.policy,
+            "policy_version": 1,
+            "reason": "; ".join(result.reasons[:5]),
         })
-        return jsonify(signed)
-    except Exception as e:
-        logger.error("signing_failed", error=str(e))
-        return jsonify({"error": "signing unavailable"}), 500
+
+        # Include server-generated decision metadata.
+        signed["risk_score"] = result.risk_score
+        signed["risk_level"] = result.risk_level
+        signed["reason_codes"] = result.reason_codes
+        signed["enforcement"] = result.enforcement
+
+        return jsonify(signed), 200
+
+    except Exception as exc:
+        logger.exception(
+            "decision_signing_failed",
+            error=str(exc),
+        )
+
+        return jsonify({
+            "error": "security signing unavailable"
+        }), 503
 
 # ═══════════════════════════════════════════════════════════════
 # HUMAN-IN-THE-LOOP — APPROVALS
