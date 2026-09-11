@@ -38,7 +38,11 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 from agentguard_sdk import AgentGuard, SecurityException
-
+from concurrent.futures import ThreadPoolExecutor
+guard = AgentGuard(
+  _executor = ThreadPoolExecutor(
+    max_workers=int(os.environ.get("AGENTGUARD_MCP_WORKERS", "4"))
+)
 SERVER_LABEL = os.environ.get("AGENTGUARD_MCP_SERVER_LABEL", "upstream")
 
 guard = AgentGuard(
@@ -78,27 +82,47 @@ async def run_gateway(upstream_command: list[str]) -> None:
                 return result.tools
 
             @gateway.call_tool()
-            async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-                tool_name = f"mcp:{SERVER_LABEL}:{name}"
+async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    tool_name = f"mcp:{SERVER_LABEL}:{name}"
+    arguments = dict(arguments or {})
 
-                try:
-                    # Le point de contrôle : rien n'atteint le serveur MCP
-                    # réel sans être passé par le Policy Engine + Runtime
-                    # Risk Engine + (si configuré) le LLM Judge.
-                    result = guard.guard_tool_call(
-                        tool_name=tool_name,
-                        params=dict(arguments or {}),
-                        func=lambda: asyncio.run(
-                            upstream.call_tool(name, arguments)
-                        ),
-                    )
-                except SecurityException as exc:
-                    return [TextContent(
-                        type="text",
-                        text=f"🛡️ Bloqué par AgentGuard : {exc}",
-                    )]
+    async def execute_upstream():
+        return await upstream.call_tool(name, arguments)
 
-                return result.content
+    def run_guarded():
+        """
+        AgentGuard est synchrone.
+        MCP est asyncio.
+        On exécute donc le guard dans un thread séparé
+        et on ne crée PAS de nouvelle boucle asyncio dans
+        la boucle MCP principale.
+        """
+
+        def execute_in_thread():
+            # Le thread possède sa propre event loop.
+            return asyncio.run(execute_upstream())
+
+        return guard.guard_tool_call(
+            tool_name=tool_name,
+            params=arguments,
+            func=execute_in_thread,
+        )
+
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(
+            _executor,
+            run_guarded,
+        )
+
+    except SecurityException as exc:
+        return [
+            TextContent(
+                type="text",
+                text=f"🛡️ Bloqué par AgentGuard : {exc}",
+            )
+        ]
+
+    return result.content
 
             async with stdio_server() as (down_read, down_write):
                 await gateway.run(
