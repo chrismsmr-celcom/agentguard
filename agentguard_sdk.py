@@ -1675,62 +1675,148 @@ class AgentGuard:
                 )
 
         # Check local (si pas de signed decision ou ALLOW signé)
-        if not check.passed and check.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL) and self.block_on_high:
-            span = GuardSpan(
-                span_id=span_id, trace_id=self.trace_id, span_type="tool_call",
-                timestamp=start, latency_ms=(time.time() - start) * 1000,
-                input_data={"tool": tool_name, "params": params},
-                output_data={"blocked": True},
-                security_checks=[check, runtime_check],
-                blocked=True,
-                block_reason=check.details,
-                input_tokens=0,
-                output_tokens=0,
-            )
-            self.spans.append(span)
-            self._send_to_collector(span)
-            raise SecurityException(f"🛡️ Tool blocked: {check.details}")
+       # ──────────────────────────────────────────────
+# SERVER-SIDE SIGNED DECISION
+# ──────────────────────────────────────────────
 
-        try:
-            result = func(**params)
-        except Exception as exc:
-            span = GuardSpan(
-                span_id=span_id, trace_id=self.trace_id, span_type="tool_call",
-                timestamp=start, latency_ms=(time.time() - start) * 1000,
-                input_data={"tool": tool_name, "params": params},
-                output_data={"error": str(exc)[:1000]},
-                security_checks=[check, runtime_check],
-                input_tokens=0,
-                output_tokens=0,
-            )
-            self.spans.append(span)
-            self._send_to_collector(span)
-            raise
+signed_decision = None
 
-        output_data = {"result": str(result)[:500]}
-        output_data["runtime_risk"] = {
-            "action": runtime_decision.action,
-            "risk_score": runtime_decision.risk_score,
-            "risk_level": runtime_decision.risk_level.value,
-        }
-        if taint_combined_dict:
-            output_data["taint"] = taint_combined_dict
-        if taint_violation and taint_violation.startswith("REVIEW:"):
-            output_data["taint_review"] = taint_violation
+if self._verifier:
+    signed_decision = self._request_signed_decision(
+        tool_name,
+        params or {},
+    )
 
+    # A missing signed decision is NOT an ALLOW.
+    #
+    # If the collector cannot provide a cryptographically
+    # verified decision, the tool must not execute.
+    if signed_decision is None:
         span = GuardSpan(
-            span_id=span_id, trace_id=self.trace_id, span_type="tool_call",
-            timestamp=start, latency_ms=(time.time() - start) * 1000,
-            input_data={"tool": tool_name, "params": params},
-            output_data=output_data,
-            security_checks=[check, runtime_check],
+            span_id=span_id,
+            trace_id=self.trace_id,
+            span_type="tool_call",
+            timestamp=start,
+            latency_ms=(time.time() - start) * 1000,
+            input_data={
+                "tool": tool_name,
+                "params": params,
+            },
+            output_data={
+                "blocked": True,
+                "reason": "signed_decision_unavailable",
+            },
+            security_checks=[
+                check,
+                runtime_check,
+            ],
+            blocked=True,
+            block_reason=(
+                "[SECURITY] "
+                "Signed server decision unavailable"
+            ),
             input_tokens=0,
             output_tokens=0,
         )
+
         self.spans.append(span)
         self._send_to_collector(span)
-        self._record_trajectory_tool(tool_name, runtime_decision)
-        return result
+        self._record_trajectory_tool(
+            tool_name,
+            RuntimeRiskDecision(
+                "DENY",
+                100.0,
+                RiskLevel.CRITICAL,
+                [
+                    "signed server decision unavailable"
+                ],
+                {},
+            ),
+        )
+
+        raise SecurityException(
+            "🛡️ AgentGuard DENY: "
+            "server security decision unavailable"
+        )
+
+    # A cryptographically valid DENY always wins.
+    if signed_decision.get("action") == "DENY":
+        span = GuardSpan(
+            span_id=span_id,
+            trace_id=self.trace_id,
+            span_type="tool_call",
+            timestamp=start,
+            latency_ms=(time.time() - start) * 1000,
+            input_data={
+                "tool": tool_name,
+                "params": params,
+            },
+            output_data={
+                "blocked": True,
+                "signed_decision": signed_decision,
+            },
+            security_checks=[
+                check,
+                runtime_check,
+            ],
+            blocked=True,
+            block_reason=(
+                "[SIGNED DENY] "
+                f"{signed_decision.get('reason', 'policy violation')}"
+            ),
+            input_tokens=0,
+            output_tokens=0,
+        )
+
+        self.spans.append(span)
+        self._send_to_collector(span)
+
+        raise SecurityException(
+            "🛡️ Signed DENY: "
+            f"{signed_decision.get('reason', 'policy violation')}"
+        )
+
+    # REQUIRE_APPROVAL must also prevent execution.
+    if signed_decision.get("action") == "REQUIRE_APPROVAL":
+        span = GuardSpan(
+            span_id=span_id,
+            trace_id=self.trace_id,
+            span_type="tool_call",
+            timestamp=start,
+            latency_ms=(time.time() - start) * 1000,
+            input_data={
+                "tool": tool_name,
+                "params": params,
+            },
+            output_data={
+                "blocked": True,
+                "signed_decision": signed_decision,
+            },
+            security_checks=[
+                check,
+                runtime_check,
+            ],
+            blocked=True,
+            block_reason=(
+                "[SIGNED REVIEW] "
+                f"{signed_decision.get('reason', 'approval required')}"
+            ),
+            input_tokens=0,
+            output_tokens=0,
+        )
+
+        self.spans.append(span)
+        self._send_to_collector(span)
+
+        raise SecurityException(
+            "🛡️ AgentGuard: human approval required"
+        )
+
+    # Only a valid signed ALLOW can continue.
+    if signed_decision.get("action") != "ALLOW":
+        raise SecurityException(
+            "🛡️ AgentGuard DENY: invalid server decision"
+        )
 
     def get_report(self):
         """Génère un rapport de session."""
