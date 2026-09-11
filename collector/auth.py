@@ -2309,107 +2309,82 @@ LOGIN_HTML = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cerbere — Secure Access</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
         :root {
             --bg-primary: #09090b;
-            --bg-secondary: #18181b;
-            --bg-card: rgba(24, 24, 27, 0.6);
+            --bg-secondary: #121215;
             --border-color: rgba(255, 255, 255, 0.08);
-            --border-hover: rgba(239, 68, 68, 0.5);
+            --border-hover: rgba(239, 68, 68, 0.6);
             --text-primary: #fafafa;
             --text-secondary: #a1a1aa;
             --text-muted: #71717a;
             --accent-red: #ef4444;
-            --accent-orange: #f97316;
             --accent-glow: rgba(239, 68, 68, 0.15);
             --success: #10b981;
         }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg-primary);
             color: var(--text-primary);
             min-height: 100vh;
-            overflow-x: hidden;
             -webkit-font-smoothing: antialiased;
         }
-
         .container {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 1.2fr;
             min-height: 100vh;
         }
-
+        
+        /* --- LEFT SIDE: FORM --- */
         .login-section {
             display: flex;
             flex-direction: column;
             justify-content: center;
-            align-items: center;
-            padding: 3rem;
+            padding: 3rem 4rem;
             background: var(--bg-primary);
-            position: relative;
+            border-right: 1px solid var(--border-color);
         }
-
         .login-container {
             width: 100%;
-            max-width: 420px;
-            position: relative;
-            z-index: 1;
+            max-width: 400px;
+            margin: 0 auto;
         }
-
         .logo {
             display: flex;
             align-items: center;
             gap: 12px;
-            margin-bottom: 2.5rem;
-        }
-
-        .logo img {
-            width: 40px;
-            height: 40px;
-        }
-
-        .logo-text {
-            font-size: 22px;
-            font-weight: 700;
-            letter-spacing: -0.02em;
-            color: var(--text-primary);
-        }
-
-        .welcome-text {
             margin-bottom: 2rem;
         }
-
-        .welcome-text h1 {
-            font-size: 28px;
-            font-weight: 600;
-            margin-bottom: 0.5rem;
-            letter-spacing: -0.02em;
-            color: var(--text-primary);
-        }
-
-        .welcome-text p {
-            color: var(--text-secondary);
-            font-size: 15px;
+        .logo img { width: 36px; height: 36px; }
+        .logo-text { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+        
+        .welcome-text { margin-bottom: 2rem; }
+        .welcome-text h1 { font-size: 26px; font-weight: 600; margin-bottom: 0.5rem; letter-spacing: -0.02em; }
+        .welcome-text p { color: var(--text-secondary); font-size: 15px; line-height: 1.5; }
+        
+        .alert {
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 1.5rem;
             line-height: 1.5;
         }
-
+        .alert-error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #f87171; }
+        .alert-success { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); color: #34d399; }
+        
         .auth-tabs {
             display: flex;
             gap: 4px;
-            margin-bottom: 2rem;
+            margin-bottom: 1.5rem;
             background: rgba(255, 255, 255, 0.03);
             padding: 4px;
             border-radius: 8px;
             border: 1px solid var(--border-color);
         }
-
         .auth-tab {
             flex: 1;
             padding: 10px 16px;
@@ -2421,36 +2396,19 @@ LOGIN_HTML = """
             cursor: pointer;
             border-radius: 6px;
             transition: all 0.2s ease;
+            font-family: inherit;
         }
-
         .auth-tab.active {
             background: rgba(255, 255, 255, 0.08);
             color: var(--text-primary);
-            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
         }
-
-        .auth-tab:hover:not(.active) {
-            color: var(--text-primary);
-        }
-
-        .auth-form {
-            display: none;
-            animation: fadeIn 0.3s ease;
-        }
-
-        .auth-form.active {
-            display: block;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(4px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .form-group {
-            margin-bottom: 1.25rem;
-        }
-
+        .auth-tab:hover:not(.active) { color: var(--text-primary); }
+        
+        .auth-form { display: none; }
+        .auth-form.active { display: block; animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .form-group { margin-bottom: 1.25rem; }
         .form-group label {
             display: block;
             margin-bottom: 0.5rem;
@@ -2458,7 +2416,6 @@ LOGIN_HTML = """
             font-weight: 500;
             color: var(--text-secondary);
         }
-
         .form-group input {
             width: 100%;
             padding: 12px 14px;
@@ -2469,18 +2426,15 @@ LOGIN_HTML = """
             font-size: 14px;
             transition: all 0.2s ease;
             outline: none;
+            font-family: inherit;
         }
-
         .form-group input:focus {
             border-color: var(--border-hover);
             background: rgba(255, 255, 255, 0.05);
             box-shadow: 0 0 0 3px var(--accent-glow);
         }
-
-        .form-group input::placeholder {
-            color: var(--text-muted);
-        }
-
+        .form-group input::placeholder { color: var(--text-muted); }
+        
         .btn-primary {
             width: 100%;
             padding: 12px;
@@ -2492,16 +2446,11 @@ LOGIN_HTML = """
             font-weight: 600;
             cursor: pointer;
             transition: all 0.2s ease;
+            font-family: inherit;
         }
-
-        .btn-primary:hover {
-            background: #e4e4e7;
-        }
-
-        .btn-primary:active {
-            transform: scale(0.98);
-        }
-
+        .btn-primary:hover { background: #e4e4e7; }
+        .btn-primary:active { transform: scale(0.98); }
+        
         .divider {
             display: flex;
             align-items: center;
@@ -2511,26 +2460,15 @@ LOGIN_HTML = """
             text-transform: uppercase;
             letter-spacing: 0.05em;
         }
-
-        .divider::before,
-        .divider::after {
+        .divider::before, .divider::after {
             content: '';
             flex: 1;
             height: 1px;
             background: var(--border-color);
         }
-
-        .divider span {
-            padding: 0 1rem;
-        }
-
-        .social-buttons {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            margin-bottom: 1.5rem;
-        }
-
+        .divider span { padding: 0 1rem; }
+        
+        .social-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 1.5rem; }
         .social-btn {
             display: flex;
             align-items: center;
@@ -2546,348 +2484,138 @@ LOGIN_HTML = """
             cursor: pointer;
             transition: all 0.2s ease;
             text-decoration: none;
+            font-family: inherit;
         }
-
-        .social-btn:hover {
-            background: rgba(255, 255, 255, 0.05);
-            border-color: var(--text-muted);
-        }
-
-        .social-btn svg {
-            width: 18px;
-            height: 18px;
-        }
-
+        .social-btn:hover { background: rgba(255, 255, 255, 0.05); border-color: var(--text-secondary); }
+        .social-btn svg { width: 18px; height: 18px; }
+        
         .signup-link {
             text-align: center;
             margin-top: 1.5rem;
             color: var(--text-secondary);
             font-size: 14px;
         }
+        .signup-link a { color: var(--text-primary); text-decoration: none; font-weight: 500; }
+        .signup-link a:hover { text-decoration: underline; }
 
-        .signup-link a {
-            color: var(--text-primary);
-            text-decoration: none;
-            font-weight: 500;
-            transition: color 0.2s ease;
-        }
-
-        .signup-link a:hover {
-            text-decoration: underline;
-        }
-
-        .security-badge {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            margin-top: 2rem;
-            padding: 10px;
-            background: rgba(16, 185, 129, 0.05);
-            border: 1px solid rgba(16, 185, 129, 0.15);
-            border-radius: 6px;
-            color: var(--success);
-            font-size: 12px;
-            font-weight: 500;
-            letter-spacing: 0.02em;
-        }
-
-        .security-badge::before {
-            content: '';
-            width: 6px;
-            height: 6px;
-            background: var(--success);
-            border-radius: 50%;
-            box-shadow: 0 0 8px var(--success);
-            animation: pulse-dot 2s infinite;
-        }
-
-        @keyframes pulse-dot {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.4; }
-        }
-
-        .alert {
-            padding: 12px 16px;
-            border-radius: 8px;
-            font-size: 14px;
-            margin-bottom: 1.5rem;
-            line-height: 1.5;
-            animation: fadeIn 0.3s ease;
-        }
-
-        .alert-error {
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.2);
-            color: #f87171;
-        }
-
-        .alert-success {
-            background: rgba(16, 185, 129, 0.1);
-            border: 1px solid rgba(16, 185, 129, 0.2);
-            color: #34d399;
-        }
-
-        .hero-section {
-            position: relative;
+        /* --- RIGHT SIDE: VISUAL --- */
+        .visual-section {
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
             padding: 3rem;
             background: var(--bg-secondary);
-            overflow: hidden;
-            border-left: 1px solid var(--border-color);
-        }
-
-        .hero-bg {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
+            position: relative;
             overflow: hidden;
         }
-
-        .wave-container {
+        /* Subtle tech grid background, no flashy animations */
+        .visual-section::before {
+            content: '';
             position: absolute;
-            width: 100%;
-            height: 100%;
-        }
-
-        .wave {
-            position: absolute;
-            width: 150%;
-            height: 150%;
-            top: -25%;
-            left: -25%;
-            background: radial-gradient(circle, rgba(239, 68, 68, 0.08) 0%, transparent 60%);
-            border-radius: 40%;
-            animation: rotate 30s linear infinite;
-            transition: transform 0.1s ease-out;
-        }
-
-        .wave:nth-child(2) {
-            background: radial-gradient(circle, rgba(249, 115, 22, 0.06) 0%, transparent 60%);
-            animation-delay: -10s;
-            animation-duration: 40s;
-        }
-
-        .wave:nth-child(3) {
-            background: radial-gradient(circle, rgba(239, 68, 68, 0.04) 0%, transparent 60%);
-            animation-delay: -20s;
-            animation-duration: 50s;
-        }
-
-        @keyframes rotate {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-
-        .grid-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
+            inset: 0;
             background-image: 
                 linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
                 linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
             background-size: 40px 40px;
-            mask-image: radial-gradient(circle at center, black 40%, transparent 80%);
-            -webkit-mask-image: radial-gradient(circle at center, black 40%, transparent 80%);
+            mask-image: radial-gradient(circle at center, black 20%, transparent 70%);
+            -webkit-mask-image: radial-gradient(circle at center, black 20%, transparent 70%);
         }
-
-        .hero-content {
+        .dashboard-preview {
             position: relative;
             z-index: 1;
-            text-align: center;
-            max-width: 560px;
-        }
-
-        .hero-logo {
-            width: 80px;
-            height: 80px;
-            margin-bottom: 2rem;
-            filter: drop-shadow(0 0 40px rgba(239, 68, 68, 0.2));
-            transition: transform 0.5s ease;
-        }
-
-        .hero-section:hover .hero-logo {
-            transform: scale(1.05);
-        }
-
-        .hero-title {
-            font-size: 36px;
-            font-weight: 700;
-            margin-bottom: 1rem;
-            line-height: 1.2;
-            letter-spacing: -0.02em;
-            color: var(--text-primary);
-        }
-
-        .hero-title span {
-            background: linear-gradient(135deg, var(--accent-red) 0%, var(--accent-orange) 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .hero-subtitle {
-            font-size: 16px;
-            color: var(--text-secondary);
-            line-height: 1.6;
-            margin-bottom: 3rem;
-        }
-
-        .hero-features {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
-            text-align: left;
-        }
-
-        .feature {
-            padding: 16px;
-            background: rgba(255, 255, 255, 0.02);
+            width: 100%;
+            max-width: 640px;
+            border-radius: 12px;
             border: 1px solid var(--border-color);
-            border-radius: 8px;
-            transition: all 0.3s ease;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+            overflow: hidden;
+            background: var(--bg-primary);
         }
-
-        .feature:hover {
-            border-color: rgba(239, 68, 68, 0.3);
-            background: rgba(255, 255, 255, 0.04);
+        .dashboard-preview img {
+            width: 100%;
+            height: auto;
+            display: block;
+            opacity: 0.95;
         }
-
-        .feature-icon {
-            width: 32px;
-            height: 32px;
-            margin-bottom: 12px;
-            color: var(--accent-red);
+        .visual-footer {
+            position: absolute;
+            bottom: 2.5rem;
+            display: flex;
+            gap: 2rem;
+            z-index: 1;
         }
-
-        .feature h3 {
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 4px;
-            color: var(--text-primary);
-        }
-
-        .feature p {
-            font-size: 13px;
+        .visual-footer a {
             color: var(--text-muted);
-            line-height: 1.4;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            transition: color 0.2s;
         }
+        .visual-footer a:hover { color: var(--text-primary); }
 
+        /* --- RESPONSIVE --- */
         @media (max-width: 968px) {
-            .container {
-                grid-template-columns: 1fr;
-            }
-            .hero-section {
-                display: none;
-            }
-            .login-section {
-                padding: 2rem;
-            }
+            .container { grid-template-columns: 1fr; }
+            .visual-section { display: none; }
+            .login-section { padding: 2rem; border-right: none; }
         }
-
         @media (max-width: 480px) {
-            .social-buttons {
-                grid-template-columns: 1fr;
-            }
-            .hero-features {
-                grid-template-columns: 1fr;
-            }
+            .social-buttons { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- LEFT SIDE - LOGIN -->
+        <!-- LEFT SIDE: LOGIN FORM -->
         <section class="login-section">
             <div class="login-container">
                 <div class="logo">
                     <img src="/static/logo.svg" alt="Cerbere Logo">
                     <span class="logo-text">CERBERE</span>
                 </div>
-
+                
                 <div class="welcome-text">
                     <h1>Welcome back</h1>
                     <p>Secure access to your AI runtime security console.</p>
                 </div>
-
+                
                 {% if error %}
-                <div class="alert alert-error">
-                    {{ error }}
-                </div>
+                <div class="alert alert-error">{{ error }}</div>
                 {% endif %}
-
                 {% if success %}
-                <div class="alert alert-success">
-                    {{ success }}
-                </div>
+                <div class="alert alert-success">{{ success }}</div>
                 {% endif %}
-
+                
                 <div class="auth-tabs">
-                    <button class="auth-tab active" onclick="switchTab('email')" id="tab-email">
-                        Work Email
-                    </button>
-                    <button class="auth-tab" onclick="switchTab('sso')" id="tab-sso">
-                        Enterprise SSO
-                    </button>
+                    <button class="auth-tab active" onclick="switchTab('email')" id="tab-email">Work Email</button>
+                    <button class="auth-tab" onclick="switchTab('sso')" id="tab-sso">Enterprise SSO</button>
                 </div>
-
+                
                 <!-- Email Form -->
                 <form class="auth-form active" id="email-form" method="post" action="/login">
                     <div class="form-group">
                         <label for="email">Work Email</label>
-                        <input 
-                            type="email" 
-                            id="email" 
-                            name="email" 
-                            placeholder="name@company.com" 
-                            required 
-                            autocomplete="email"
-                            autocapitalize="none"
-                        >
+                        <input type="email" id="email" name="email" placeholder="name@company.com" required autocomplete="email" autocapitalize="none">
                     </div>
-                    <button type="submit" class="btn-primary" id="email-btn">
-                        Send Magic Link
-                    </button>
+                    <button type="submit" class="btn-primary" id="email-btn">Send Magic Link</button>
                 </form>
-
+                
                 <!-- SSO Form -->
                 <form class="auth-form" id="sso-form" method="post" action="/login">
                     <div class="form-group">
                         <label for="company-domain">Company Domain</label>
-                        <input 
-                            type="text" 
-                            id="company-domain" 
-                            name="domain" 
-                            placeholder="company.com" 
-                            required
-                        >
+                        <input type="text" id="company-domain" name="domain" placeholder="company.com" required>
                     </div>
                     <div class="form-group">
                         <label for="sso-email">Work Email</label>
-                        <input 
-                            type="email" 
-                            id="sso-email" 
-                            name="email" 
-                            placeholder="name@company.com" 
-                            required
-                        >
+                        <input type="email" id="sso-email" name="email" placeholder="name@company.com" required>
                     </div>
-                    <button type="submit" class="btn-primary" id="sso-btn">
-                        Continue with SSO
-                    </button>
+                    <button type="submit" class="btn-primary" id="sso-btn">Continue with SSO</button>
                 </form>
-
-                <div class="divider">
-                    <span>Or continue with</span>
-                </div>
-
+                
+                <div class="divider"><span>Or continue with</span></div>
+                
                 <div class="social-buttons">
                     <a href="/auth/google" class="social-btn">
                         <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -2905,80 +2633,31 @@ LOGIN_HTML = """
                         GitHub
                     </a>
                 </div>
-
+                
                 <div class="signup-link">
                     Don't have an account? <a href="/signup">Sign up</a>
                 </div>
-
-                <div class="security-badge">
-                    SOC 2 Type II Compliant
-                </div>
             </div>
         </section>
-
-        <!-- RIGHT SIDE - HERO -->
-        <section class="hero-section" id="hero-section">
-            <div class="hero-bg">
-                <div class="wave-container">
-                    <div class="wave"></div>
-                    <div class="wave"></div>
-                    <div class="wave"></div>
-                </div>
-                <div class="grid-overlay"></div>
+        
+        <!-- RIGHT SIDE: DASHBOARD PREVIEW & FOOTER -->
+        <section class="visual-section">
+            <div class="dashboard-preview">
+                <img src="/static/dashboard-preview-crop.png" alt="Cerbere Dashboard Preview">
             </div>
-
-            <div class="hero-content">
-                <img src="/static/logo.svg" alt="Cerbere" class="hero-logo">
-                <h1 class="hero-title">Cerbere &mdash; The Three-Headed <span>Guardian</span> of AI Agents</h1>
-                <p class="hero-subtitle">
-                    Advanced runtime security and observability for AI agents. 
-                    Monitor, detect, and protect your AI infrastructure in real-time.
-                </p>
-
-                <div class="hero-features">
-                    <div class="feature">
-                        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-                        </svg>
-                        <h3>Runtime Security</h3>
-                        <p>Real-time threat detection and policy enforcement.</p>
-                    </div>
-                    <div class="feature">
-                        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                            <circle cx="12" cy="12" r="3"></circle>
-                        </svg>
-                        <h3>Observability</h3>
-                        <p>Complete visibility into agent behavior and decisions.</p>
-                    </div>
-                    <div class="feature">
-                        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                        </svg>
-                        <h3>Access Control</h3>
-                        <p>Granular RBAC and audit trails for compliance.</p>
-                    </div>
-                    <div class="feature">
-                        <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-                        </svg>
-                        <h3>Low Latency</h3>
-                        <p>Sub-millisecond security checks without blocking.</p>
-                    </div>
-                </div>
+            <div class="visual-footer">
+                <a href="https://app.cerbereag.site/terms" target="_blank" rel="noopener noreferrer">Legal</a>
+                <a href="https://app.cerbereag.site/support" target="_blank" rel="noopener noreferrer">Contact</a>
             </div>
         </section>
     </div>
-
+    
     <script>
         function switchTab(tab) {
             const tabs = document.querySelectorAll('.auth-tab');
             const forms = document.querySelectorAll('.auth-form');
-            
             tabs.forEach(t => t.classList.remove('active'));
             forms.forEach(f => f.classList.remove('active'));
-            
             if (tab === 'email') {
                 document.getElementById('tab-email').classList.add('active');
                 document.getElementById('email-form').classList.add('active');
@@ -2986,28 +2665,6 @@ LOGIN_HTML = """
                 document.getElementById('tab-sso').classList.add('active');
                 document.getElementById('sso-form').classList.add('active');
             }
-        }
-
-        const heroSection = document.getElementById('hero-section');
-        const waves = document.querySelectorAll('.wave');
-        
-        if (heroSection && waves.length > 0) {
-            heroSection.addEventListener('mousemove', (e) => {
-                const rect = heroSection.getBoundingClientRect();
-                const x = (e.clientX - rect.left) / rect.width - 0.5;
-                const y = (e.clientY - rect.top) / rect.height - 0.5;
-                
-                waves.forEach((wave, index) => {
-                    const speed = (index + 1) * 15;
-                    wave.style.transform = `translate(${x * speed}px, ${y * speed}px)`;
-                });
-            });
-
-            heroSection.addEventListener('mouseleave', () => {
-                waves.forEach(wave => {
-                    wave.style.transform = 'translate(0, 0)';
-                });
-            });
         }
     </script>
 </body>
