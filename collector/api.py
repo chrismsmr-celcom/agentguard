@@ -16,6 +16,12 @@ from collector.db import (
     sql_false,
     sql_placeholder,
 )
+from collector.approvals import (
+    get_approval,
+    list_approvals,
+    approve_approval,
+    reject_approval,
+)
 import sqlite3
 import os
 
@@ -1080,3 +1086,290 @@ def decide():
     except Exception as e:
         logger.error("signing_failed", error=str(e))
         return jsonify({"error": "signing unavailable"}), 500
+
+# ═══════════════════════════════════════════════════════════════
+# HUMAN-IN-THE-LOOP — APPROVALS
+# ═══════════════════════════════════════════════════════════════
+
+@api_bp.route("/api/approvals", methods=["GET"])
+def api_list_approvals():
+    """
+    List approval requests for the authenticated organization.
+
+    Optional:
+        ?status=pending
+        ?status=approved
+        ?status=rejected
+        ?status=expired
+        ?limit=50
+    """
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    org_id = getattr(g, "org_id", None)
+
+    if not org_id:
+        return jsonify({"error": "Organization context required"}), 400
+
+    status = request.args.get("status")
+    limit = request.args.get("limit", 50)
+
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit must be an integer"}), 400
+
+    if status and status not in {"pending", "approved", "rejected", "expired"}:
+        return jsonify({"error": "Invalid approval status"}), 400
+
+    try:
+        approvals = list_approvals(
+            org_id=org_id,
+            status=status,
+            limit=limit,
+        )
+
+        return jsonify({
+            "approvals": approvals,
+            "count": len(approvals),
+        }), 200
+
+    except Exception as e:
+        logger.error(
+            "approval_list_failed",
+            error=str(e),
+            org_id=org_id,
+        )
+        return jsonify({"error": "Failed to list approvals"}), 500
+
+
+@api_bp.route("/api/approvals/<approval_id>", methods=["GET"])
+def api_get_approval(approval_id):
+    """
+    Get one approval request.
+
+    The organization filter prevents cross-tenant access.
+    """
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    org_id = getattr(g, "org_id", None)
+
+    if not org_id:
+        return jsonify({"error": "Organization context required"}), 400
+
+    try:
+        approval = get_approval(
+            approval_id,
+            org_id=org_id,
+        )
+
+        if approval is None:
+            return jsonify({"error": "Approval not found"}), 404
+
+        return jsonify(approval), 200
+
+    except Exception as e:
+        logger.error(
+            "approval_get_failed",
+            error=str(e),
+            approval_id=approval_id,
+            org_id=org_id,
+        )
+        return jsonify({"error": "Failed to retrieve approval"}), 500
+
+
+@api_bp.route("/api/approvals/<approval_id>/approve", methods=["POST"])
+def api_approve_approval(approval_id):
+    """
+    Approve a pending tool action.
+
+    The action is NOT executed here.
+    This endpoint only changes the approval state.
+    """
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    org_id = getattr(g, "org_id", None)
+
+    if not org_id:
+        return jsonify({"error": "Organization context required"}), 400
+
+    data = request.get_json(silent=True) or {}
+
+    decision_reason = data.get("reason")
+
+    # Best-effort human identity from the authenticated context.
+    decided_by = (
+        getattr(g, "user_id", None)
+        or getattr(g, "identity_id", None)
+        or getattr(g, "email", None)
+        or f"org:{org_id}"
+    )
+
+    try:
+        approval = approve_approval(
+            approval_id,
+            decided_by=str(decided_by),
+            decision_reason=decision_reason,
+            org_id=org_id,
+        )
+
+        # Audit lifecycle event.
+        try:
+            from collector.audit_routes import get_audit_log, AuditEventType
+
+            audit = get_audit_log()
+
+            if audit:
+                audit.log_event(
+                    event_type=getattr(
+                        AuditEventType,
+                        "APPROVAL_GRANTED",
+                        AuditEventType.SPAN_INGESTED,
+                    ),
+                    org_id=org_id,
+                    actor=str(decided_by),
+                    resource=f"approval:{approval_id}",
+                    action="approved",
+                    details={
+                        "approval_id": approval_id,
+                        "tool_name": approval.get("tool_name"),
+                        "agent_id": approval.get("agent_id"),
+                        "trace_id": approval.get("trace_id"),
+                        "decision_reason": decision_reason,
+                    },
+                    risk_level="high",
+                )
+        except Exception as audit_error:
+            logger.warning(
+                "approval_audit_failed",
+                error=str(audit_error),
+                approval_id=approval_id,
+            )
+
+        return jsonify({
+            "status": "approved",
+            "approval": approval,
+        }), 200
+
+    except KeyError:
+        return jsonify({"error": "Approval not found"}), 404
+
+    except ValueError as e:
+        message = str(e)
+
+        if "expired" in message.lower():
+            return jsonify({
+                "error": "Approval expired",
+                "status": "expired",
+            }), 409
+
+        return jsonify({
+            "error": message,
+        }), 409
+
+    except Exception as e:
+        logger.error(
+            "approval_approve_failed",
+            error=str(e),
+            approval_id=approval_id,
+            org_id=org_id,
+        )
+        return jsonify({"error": "Failed to approve request"}), 500
+
+
+@api_bp.route("/api/approvals/<approval_id>/reject", methods=["POST"])
+def api_reject_approval(approval_id):
+    """
+    Reject a pending tool action.
+    """
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    org_id = getattr(g, "org_id", None)
+
+    if not org_id:
+        return jsonify({"error": "Organization context required"}), 400
+
+    data = request.get_json(silent=True) or {}
+
+    decision_reason = data.get("reason")
+
+    decided_by = (
+        getattr(g, "user_id", None)
+        or getattr(g, "identity_id", None)
+        or getattr(g, "email", None)
+        or f"org:{org_id}"
+    )
+
+    try:
+        approval = reject_approval(
+            approval_id,
+            decided_by=str(decided_by),
+            decision_reason=decision_reason,
+            org_id=org_id,
+        )
+
+        # Audit lifecycle event.
+        try:
+            from collector.audit_routes import get_audit_log, AuditEventType
+
+            audit = get_audit_log()
+
+            if audit:
+                audit.log_event(
+                    event_type=getattr(
+                        AuditEventType,
+                        "APPROVAL_REJECTED",
+                        AuditEventType.SPAN_INGESTED,
+                    ),
+                    org_id=org_id,
+                    actor=str(decided_by),
+                    resource=f"approval:{approval_id}",
+                    action="rejected",
+                    details={
+                        "approval_id": approval_id,
+                        "tool_name": approval.get("tool_name"),
+                        "agent_id": approval.get("agent_id"),
+                        "trace_id": approval.get("trace_id"),
+                        "decision_reason": decision_reason,
+                    },
+                    risk_level="high",
+                )
+        except Exception as audit_error:
+            logger.warning(
+                "approval_audit_failed",
+                error=str(audit_error),
+                approval_id=approval_id,
+            )
+
+        return jsonify({
+            "status": "rejected",
+            "approval": approval,
+        }), 200
+
+    except KeyError:
+        return jsonify({"error": "Approval not found"}), 404
+
+    except ValueError as e:
+        message = str(e)
+
+        if "expired" in message.lower():
+            return jsonify({
+                "error": "Approval expired",
+                "status": "expired",
+            }), 409
+
+        return jsonify({
+            "error": message,
+        }), 409
+
+    except Exception as e:
+        logger.error(
+            "approval_reject_failed",
+            error=str(e),
+            approval_id=approval_id,
+            org_id=org_id,
+        )
+        return jsonify({"error": "Failed to reject request"}), 500
