@@ -131,6 +131,26 @@ class AgentGuard:
         in_p, out_p = pricing.get(model, (2.5e-6, 1.0e-5))
         return max(0.0, input_tokens * in_p + output_tokens * out_p), input_tokens, output_tokens
 
+    def _check_budget_exceeded(self, cost: float) -> Optional[SecurityCheck]:
+        """Vérifie si l'opération dépasserait le budget et retourne un SecurityCheck."""
+        if self.max_budget <= 0:
+            return None  # Budget illimité
+        
+        budget_remaining = self.max_budget - self.total_spent
+        if cost > budget_remaining:
+            return SecurityCheck(
+                check_name="budget_exceeded",
+                passed=False,
+                risk_level=RiskLevel.HIGH,
+                details=f"Cost ${cost:.6f} exceeds remaining budget ${budget_remaining:.6f}"
+            )
+        return SecurityCheck(
+            check_name="budget_check",
+            passed=True,
+            risk_level=RiskLevel.LOW,
+            details=f"Cost ${cost:.6f} within budget (remaining: ${budget_remaining:.6f})"
+        )
+
     def guard_llm_call(self, func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -153,8 +173,18 @@ class AgentGuard:
 
             latency = (time.time() - start) * 1000
             cost, input_tokens, output_tokens = self._estimate_cost(kwargs, result)
+            
+            # Vérifier le budget AVANT d'ajouter le coût
+            budget_check = self._check_budget_exceeded(cost)
+            if budget_check:
+                checks.append(budget_check)
+            
+            # Ajouter le coût au total dépensé
             self.total_spent += cost
-            checks.extend([self.policy_engine.check_pii(self._extract_output(result)), self.policy_engine.check_budget(cost, self.max_budget, self.total_spent - cost)])
+            
+            # Vérifier les risques dans la sortie
+            checks.append(self.policy_engine.check_pii(self._extract_output(result)))
+            
             blocking_output = [c for c in checks if not c.passed and c.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL)]
             blocked = bool(blocking_output) and self.block_on_high
 
