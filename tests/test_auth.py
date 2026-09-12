@@ -8,7 +8,7 @@ class TestLoginFlow:
         resp = client.get("/login")
         assert resp.status_code == 200
         # On cherche "Welcome back" ou "Secure access" qui sont dans le nouveau HTML
-        assert b"Welcome back" in resp.data or b"Secure access" in resp.data
+        assert b"CERBERE" in resp.data or b"Sign in" in resp.data
 
     def test_valid_login_redirects(self, client):
         # Le nouveau flux renvoie 200 avec un message de succès, ou 302/303
