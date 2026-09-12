@@ -456,14 +456,14 @@ class TripleJudge:
                 }
         
         if available_count == 0:
-    return self._build_result(
-        "REVIEW",
-        "low",
-        judges_results,
-        start,
-        "All judges unavailable — security decision cannot be trusted",
-        all_unavailable=True,
-    )
+            return self._build_result(
+                "REVIEW",
+                "low",
+                judges_results,
+                start,
+                "All judges unavailable — security decision cannot be trusted",
+                all_unavailable=True,
+            )
         
         # Désaccord persistant → REVIEW
         return self._build_result(
