@@ -1,6 +1,6 @@
 """Tests du moteur de détection (PolicyEngine)."""
 import pytest
-from agentguard_sdk import PolicyEngine, RiskLevel, SecurityAction
+from agentguard import PolicyEngine, RiskLevel, SecurityAction
 
 
 @pytest.fixture
