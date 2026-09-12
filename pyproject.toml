@@ -1,0 +1,14 @@
+[project]
+name = "cerbereag-mcp"
+version = "0.1.0"
+description = "MCP Server for CerbereAG (AgentGuard) runtime security"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0.0,<2.0.0",
+    "tiktoken>=0.7.0",
+    "requests>=2.31.0",
+]
+
+[project.scripts]
+cerbereag-mcp = "mcp_server:main"
