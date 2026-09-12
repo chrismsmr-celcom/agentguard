@@ -1930,7 +1930,7 @@ SUPABASE_LOGIN_HTML = r"""<!DOCTYPE html>
             color: var(--muted);
             margin-bottom: 7px;
         }
-        .field-label::before { content: '> '; color: var(--accent); }
+        .field-label::before { content: '> '; color: #b75f40; }
 
         input[type="email"], input[type="text"] {
             width: 100%;
@@ -1961,8 +1961,8 @@ SUPABASE_LOGIN_HTML = r"""<!DOCTYPE html>
             text-transform: uppercase;
             cursor: pointer;
             border-radius: 6px;
-            border: 1px solid var(--accent);
-            background: var(--accent);
+            border: 1px solid #da7753;
+            background: #b75f40;
             color: #1a120c;
             transition: all .15s ease;
             margin-top: 14px;
@@ -2081,7 +2081,7 @@ SUPABASE_LOGIN_HTML = r"""<!DOCTYPE html>
         }
 
         .ascii-banner {
-            color: var(--accent);
+            color: #b75f40;
             font-size: clamp(6px, 1.1vw, 12px);
             line-height: 1.18;
             text-shadow: 0 0 14px rgba(218, 119, 81, 0.35);
@@ -2448,7 +2448,7 @@ LOGIN_HTML = r"""<!DOCTYPE html>
             color: var(--faint);
             margin-bottom: 18px;
         }
-        .prompt-line .sig { color: var(--accent); }
+        .prompt-line .sig { color: #b75f40; }
 
         .field-label {
             display: block;
@@ -2618,7 +2618,7 @@ LOGIN_HTML = r"""<!DOCTYPE html>
         }
 
         .ascii-dog {
-            color: var(--accent);
+            color: #b75f40;
             opacity: 0.75;
             font-size: clamp(5px, 0.95vw, 10.5px);
             line-height: 1.25;
@@ -2634,7 +2634,7 @@ LOGIN_HTML = r"""<!DOCTYPE html>
             letter-spacing: 0.06em;
             line-height: 1.7;
         }
-        .brand-tagline em { color: var(--accent); font-style: normal; }
+        .brand-tagline em { color: #b75f40; font-style: normal; }
 
         .brand-specs {
             margin-top: 28px;
