@@ -16,17 +16,22 @@ from .runtime import TrajectoryAnalyzer, RuntimeRiskEngine
 logger = structlog.get_logger("agentguard.sdk")
 
 class AgentGuard:
-    def __init__(
+     def __init__(
         self,
         collector_url: str = "http://localhost:8080",
         api_key: Optional[str] = None,
         policies: Optional[List[Dict[str, Any]]] = None,
         max_budget: float = 10.0,
         block_on_high: bool = True,
-        agent_id: Optional[str] = None,
+        debug: bool = False,          # ← AJOUTE CETTE LIGNE
+        use_ml: Optional[bool] = None,
+        use_llm_judge: Optional[bool] = None,
         redis_url: Optional[str] = None,
+        fail_open: bool = False,
+        agent_id: Optional[str] = None,
     ):
         self.collector_url = collector_url.rstrip("/")
+        self.debug = debug  
         self.api_key = api_key or os.getenv("AGENTGUARD_API_KEY")
         self.agent_id = agent_id or os.getenv("AGENTGUARD_AGENT_ID", "default")
         self.max_budget = max(0.0, float(max_budget))
