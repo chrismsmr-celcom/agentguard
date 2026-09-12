@@ -258,58 +258,58 @@ class ImmutableAuditLog:
         
         # Récupère le hash précédent
         with self._write_lock:
-    prev_hash = self._get_last_hash()
+            prev_hash = self._get_last_hash()
 
-    entry = AuditEntry(
-        event_id=secrets.token_hex(16),
-        timestamp=time.time(),
-        event_type=(
-            event_type.value
-            if isinstance(event_type, AuditEventType)
-            else str(event_type)
-        ),
-        org_id=str(org_id),
-        actor=str(actor),
-        resource=str(resource),
-        action=str(action),
-        details=details,
-        risk_level=risk_level,
-        prev_hash=prev_hash,
-    )
-
-    entry.entry_hash = entry.compute_hash()
-
-    self._entry_counter += 1
-
-    if (
-        self._signer
-        and self.sign_every > 0
-        and self._entry_counter % self.sign_every == 0
-    ):
-        try:
-            payload = {
-                "request_id": entry.event_id,
-                "action": "audit_checkpoint",
-                "policy_name": "audit_chain",
-                "policy_version": 1,
-                "reason": (
-                    f"Checkpoint at entry "
-                    f"{self._entry_counter}"
+            entry = AuditEntry(
+                event_id=secrets.token_hex(16),
+                timestamp=time.time(),
+                event_type=(
+                    event_type.value
+                    if isinstance(event_type, AuditEventType)
+                    else str(event_type)
                 ),
-            }
-
-            signed = self._signer.sign_decision(payload)
-
-            entry.signature = signed.get("signature")
-
-        except Exception as exc:
-            print(
-                f"[AuditLog] Signing failed: {exc}"
+                org_id=str(org_id),
+                actor=str(actor),
+                resource=str(resource),
+                action=str(action),
+                details=details,
+                risk_level=risk_level,
+                prev_hash=prev_hash,
             )
 
-    self._persist(entry)
+            entry.entry_hash = entry.compute_hash()
 
-return entry
+            self._entry_counter += 1
+
+            if (
+                self._signer
+                and self.sign_every > 0
+                and self._entry_counter % self.sign_every == 0
+            ):
+                try:
+                    payload = {
+                        "request_id": entry.event_id,
+                        "action": "audit_checkpoint",
+                        "policy_name": "audit_chain",
+                        "policy_version": 1,
+                        "reason": (
+                            f"Checkpoint at entry "
+                            f"{self._entry_counter}"
+                        ),
+                    }
+
+                    signed = self._signer.sign_decision(payload)
+
+                    entry.signature = signed.get("signature")
+
+                except Exception as exc:
+                    print(
+                        f"[AuditLog] Signing failed: {exc}"
+                    )
+
+            self._persist(entry)
+
+        return entry
     
     def _persist(self, entry: AuditEntry):
         """Persiste l'entrée dans Postgres ET backup file."""
