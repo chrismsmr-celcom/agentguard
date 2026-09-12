@@ -1838,150 +1838,273 @@ from collector.supabase_auth import (
     verify_supabase_jwt,
 )
 
-SUPABASE_LOGIN_HTML = """
-<!DOCTYPE html>
+SUPABASE_LOGIN_HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cerbere — Secure Access</title>
+    <title>CERBERE // Secure Access</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         :root {
-            --ink: #0b0b0c;
-            --panel: #131315;
-            --line: rgba(255,255,255,0.09);
-            --paper: #f3f1ec;
-            --paper-dim: #b9b6ad;
-            --ember: #d1502f;
-            --ember-soft: rgba(209,80,47,0.14);
+            --term-bg: #050805;
+            --term-panel: #0a0f0a;
+            --term-green: #33ff66;
+            --term-green-dim: #1a8f3c;
+            --term-green-faint: rgba(51, 255, 102, 0.12);
+            --term-amber: #ffb347;
+            --term-red: #ff5555;
+            --term-text: #b8ffcb;
+            --term-muted: #4e7a58;
+            --term-line: rgba(51, 255, 102, 0.22);
         }
 
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--ink);
-            color: var(--paper);
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            background: var(--term-bg);
+            color: var(--term-text);
             min-height: 100vh;
-            -webkit-font-smoothing: antialiased;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* ── Scanlines CRT ─────────────────────────────── */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: repeating-linear-gradient(
+                to bottom,
+                transparent 0px,
+                transparent 2px,
+                rgba(0, 0, 0, 0.22) 3px,
+                rgba(0, 0, 0, 0.22) 4px
+            );
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        /* ── Halo phosphore ────────────────────────────── */
+        body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: radial-gradient(
+                ellipse at center,
+                transparent 55%,
+                rgba(0, 0, 0, 0.55) 100%
+            );
+            pointer-events: none;
+            z-index: 101;
         }
 
         .shell {
-            display: grid;
-            grid-template-columns: minmax(360px, 460px) 1fr;
             min-height: 100vh;
-        }
-
-        .pane-form {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            padding: 4vw 4.5vw;
-            border-right: 1px solid var(--line);
-        }
-
-        .mark {
             display: flex;
             align-items: center;
-            gap: 10px;
-            margin-bottom: 3.2rem;
+            justify-content: center;
+            padding: 32px 16px;
+            position: relative;
+            z-index: 1;
         }
 
-        .mark img { width: 30px; height: 30px; border-radius: 6px; }
-
-        .mark span {
-            font-size: 13px;
-            font-weight: 700;
-            letter-spacing: 0.16em;
-            color: var(--paper);
+        /* ── Fenêtre terminal ──────────────────────────── */
+        .terminal {
+            width: 100%;
+            max-width: 760px;
+            background: var(--term-panel);
+            border: 1px solid var(--term-line);
+            box-shadow:
+                0 0 24px rgba(51, 255, 102, 0.10),
+                0 0 80px rgba(51, 255, 102, 0.05),
+                inset 0 0 60px rgba(51, 255, 102, 0.03);
+            animation: boot-in 0.7s ease-out both;
         }
 
-        h1 {
-            font-family: 'Fraunces', Georgia, serif;
-            font-weight: 600;
-            font-size: 30px;
+        @keyframes boot-in {
+            0%   { opacity: 0; transform: scaleY(0.02); filter: brightness(4); }
+            45%  { opacity: 1; transform: scaleY(1.03); filter: brightness(1.6); }
+            100% { opacity: 1; transform: scaleY(1); filter: brightness(1); }
+        }
+
+        .term-titlebar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--term-line);
+            background: rgba(51, 255, 102, 0.04);
+            font-size: 12px;
+            color: var(--term-muted);
+            letter-spacing: 0.08em;
+            user-select: none;
+        }
+
+        .term-dot {
+            width: 11px; height: 11px;
+            border-radius: 50%;
+            border: 1px solid var(--term-line);
+            position: relative;
+        }
+        .term-dot::after {
+            content: '';
+            position: absolute;
+            inset: 2px;
+            border-radius: 50%;
+            background: currentColor;
+            opacity: 0.7;
+        }
+        .dot-r { color: var(--term-red); }
+        .dot-a { color: var(--term-amber); }
+        .dot-g { color: var(--term-green); }
+
+        .term-titlebar .title {
+            margin-left: 8px;
+        }
+
+        .term-body {
+            padding: 28px 32px 32px;
+        }
+
+        /* ── Bannière ASCII ────────────────────────────── */
+        .ascii-banner {
+            color: var(--term-green);
+            font-size: clamp(5px, 1.45vw, 12.5px);
             line-height: 1.15;
-            letter-spacing: -0.01em;
-            margin-bottom: 0.6rem;
+            text-align: center;
+            text-shadow: 0 0 8px rgba(51, 255, 102, 0.55);
+            white-space: pre;
+            overflow: hidden;
+            margin-bottom: 4px;
+            user-select: none;
         }
 
-        .lede {
-            color: var(--paper-dim);
-            font-size: 14.5px;
-            line-height: 1.55;
-            margin-bottom: 2.2rem;
-            max-width: 34ch;
+        .ascii-dog {
+            color: var(--term-green-dim);
+            font-size: clamp(5px, 1.3vw, 11px);
+            line-height: 1.2;
+            text-align: center;
+            white-space: pre;
+            overflow: hidden;
+            user-select: none;
+            margin-bottom: 10px;
         }
 
-        #alert-box:empty { display: none; }
-
-        .alert {
-            padding: 11px 13px;
-            border-radius: 6px;
-            font-size: 13px;
-            line-height: 1.5;
-            margin-bottom: 1.3rem;
+        .boot-line {
+            font-size: 12px;
+            color: var(--term-muted);
+            margin-bottom: 22px;
+            letter-spacing: 0.04em;
         }
-        .alert-error   { background: rgba(209,80,47,0.12); border: 1px solid rgba(209,80,47,0.35); color: #f0917a; }
-        .alert-success { background: rgba(120,170,140,0.1); border: 1px solid rgba(120,170,140,0.3); color: #9bcbae; }
+        .boot-line .ok { color: var(--term-green); }
 
-        label {
+        /* ── Typing subtitle ───────────────────────────── */
+        .typeline {
+            font-size: 14px;
+            color: var(--term-text);
+            min-height: 22px;
+            margin-bottom: 24px;
+        }
+
+        .cursor {
+            display: inline-block;
+            width: 9px;
+            height: 16px;
+            background: var(--term-green);
+            vertical-align: -2px;
+            margin-left: 3px;
+            animation: blink 1s steps(1) infinite;
+            box-shadow: 0 0 8px rgba(51, 255, 102, 0.8);
+        }
+
+        @keyframes blink { 50% { opacity: 0; } }
+
+        /* ── Boîte formulaire ──────────────────────────── */
+        .form-box {
+            border: 1px solid var(--term-line);
+            padding: 22px 22px 24px;
+            margin-bottom: 18px;
+            background: rgba(51, 255, 102, 0.02);
+        }
+
+        .box-label {
+            font-size: 12px;
+            color: var(--term-amber);
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            margin-bottom: 14px;
+            user-select: none;
+        }
+
+        .field-label {
             display: block;
             font-size: 12px;
-            font-weight: 500;
-            color: var(--paper-dim);
-            margin-bottom: 7px;
+            color: var(--term-muted);
+            margin-bottom: 6px;
         }
+        .field-label::before { content: '> '; color: var(--term-green); }
 
         input[type="email"] {
             width: 100%;
             padding: 12px 14px;
-            background: rgba(255,255,255,0.03);
-            border: 1px solid var(--line);
-            border-radius: 7px;
-            color: var(--paper);
-            font-size: 14px;
+            background: #040604;
+            border: 1px solid var(--term-line);
+            color: var(--term-green);
             font-family: inherit;
+            font-size: 14px;
             outline: none;
-            transition: border-color .15s ease;
+            caret-color: var(--term-green);
+            transition: border-color .15s ease, box-shadow .15s ease;
         }
-        input[type="email"]:focus { border-color: rgba(209,80,47,0.5); }
-        input[type="email"]::placeholder { color: #6b6a66; }
+        input[type="email"]:focus {
+            border-color: var(--term-green);
+            box-shadow: 0 0 12px rgba(51, 255, 102, 0.25), inset 0 0 8px rgba(51, 255, 102, 0.06);
+        }
+        input[type="email"]::placeholder { color: #2c4a33; }
 
         .btn {
             width: 100%;
             padding: 12px;
-            border-radius: 7px;
-            font-size: 14px;
-            font-weight: 600;
             font-family: inherit;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
             cursor: pointer;
-            border: none;
-            transition: filter .15s ease, background .15s ease;
-        }
-        .btn:disabled { opacity: 0.55; cursor: default; }
-
-        .btn-send {
-            background: var(--paper);
-            color: var(--ink);
+            border: 1px solid var(--term-green);
+            background: var(--term-green-faint);
+            color: var(--term-green);
+            transition: all .15s ease;
             margin-top: 14px;
         }
-        .btn-send:hover:not(:disabled) { filter: brightness(0.92); }
+        .btn:hover:not(:disabled) {
+            background: var(--term-green);
+            color: #031007;
+            box-shadow: 0 0 18px rgba(51, 255, 102, 0.45);
+        }
+        .btn:disabled { opacity: 0.45; cursor: default; }
 
         .rule {
             display: flex;
             align-items: center;
             gap: 14px;
-            margin: 1.7rem 0;
-            color: #6b6a66;
-            font-size: 11.5px;
-            letter-spacing: 0.04em;
+            margin: 4px 0 18px;
+            color: var(--term-muted);
+            font-size: 11px;
+            letter-spacing: 0.2em;
+            user-select: none;
         }
-        .rule::before, .rule::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+        .rule::before, .rule::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--term-line);
+        }
 
         .oauth-row { display: flex; flex-direction: column; gap: 10px; }
 
@@ -1991,162 +2114,144 @@ SUPABASE_LOGIN_HTML = """
             justify-content: center;
             gap: 10px;
             background: transparent;
-            color: var(--paper);
-            border: 1px solid var(--line);
+            color: var(--term-text);
+            border: 1px solid var(--term-line);
         }
-        .btn-oauth:hover { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.18); }
-        .btn-oauth svg { width: 17px; height: 17px; flex-shrink: 0; }
+        .btn-oauth:hover {
+            background: rgba(51, 255, 102, 0.06);
+            border-color: var(--term-green-dim);
+            color: var(--term-green);
+            box-shadow: none;
+        }
+        .btn-oauth svg { width: 16px; height: 16px; flex-shrink: 0; }
 
         .signup-note {
-            margin-top: 2rem;
-            padding-top: 1.4rem;
-            border-top: 1px solid var(--line);
-            font-size: 13px;
-            color: var(--paper-dim);
-            line-height: 1.6;
-        }
-        .signup-note strong { color: var(--paper); font-weight: 600; }
-
-        .pane-visual {
-            position: relative;
-            overflow: hidden;
-            background:
-                radial-gradient(ellipse 620px 420px at 78% 8%, var(--ember-soft), transparent 60%),
-                var(--panel);
-            display: flex;
-            flex-direction: column;
-        }
-
-        .visual-copy {
-            padding: 4.4vw 4.4vw 0;
-            max-width: 640px;
-        }
-
-        .visual-eyebrow {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
+            margin-top: 20px;
+            padding: 14px 16px;
+            border: 1px dashed var(--term-line);
             font-size: 12px;
-            color: var(--paper-dim);
-            margin-bottom: 1.4rem;
+            color: var(--term-muted);
+            line-height: 1.7;
         }
-        .visual-eyebrow img { width: 100px; height: 100px; border-radius: 5px; }
+        .signup-note strong { color: var(--term-amber); font-weight: 700; }
 
-        .visual-copy h2 {
-            font-family: 'Fraunces', Georgia, serif;
-            font-weight: 500;
-            font-size: clamp(30px, 3.1vw, 44px);
-            line-height: 1.16;
-            letter-spacing: -0.01em;
-            color: var(--paper);
-            max-width: 15ch;
+        #alert-box:empty { display: none; }
+
+        .alert {
+            padding: 11px 14px;
+            font-size: 12.5px;
+            line-height: 1.6;
+            margin-bottom: 18px;
+            font-family: inherit;
         }
-
-        .visual-copy h2 em {
-            font-style: normal;
-            color: var(--ember);
+        .alert-error {
+            border: 1px solid rgba(255, 85, 85, 0.5);
+            background: rgba(255, 85, 85, 0.07);
+            color: #ff9a9a;
         }
-
-        .preview-frame {
-            position: relative;
-            flex: 1;
-            margin-top: 3vw;
-            min-height: 0;
+        .alert-success {
+            border: 1px solid rgba(51, 255, 102, 0.5);
+            background: rgba(51, 255, 102, 0.07);
+            color: var(--term-green);
         }
 
-        .preview-frame::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; right: 0;
-            height: 140px;
-            background: linear-gradient(to bottom, var(--panel), transparent);
-            z-index: 2;
+        .statusbar {
+            border-top: 1px solid var(--term-line);
+            padding: 8px 14px;
+            font-size: 11px;
+            color: var(--term-muted);
+            display: flex;
+            justify-content: space-between;
+            letter-spacing: 0.06em;
+            user-select: none;
         }
+        .statusbar .live { color: var(--term-green); }
 
-        .preview-frame::after {
-            content: '';
-            position: absolute;
-            inset: 0;
-            box-shadow: inset 0 0 0 1px var(--line);
-            pointer-events: none;
-            z-index: 3;
-        }
-
-        .preview-frame img {
-            position: absolute;
-            top: 8%;
-            left: 6%;
-            width: 108%;
-            border-radius: 10px 0 0 0;
-            box-shadow: -18px -18px 60px rgba(0,0,0,0.45);
-            display: block;
-        }
-
-        @media (max-width: 980px) {
-            .shell { grid-template-columns: 1fr; }
-            .pane-visual { display: none; }
-            .pane-form { border-right: none; padding: 8vw 7vw; }
+        @media (max-width: 640px) {
+            .term-body { padding: 20px 16px 24px; }
+            .shell { padding: 16px 8px; }
         }
     </style>
 </head>
 <body>
     <div class="shell">
-        <section class="pane-form">
-            <div class="mark">
-                <img src="/static/logo.svg" alt="Cerbere">
-                <span>CERBERE</span>
+        <div class="terminal">
+            <div class="term-titlebar">
+                <span class="term-dot dot-r"></span>
+                <span class="term-dot dot-a"></span>
+                <span class="term-dot dot-g"></span>
+                <span class="title">cerbere@secure-gate:~$ auth --tty</span>
             </div>
 
-            <h1>Welcome back</h1>
-            <p class="lede">Sign in to your runtime security console.</p>
+            <div class="term-body">
+<pre class="ascii-banner">
+ ██████╗███████╗██████╗ ██████╗ ███████╗██████╗ ███████╗
+██╔════╝██╔════╝██╔══██╗██╔══██╗██╔════╝██╔══██╗██╔════╝
+██║     █████╗  ██████╔╝██████╔╝█████╗  ██████╔╝█████╗
+██║     ██╔══╝  ██╔══██╗██╔══██╗██╔══╝  ██╔══██╗██╔══╝
+╚██████╗███████╗██║  ██║██████╔╝███████╗██║  ██║███████╗
+ ╚═════╝╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚══════╝</pre>
 
-            <div id="alert-box"></div>
+<pre class="ascii-dog">
+        /\___/\     /\___/\     /\___/\
+       ( o   o )   ( o   o )   ( o   o )
+        (  =^= )    (  =^= )    (  =^= )
+   ____/ \___/ ____ \___/ ____ \___/ \____
+  /                                     \
+</pre>
 
-            <form id="otp-form">
-                <label for="email">Work email</label>
-                <input type="email" id="email" placeholder="you@company.com" required autocomplete="email">
-                <button type="submit" class="btn btn-send" id="otp-btn">Send magic link</button>
-            </form>
-
-            <div class="rule">or continue with</div>
-
-            <div class="oauth-row">
-                <button class="btn btn-oauth" id="btn-google">
-                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-                    </svg>
-                    Continue with Google
-                </button>
-                <button class="btn btn-oauth" id="btn-github">
-                    <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
-                    </svg>
-                    Continue with GitHub
-                </button>
-            </div>
-
-            <p class="signup-note">
-                <strong>Not registered yet?</strong> There's no separate sign-up —
-                enter your email or use Google / GitHub above and Cerbere sets up
-                your workspace automatically.
-            </p>
-        </section>
-
-        <section class="pane-visual">
-            <div class="visual-copy">
-                <div class="visual-eyebrow">
-                    <img src="/static/logo.svg" alt="">
-                    Runtime security for AI agents
+                <div class="boot-line">
+                    [<span class="ok">OK</span>] guardian daemon loaded &nbsp; [<span class="ok">OK</span>] 3 heads online &nbsp; [<span class="ok">OK</span>] gate armed
                 </div>
-                <h2>The Three-Headed <em>Guardian</em> of AI Agents</h2>
+
+                <div class="typeline">
+                    <span style="color: var(--term-green);">$</span> <span id="typed"></span><span class="cursor"></span>
+                </div>
+
+                <div id="alert-box"></div>
+
+                <div class="form-box">
+                    <div class="box-label">// authenticate</div>
+
+                    <form id="otp-form">
+                        <label class="field-label" for="email">work_email</label>
+                        <input type="email" id="email" placeholder="you@company.com" required autocomplete="email">
+                        <button type="submit" class="btn" id="otp-btn">[ Send magic link ]</button>
+                    </form>
+                </div>
+
+                <div class="rule">OR CONTINUE WITH</div>
+
+                <div class="oauth-row">
+                    <button class="btn btn-oauth" id="btn-google">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                        </svg>
+                        google --oauth
+                    </button>
+                    <button class="btn btn-oauth" id="btn-github">
+                        <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+                        </svg>
+                        github --oauth
+                    </button>
+                </div>
+
+                <div class="signup-note">
+                    <strong>// no signup needed</strong> — enter your email or use
+                    google / github above and cerbere provisions your workspace
+                    automatically. the three heads remember you.
+                </div>
             </div>
-            <div class="preview-frame">
-                <img src="/static/dashboard-preview-crop.png" alt="Cerbere dashboard preview">
+
+            <div class="statusbar">
+                <span>tty1 · utf-8 · <span class="live">● SECURE CHANNEL</span></span>
+                <span id="clock">--:--:--</span>
             </div>
-        </section>
+        </div>
     </div>
 
     <script>
@@ -2160,6 +2265,40 @@ SUPABASE_LOGIN_HTML = """
             if (box) box.innerHTML = `<div class="alert alert-${kind}">${msg}</div>`;
         }
 
+        // ── Effet machine à écrire ────────────────────────
+        (function typewriter() {
+            const phrases = [
+                "auth --identity human",
+                "guardian watching. 3/3 heads online_",
+                "sudo let-me-in --verified",
+                "runtime security for AI agents"
+            ];
+            const el = document.getElementById("typed");
+            let pi = 0, ci = 0, deleting = false;
+
+            function tick() {
+                const phrase = phrases[pi];
+                el.textContent = phrase.slice(0, ci);
+
+                if (!deleting) {
+                    if (ci < phrase.length) { ci++; setTimeout(tick, 55); return; }
+                    deleting = true; setTimeout(tick, 2200); return;
+                }
+                if (ci > 0) { ci--; setTimeout(tick, 24); return; }
+                deleting = false; pi = (pi + 1) % phrases.length; setTimeout(tick, 400);
+            }
+            tick();
+        })();
+
+        // ── Horloge status bar ────────────────────────────
+        (function clock() {
+            const el = document.getElementById("clock");
+            function upd() {
+                el.textContent = new Date().toLocaleTimeString('en-GB');
+            }
+            upd(); setInterval(upd, 1000);
+        })();
+
         const otpForm = document.getElementById("otp-form");
         if (otpForm) {
             otpForm.addEventListener("submit", async (e) => {
@@ -2167,7 +2306,7 @@ SUPABASE_LOGIN_HTML = """
                 const email = document.getElementById("email").value.trim();
                 const btn = document.getElementById("otp-btn");
                 btn.disabled = true;
-                btn.textContent = "Sending...";
+                btn.textContent = "[ transmitting... ]";
 
                 const { error } = await supabaseClient.auth.signInWithOtp({
                     email,
@@ -2175,12 +2314,12 @@ SUPABASE_LOGIN_HTML = """
                 });
 
                 btn.disabled = false;
-                btn.textContent = "Send magic link";
+                btn.textContent = "[ Send magic link ]";
 
                 if (error) {
-                    showAlert(error.message, "error");
+                    showAlert("ERR: " + error.message, "error");
                 } else {
-                    showAlert("Check your inbox — your secure sign-in link is on its way.", "success");
+                    showAlert("OK: check your inbox — secure sign-in link en route.", "success");
                 }
             });
         }
@@ -2302,362 +2441,468 @@ def supabase_session():
 # LOGIN PAGE — LEGACY (fallback si Supabase non configuré)
 # ═══════════════════════════════════════════════════════════════
 
-LOGIN_HTML = """
-<!DOCTYPE html>
+LOGIN_HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cerbere — Secure Access</title>
+    <title>CERBERE // Secure Access</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
-        :root {
-            --bg-primary: #09090b;
-            --bg-secondary: #121215;
-            --border-color: rgba(255, 255, 255, 0.08);
-            --border-hover: rgba(239, 68, 68, 0.6);
-            --text-primary: #fafafa;
-            --text-secondary: #a1a1aa;
-            --text-muted: #71717a;
-            --accent-red: #ef4444;
-            --accent-glow: rgba(239, 68, 68, 0.15);
-            --success: #10b981;
-        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --term-bg: #050805;
+            --term-panel: #0a0f0a;
+            --term-green: #33ff66;
+            --term-green-dim: #1a8f3c;
+            --term-green-faint: rgba(51, 255, 102, 0.12);
+            --term-amber: #ffb347;
+            --term-red: #ff5555;
+            --term-text: #b8ffcb;
+            --term-muted: #4e7a58;
+            --term-line: rgba(51, 255, 102, 0.22);
+        }
+
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg-primary);
-            color: var(--text-primary);
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            background: var(--term-bg);
+            color: var(--term-text);
             min-height: 100vh;
-            -webkit-font-smoothing: antialiased;
+            overflow-x: hidden;
+            position: relative;
         }
-        .container {
-            display: grid;
-            grid-template-columns: 1fr 1.2fr;
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: repeating-linear-gradient(
+                to bottom,
+                transparent 0px,
+                transparent 2px,
+                rgba(0, 0, 0, 0.22) 3px,
+                rgba(0, 0, 0, 0.22) 4px
+            );
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+            pointer-events: none;
+            z-index: 101;
+        }
+
+        .shell {
             min-height: 100vh;
-        }
-        
-        /* --- LEFT SIDE: FORM --- */
-        .login-section {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            padding: 3rem 4rem;
-            background: var(--bg-primary);
-            border-right: 1px solid var(--border-color);
-        }
-        .login-container {
-            width: 100%;
-            max-width: 400px;
-            margin: 0 auto;
-        }
-        .logo {
             display: flex;
             align-items: center;
-            gap: 12px;
-            margin-bottom: 2rem;
+            justify-content: center;
+            padding: 32px 16px;
+            position: relative;
+            z-index: 1;
         }
-        .logo img { width: 36px; height: 36px; }
-        .logo-text { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
-        
-        .welcome-text { margin-bottom: 2rem; }
-        .welcome-text h1 { font-size: 26px; font-weight: 600; margin-bottom: 0.5rem; letter-spacing: -0.02em; }
-        .welcome-text p { color: var(--text-secondary); font-size: 15px; line-height: 1.5; }
-        
-        .alert {
-            padding: 12px 16px;
-            border-radius: 8px;
-            font-size: 14px;
-            margin-bottom: 1.5rem;
-            line-height: 1.5;
+
+        .terminal {
+            width: 100%;
+            max-width: 760px;
+            background: var(--term-panel);
+            border: 1px solid var(--term-line);
+            box-shadow:
+                0 0 24px rgba(51, 255, 102, 0.10),
+                0 0 80px rgba(51, 255, 102, 0.05),
+                inset 0 0 60px rgba(51, 255, 102, 0.03);
+            animation: boot-in 0.7s ease-out both;
         }
-        .alert-error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #f87171; }
-        .alert-success { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); color: #34d399; }
-        
-        .auth-tabs {
+
+        @keyframes boot-in {
+            0%   { opacity: 0; transform: scaleY(0.02); filter: brightness(4); }
+            45%  { opacity: 1; transform: scaleY(1.03); filter: brightness(1.6); }
+            100% { opacity: 1; transform: scaleY(1); filter: brightness(1); }
+        }
+
+        .term-titlebar {
             display: flex;
-            gap: 4px;
-            margin-bottom: 1.5rem;
-            background: rgba(255, 255, 255, 0.03);
-            padding: 4px;
-            border-radius: 8px;
-            border: 1px solid var(--border-color);
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--term-line);
+            background: rgba(51, 255, 102, 0.04);
+            font-size: 12px;
+            color: var(--term-muted);
+            letter-spacing: 0.08em;
+            user-select: none;
         }
-        .auth-tab {
-            flex: 1;
-            padding: 10px 16px;
-            background: transparent;
-            border: none;
-            color: var(--text-secondary);
+
+        .term-dot {
+            width: 11px; height: 11px;
+            border-radius: 50%;
+            border: 1px solid var(--term-line);
+            position: relative;
+        }
+        .term-dot::after {
+            content: '';
+            position: absolute;
+            inset: 2px;
+            border-radius: 50%;
+            background: currentColor;
+            opacity: 0.7;
+        }
+        .dot-r { color: var(--term-red); }
+        .dot-a { color: var(--term-amber); }
+        .dot-g { color: var(--term-green); }
+
+        .term-titlebar .title { margin-left: 8px; }
+
+        .term-body { padding: 28px 32px 32px; }
+
+        .ascii-banner {
+            color: var(--term-green);
+            font-size: clamp(5px, 1.45vw, 12.5px);
+            line-height: 1.15;
+            text-align: center;
+            text-shadow: 0 0 8px rgba(51, 255, 102, 0.55);
+            white-space: pre;
+            overflow: hidden;
+            margin-bottom: 4px;
+            user-select: none;
+        }
+
+        .ascii-dog {
+            color: var(--term-green-dim);
+            font-size: clamp(5px, 1.3vw, 11px);
+            line-height: 1.2;
+            text-align: center;
+            white-space: pre;
+            overflow: hidden;
+            user-select: none;
+            margin-bottom: 10px;
+        }
+
+        .boot-line {
+            font-size: 12px;
+            color: var(--term-muted);
+            margin-bottom: 22px;
+            letter-spacing: 0.04em;
+        }
+        .boot-line .ok { color: var(--term-green); }
+
+        .typeline {
             font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            border-radius: 6px;
-            transition: all 0.2s ease;
-            font-family: inherit;
+            color: var(--term-text);
+            min-height: 22px;
+            margin-bottom: 24px;
         }
-        .auth-tab.active {
-            background: rgba(255, 255, 255, 0.08);
-            color: var(--text-primary);
+
+        .cursor {
+            display: inline-block;
+            width: 9px;
+            height: 16px;
+            background: var(--term-green);
+            vertical-align: -2px;
+            margin-left: 3px;
+            animation: blink 1s steps(1) infinite;
+            box-shadow: 0 0 8px rgba(51, 255, 102, 0.8);
         }
-        .auth-tab:hover:not(.active) { color: var(--text-primary); }
-        
-        .auth-form { display: none; }
-        .auth-form.active { display: block; animation: fadeIn 0.3s ease; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-        
-        .form-group { margin-bottom: 1.25rem; }
-        .form-group label {
+
+        @keyframes blink { 50% { opacity: 0; } }
+
+        .form-box {
+            border: 1px solid var(--term-line);
+            padding: 22px 22px 24px;
+            margin-bottom: 18px;
+            background: rgba(51, 255, 102, 0.02);
+        }
+
+        .box-label {
+            font-size: 12px;
+            color: var(--term-amber);
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            margin-bottom: 14px;
+            user-select: none;
+        }
+
+        .field-label {
             display: block;
-            margin-bottom: 0.5rem;
-            font-size: 13px;
-            font-weight: 500;
-            color: var(--text-secondary);
+            font-size: 12px;
+            color: var(--term-muted);
+            margin-bottom: 6px;
         }
-        .form-group input {
+        .field-label::before { content: '> '; color: var(--term-green); }
+
+        input[type="email"], input[type="text"] {
             width: 100%;
             padding: 12px 14px;
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            color: var(--text-primary);
-            font-size: 14px;
-            transition: all 0.2s ease;
-            outline: none;
+            background: #040604;
+            border: 1px solid var(--term-line);
+            color: var(--term-green);
             font-family: inherit;
+            font-size: 14px;
+            outline: none;
+            caret-color: var(--term-green);
+            transition: border-color .15s ease, box-shadow .15s ease;
         }
-        .form-group input:focus {
-            border-color: var(--border-hover);
-            background: rgba(255, 255, 255, 0.05);
-            box-shadow: 0 0 0 3px var(--accent-glow);
+        input:focus {
+            border-color: var(--term-green);
+            box-shadow: 0 0 12px rgba(51, 255, 102, 0.25), inset 0 0 8px rgba(51, 255, 102, 0.06);
         }
-        .form-group input::placeholder { color: var(--text-muted); }
-        
-        .btn-primary {
+        input::placeholder { color: #2c4a33; }
+
+        .btn {
             width: 100%;
             padding: 12px;
-            background: var(--text-primary);
-            border: none;
-            border-radius: 8px;
-            color: var(--bg-primary);
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
             font-family: inherit;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            cursor: pointer;
+            border: 1px solid var(--term-green);
+            background: var(--term-green-faint);
+            color: var(--term-green);
+            transition: all .15s ease;
+            margin-top: 14px;
         }
-        .btn-primary:hover { background: #e4e4e7; }
-        .btn-primary:active { transform: scale(0.98); }
-        
-        .divider {
+        .btn:hover:not(:disabled) {
+            background: var(--term-green);
+            color: #031007;
+            box-shadow: 0 0 18px rgba(51, 255, 102, 0.45);
+        }
+        .btn:disabled { opacity: 0.45; cursor: default; }
+
+        .tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 18px;
+            border: 1px solid var(--term-line);
+            user-select: none;
+        }
+        .tab {
+            flex: 1;
+            padding: 10px;
+            background: transparent;
+            border: none;
+            border-right: 1px solid var(--term-line);
+            color: var(--term-muted);
+            font-family: inherit;
+            font-size: 12px;
+            letter-spacing: 0.1em;
+            cursor: pointer;
+            transition: all .15s ease;
+        }
+        .tab:last-child { border-right: none; }
+        .tab.active {
+            background: var(--term-green-faint);
+            color: var(--term-green);
+        }
+        .tab:hover:not(.active) { color: var(--term-text); }
+
+        .auth-form { display: none; }
+        .auth-form.active { display: block; animation: fadeIn 0.25s ease; }
+
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        .form-group { margin-bottom: 14px; }
+
+        .rule {
             display: flex;
             align-items: center;
-            margin: 1.5rem 0;
-            color: var(--text-muted);
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
+            gap: 14px;
+            margin: 4px 0 18px;
+            color: var(--term-muted);
+            font-size: 11px;
+            letter-spacing: 0.2em;
+            user-select: none;
         }
-        .divider::before, .divider::after {
+        .rule::before, .rule::after {
             content: '';
             flex: 1;
             height: 1px;
-            background: var(--border-color);
+            background: var(--term-line);
         }
-        .divider span { padding: 0 1rem; }
-        
-        .social-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 1.5rem; }
-        .social-btn {
+
+        .oauth-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+
+        .btn-oauth {
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 8px;
-            padding: 12px;
+            gap: 10px;
             background: transparent;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            color: var(--text-primary);
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            text-decoration: none;
-            font-family: inherit;
+            color: var(--term-text);
+            border: 1px solid var(--term-line);
+            margin-top: 0;
         }
-        .social-btn:hover { background: rgba(255, 255, 255, 0.05); border-color: var(--text-secondary); }
-        .social-btn svg { width: 18px; height: 18px; }
-        
+        .btn-oauth:hover {
+            background: rgba(51, 255, 102, 0.06);
+            border-color: var(--term-green-dim);
+            color: var(--term-green);
+            box-shadow: none;
+        }
+        .btn-oauth svg { width: 16px; height: 16px; flex-shrink: 0; }
+
         .signup-link {
             text-align: center;
-            margin-top: 1.5rem;
-            color: var(--text-secondary);
-            font-size: 14px;
+            font-size: 12px;
+            color: var(--term-muted);
+            margin-top: 4px;
         }
-        .signup-link a { color: var(--text-primary); text-decoration: none; font-weight: 500; }
+        .signup-link a { color: var(--term-green); text-decoration: none; }
         .signup-link a:hover { text-decoration: underline; }
 
-        /* --- RIGHT SIDE: VISUAL --- */
-        .visual-section {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            padding: 3rem;
-            background: var(--bg-secondary);
-            position: relative;
-            overflow: hidden;
+        .alert {
+            padding: 11px 14px;
+            font-size: 12.5px;
+            line-height: 1.6;
+            margin-bottom: 18px;
+            font-family: inherit;
         }
-        /* Subtle tech grid background, no flashy animations */
-        .visual-section::before {
-            content: '';
-            position: absolute;
-            inset: 0;
-            background-image: 
-                linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-            background-size: 40px 40px;
-            mask-image: radial-gradient(circle at center, black 20%, transparent 70%);
-            -webkit-mask-image: radial-gradient(circle at center, black 20%, transparent 70%);
+        .alert-error {
+            border: 1px solid rgba(255, 85, 85, 0.5);
+            background: rgba(255, 85, 85, 0.07);
+            color: #ff9a9a;
         }
-        .dashboard-preview {
-            position: relative;
-            z-index: 1;
-            width: 100%;
-            max-width: 640px;
-            border-radius: 12px;
-            border: 1px solid var(--border-color);
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
-            overflow: hidden;
-            background: var(--bg-primary);
+        .alert-success {
+            border: 1px solid rgba(51, 255, 102, 0.5);
+            background: rgba(51, 255, 102, 0.07);
+            color: var(--term-green);
         }
-        .dashboard-preview img {
-            width: 100%;
-            height: auto;
-            display: block;
-            opacity: 0.95;
-        }
-        .visual-footer {
-            position: absolute;
-            bottom: 2.5rem;
-            display: flex;
-            gap: 2rem;
-            z-index: 1;
-        }
-        .visual-footer a {
-            color: var(--text-muted);
-            text-decoration: none;
-            font-size: 13px;
-            font-weight: 500;
-            transition: color 0.2s;
-        }
-        .visual-footer a:hover { color: var(--text-primary); }
 
-        /* --- RESPONSIVE --- */
-        @media (max-width: 968px) {
-            .container { grid-template-columns: 1fr; }
-            .visual-section { display: none; }
-            .login-section { padding: 2rem; border-right: none; }
+        .statusbar {
+            border-top: 1px solid var(--term-line);
+            padding: 8px 14px;
+            font-size: 11px;
+            color: var(--term-muted);
+            display: flex;
+            justify-content: space-between;
+            letter-spacing: 0.06em;
+            user-select: none;
         }
-        @media (max-width: 480px) {
-            .social-buttons { grid-template-columns: 1fr; }
+        .statusbar .live { color: var(--term-green); }
+
+        @media (max-width: 640px) {
+            .term-body { padding: 20px 16px 24px; }
+            .shell { padding: 16px 8px; }
+            .oauth-row { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <!-- LEFT SIDE: LOGIN FORM -->
-        <section class="login-section">
-            <div class="login-container">
-                <div class="logo">
-                    <img src="/static/logo.svg" alt="Cerbere Logo">
-                    <span class="logo-text">CERBERE</span>
+    <div class="shell">
+        <div class="terminal">
+            <div class="term-titlebar">
+                <span class="term-dot dot-r"></span>
+                <span class="term-dot dot-a"></span>
+                <span class="term-dot dot-g"></span>
+                <span class="title">cerbere@secure-gate:~$ auth --tty</span>
+            </div>
+
+            <div class="term-body">
+<pre class="ascii-banner">
+ ██████╗███████╗██████╗ ██████╗ ███████╗██████╗ ███████╗
+██╔════╝██╔════╝██╔══██╗██╔══██╗██╔════╝██╔══██╗██╔════╝
+██║     █████╗  ██████╔╝██████╔╝█████╗  ██████╔╝█████╗
+██║     ██╔══╝  ██╔══██╗██╔══██╗██╔══╝  ██╔══██╗██╔══╝
+╚██████╗███████╗██║  ██║██████╔╝███████╗██║  ██║███████╗
+ ╚═════╝╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚══════╝</pre>
+
+<pre class="ascii-dog">
+        /\___/\     /\___/\     /\___/\
+       ( o   o )   ( o   o )   ( o   o )
+        (  =^= )    (  =^= )    (  =^= )
+   ____/ \___/ ____ \___/ ____ \___/ \____
+  /                                     \
+</pre>
+
+                <div class="boot-line">
+                    [<span class="ok">OK</span>] guardian daemon loaded &nbsp; [<span class="ok">OK</span>] 3 heads online &nbsp; [<span class="ok">OK</span>] gate armed
                 </div>
-                
-                <div class="welcome-text">
-                    <h1>Welcome back</h1>
-                    <p>Secure access to your AI runtime security console.</p>
+
+                <div class="typeline">
+                    <span style="color: var(--term-green);">$</span> <span id="typed"></span><span class="cursor"></span>
                 </div>
-                
+
                 {% if error %}
-                <div class="alert alert-error">{{ error }}</div>
+                <div class="alert alert-error">ERR: {{ error }}</div>
                 {% endif %}
+
                 {% if success %}
-                <div class="alert alert-success">{{ success }}</div>
+                <div class="alert alert-success">OK: {{ success }}</div>
                 {% endif %}
-                
-                <div class="auth-tabs">
-                    <button class="auth-tab active" onclick="switchTab('email')" id="tab-email">Work Email</button>
-                    <button class="auth-tab" onclick="switchTab('sso')" id="tab-sso">Enterprise SSO</button>
+
+                <div class="form-box">
+                    <div class="box-label">// authenticate</div>
+
+                    <div class="tabs">
+                        <button class="tab active" onclick="switchTab('email')" id="tab-email">EMAIL</button>
+                        <button class="tab" onclick="switchTab('sso')" id="tab-sso">ENTERPRISE SSO</button>
+                    </div>
+
+                    <form class="auth-form active" id="email-form" method="post" action="/login">
+                        <div class="form-group">
+                            <label class="field-label" for="email">work_email</label>
+                            <input type="email" id="email" name="email" placeholder="name@company.com" required autocomplete="email" autocapitalize="none">
+                        </div>
+                        <button type="submit" class="btn">[ Send magic link ]</button>
+                    </form>
+
+                    <form class="auth-form" id="sso-form" method="post" action="/login">
+                        <div class="form-group">
+                            <label class="field-label" for="company-domain">company_domain</label>
+                            <input type="text" id="company-domain" name="domain" placeholder="company.com" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="field-label" for="sso-email">work_email</label>
+                            <input type="email" id="sso-email" name="email" placeholder="name@company.com" required>
+                        </div>
+                        <button type="submit" class="btn">[ Continue with SSO ]</button>
+                    </form>
                 </div>
-                
-                <!-- Email Form -->
-                <form class="auth-form active" id="email-form" method="post" action="/login">
-                    <div class="form-group">
-                        <label for="email">Work Email</label>
-                        <input type="email" id="email" name="email" placeholder="name@company.com" required autocomplete="email" autocapitalize="none">
-                    </div>
-                    <button type="submit" class="btn-primary" id="email-btn">Send Magic Link</button>
-                </form>
-                
-                <!-- SSO Form -->
-                <form class="auth-form" id="sso-form" method="post" action="/login">
-                    <div class="form-group">
-                        <label for="company-domain">Company Domain</label>
-                        <input type="text" id="company-domain" name="domain" placeholder="company.com" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="sso-email">Work Email</label>
-                        <input type="email" id="sso-email" name="email" placeholder="name@company.com" required>
-                    </div>
-                    <button type="submit" class="btn-primary" id="sso-btn">Continue with SSO</button>
-                </form>
-                
-                <div class="divider"><span>Or continue with</span></div>
-                
-                <div class="social-buttons">
-                    <a href="/auth/google" class="social-btn">
+
+                <div class="rule">OR CONTINUE WITH</div>
+
+                <div class="oauth-row">
+                    <a href="/auth/google" class="btn btn-oauth">
                         <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
                             <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
                             <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
                             <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
                         </svg>
-                        Google
+                        google
                     </a>
-                    <a href="/auth/github" class="social-btn">
+                    <a href="/auth/github" class="btn btn-oauth">
                         <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
                             <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
                         </svg>
-                        GitHub
+                        github
                     </a>
                 </div>
-                
+
                 <div class="signup-link">
-                    Don't have an account? <a href="/signup">Sign up</a>
+                    no account yet? <a href="/signup">./signup</a>
                 </div>
             </div>
-        </section>
-        
-        <!-- RIGHT SIDE: DASHBOARD PREVIEW & FOOTER -->
-        <section class="visual-section">
-            <div class="dashboard-preview">
-                <img src="/static/dashboard-preview-crop.png" alt="Cerbere Dashboard Preview">
+
+            <div class="statusbar">
+                <span>tty1 · utf-8 · <span class="live">● SECURE CHANNEL</span></span>
+                <span id="clock">--:--:--</span>
             </div>
-            <div class="visual-footer">
-                <a href="https://app.cerbereag.site/terms" target="_blank" rel="noopener noreferrer">Legal</a>
-                <a href="https://app.cerbereag.site/support" target="_blank" rel="noopener noreferrer">Contact</a>
-            </div>
-        </section>
+        </div>
     </div>
-    
+
     <script>
         function switchTab(tab) {
-            const tabs = document.querySelectorAll('.auth-tab');
-            const forms = document.querySelectorAll('.auth-form');
-            tabs.forEach(t => t.classList.remove('active'));
-            forms.forEach(f => f.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
+
             if (tab === 'email') {
                 document.getElementById('tab-email').classList.add('active');
                 document.getElementById('email-form').classList.add('active');
@@ -2666,6 +2911,36 @@ LOGIN_HTML = """
                 document.getElementById('sso-form').classList.add('active');
             }
         }
+
+        (function typewriter() {
+            const phrases = [
+                "auth --identity human",
+                "guardian watching. 3/3 heads online_",
+                "sudo let-me-in --verified",
+                "runtime security for AI agents"
+            ];
+            const el = document.getElementById("typed");
+            let pi = 0, ci = 0, deleting = false;
+
+            function tick() {
+                const phrase = phrases[pi];
+                el.textContent = phrase.slice(0, ci);
+
+                if (!deleting) {
+                    if (ci < phrase.length) { ci++; setTimeout(tick, 55); return; }
+                    deleting = true; setTimeout(tick, 2200); return;
+                }
+                if (ci > 0) { ci--; setTimeout(tick, 24); return; }
+                deleting = false; pi = (pi + 1) % phrases.length; setTimeout(tick, 400);
+            }
+            tick();
+        })();
+
+        (function clock() {
+            const el = document.getElementById("clock");
+            function upd() { el.textContent = new Date().toLocaleTimeString('en-GB'); }
+            upd(); setInterval(upd, 1000);
+        })();
     </script>
 </body>
 </html>
