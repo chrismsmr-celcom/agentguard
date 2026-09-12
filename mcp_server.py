@@ -1,16 +1,16 @@
 """
-AgentGuard MCP Server
-Permet aux agents IA compatibles MCP (Claude, Cursor, etc.) d'interroger 
-les politiques de sécurité, de vérifier les prompts et d'autoriser les outils.
+AgentGuard MCP Server (Compatible MCP v1.x)
+Permet aux agents IA compatibles MCP d'interroger les politiques de sécurité.
 """
 
 import os
 import json
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional
 
+# Import stable pour MCP v1.x
 from mcp.server.fastmcp import FastMCP
-from agentguard import AgentGuard, RiskLevel, SecurityAction
+from agentguard import AgentGuard
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -22,9 +22,7 @@ mcp = FastMCP(
     instructions="Serveur de sécurité runtime pour agents IA. Utilise ces outils pour vérifier les prompts et les appels d'outils avant exécution."
 )
 
-# Initialisation d'AgentGuard (mode standalone pour MCP)
-# On désactive l'envoi au collector distant par défaut si non configuré, 
-# pour que le MCP puisse tourner localement de manière autonome.
+# Initialisation d'AgentGuard
 collector_url = os.getenv("AGENTGUARD_MCP_COLLECTOR_URL", "http://localhost:8080")
 guard = AgentGuard(
     collector_url=collector_url,
@@ -35,21 +33,12 @@ guard = AgentGuard(
 )
 
 # ==============================================================================
-# 🛠️ MCP TOOLS (Pour que l'agent IA vérifie ses actions)
+# 🛠️ MCP TOOLS
 # ==============================================================================
 
 @mcp.tool()
 def check_prompt_security(text: str) -> str:
-    """
-    Vérifie si un texte (prompt ou sortie LLM) contient des injections, 
-    des fuites de PII ou des motifs malveillants.
-    À appeler AVANT d'envoyer un prompt à un LLM ou d'afficher une réponse.
-    
-    Args:
-        text: Le texte à analyser.
-    Returns:
-        Un JSON indiquant si le texte est sûr (is_safe: bool) et les détails des risques.
-    """
+    """Vérifie si un texte contient des injections, des fuites de PII ou des motifs malveillants."""
     try:
         injection_check = guard.policy_engine.check_injection(text)
         pii_check = guard.policy_engine.check_pii(text)
@@ -75,18 +64,7 @@ def check_prompt_security(text: str) -> str:
 
 @mcp.tool()
 def authorize_tool_call(tool_name: str, params_json: str, agent_id: Optional[str] = None) -> str:
-    """
-    Vérifie si un appel d'outil spécifique est autorisé par les politiques de sécurité 
-    et le budget restant.
-    À appeler AVANT d'exécuter un outil externe (ex: base de données, API, shell).
-    
-    Args:
-        tool_name: Le nom de l'outil (ex: "execute_command", "send_email").
-        params_json: Les paramètres de l'outil sous forme de chaîne JSON.
-        agent_id: L'identifiant de l'agent (optionnel, utilise la valeur par défaut sinon).
-    Returns:
-        Un JSON indiquant si l'outil est autorisé (is_allowed: bool) et la raison.
-    """
+    """Vérifie si un appel d'outil spécifique est autorisé par les politiques de sécurité."""
     try:
         params = json.loads(params_json)
         current_agent = agent_id or guard.agent_id
@@ -110,9 +88,7 @@ def authorize_tool_call(tool_name: str, params_json: str, agent_id: Optional[str
 
 @mcp.tool()
 def get_security_status(agent_id: Optional[str] = None) -> str:
-    """
-    Récupère l'état actuel de la sécurité et du budget pour l'agent.
-    """
+    """Récupère l'état actuel de la sécurité et du budget pour l'agent."""
     try:
         report = guard.get_report()
         report["agent_id"] = agent_id or guard.agent_id
@@ -121,14 +97,12 @@ def get_security_status(agent_id: Optional[str] = None) -> str:
         return json.dumps({"error": str(e)})
 
 # ==============================================================================
-# 📚 MCP RESOURCES (Pour que l'agent IA lise le contexte de sécurité)
+# 📚 MCP RESOURCES
 # ==============================================================================
 
 @mcp.resource("agentguard://policies/summary")
 def get_policies_summary() -> str:
-    """
-    Fournit un résumé des politiques de sécurité actives (outils autorisés/interdits).
-    """
+    """Fournit un résumé des politiques de sécurité actives."""
     allowed = list(guard.policy_engine._allowed_tools)
     return json.dumps({
         "policy_type": "tool_whitelist",
@@ -143,7 +117,6 @@ def get_policies_summary() -> str:
 # ==============================================================================
 
 if __name__ == "__main__":
-    # Le transport stdio est le standard pour les serveurs MCP locaux
-    # Il permet à l'hôte (Claude Desktop, Cursor, etc.) de communiquer via stdin/stdout
-    logger.info("Starting AgentGuard MCP Server on stdio...")
+    logger.info("Starting AgentGuard MCP Server (v1.x) on stdio...")
+    # La méthode run() avec transport='stdio' est la méthode standard et stable en v1.x
     mcp.run(transport='stdio')
