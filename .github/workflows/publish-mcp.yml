@@ -1,0 +1,36 @@
+name: Publish CerbereAG MCP to PyPI
+
+on:
+  release:
+    types: [published] # Se déclenche quand tu publies une "Release" sur GitHub
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest # On utilise Linux en ligne, beaucoup plus stable pour les builds Python
+    permissions:
+      id-token: write # IMPORTANT : Requis pour la "Trusted Publishing" de PyPI
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build package
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # NOTE : Si tu n'as pas configuré la "Trusted Publishing" sur PyPI, 
+        # décommente les lignes ci-dessous et ajoute un secret PYPI_API_TOKEN dans GitHub :
+        # with:
+        #   password: ${{ secrets.PYPI_API_TOKEN }}
