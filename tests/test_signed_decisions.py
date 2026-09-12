@@ -1,7 +1,8 @@
 """Tests des décisions signées Ed25519 (v3.2)."""
 import time
 import pytest
-
+import os
+os.environ["AGENTGUARD_ALLOW_EPHEMERAL_SIGNING_KEY"] = "true" 
 try:
     from signing import DecisionSigner, DecisionVerifier
     SIGNING_AVAILABLE = True
