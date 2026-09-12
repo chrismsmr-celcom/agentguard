@@ -974,15 +974,15 @@ class AgentGuard:
         self.debug = debug
         self.fail_open = fail_open
         self.agent_id = (
-    agent_id
-    or os.getenv("AGENTGUARD_AGENT_ID")
-)
+            agent_id
+            or os.getenv("AGENTGUARD_AGENT_ID")
+        )
 
-if not self.agent_id:
-    raise ValueError(
-        "AGENTGUARD_AGENT_ID is required. "
-        "Each runtime agent must have a unique identity."
-    )
+        if not self.agent_id:
+            raise ValueError(
+                "AGENTGUARD_AGENT_ID is required. "
+                "Each runtime agent must have a unique identity."
+            )
         self.total_spent = 0.0
         self.trace_id = self._generate_id()
         self.spans: List[GuardSpan] = []
