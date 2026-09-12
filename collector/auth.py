@@ -1843,7 +1843,7 @@ SUPABASE_LOGIN_HTML = r"""<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CERBERE // Secure Access</title>
+    <title>CERBERE — Sign in</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -1852,258 +1852,140 @@ SUPABASE_LOGIN_HTML = r"""<!DOCTYPE html>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         :root {
-            --term-bg: #050805;
-            --term-panel: #0a0f0a;
-            --term-green: #33ff66;
-            --term-green-dim: #1a8f3c;
-            --term-green-faint: rgba(51, 255, 102, 0.12);
-            --term-amber: #ffb347;
-            --term-red: #ff5555;
-            --term-text: #b8ffcb;
-            --term-muted: #4e7a58;
-            --term-line: rgba(51, 255, 102, 0.22);
+            --bg: #121110;
+            --panel: #171512;
+            --panel-2: #1c1915;
+            --accent: #da7751;
+            --accent-soft: rgba(218, 119, 81, 0.12);
+            --accent-line: rgba(218, 119, 81, 0.30);
+            --text: #ece6db;
+            --muted: #8f8579;
+            --faint: #5c554c;
+            --error: #d96a6a;
+            --line: rgba(236, 230, 219, 0.09);
         }
 
         body {
             font-family: 'JetBrains Mono', 'Courier New', monospace;
-            background: var(--term-bg);
-            color: var(--term-text);
+            background: var(--bg);
+            color: var(--text);
             min-height: 100vh;
-            overflow-x: hidden;
-            position: relative;
-        }
-
-        /* ── Scanlines CRT ─────────────────────────────── */
-        body::before {
-            content: '';
-            position: fixed;
-            inset: 0;
-            background: repeating-linear-gradient(
-                to bottom,
-                transparent 0px,
-                transparent 2px,
-                rgba(0, 0, 0, 0.22) 3px,
-                rgba(0, 0, 0, 0.22) 4px
-            );
-            pointer-events: none;
-            z-index: 100;
-        }
-
-        /* ── Halo phosphore ────────────────────────────── */
-        body::after {
-            content: '';
-            position: fixed;
-            inset: 0;
-            background: radial-gradient(
-                ellipse at center,
-                transparent 55%,
-                rgba(0, 0, 0, 0.55) 100%
-            );
-            pointer-events: none;
-            z-index: 101;
+            -webkit-font-smoothing: antialiased;
         }
 
         .shell {
+            display: grid;
+            grid-template-columns: minmax(420px, 500px) 1fr;
             min-height: 100vh;
+        }
+
+        /* GAUCHE — formulaire */
+        .pane-form {
             display: flex;
-            align-items: center;
+            flex-direction: column;
             justify-content: center;
-            padding: 32px 16px;
-            position: relative;
-            z-index: 1;
+            padding: 48px 52px;
+            background: var(--panel);
+            border-right: 1px solid var(--line);
         }
 
-        /* ── Fenêtre terminal ──────────────────────────── */
-        .terminal {
-            width: 100%;
-            max-width: 760px;
-            background: var(--term-panel);
-            border: 1px solid var(--term-line);
-            box-shadow:
-                0 0 24px rgba(51, 255, 102, 0.10),
-                0 0 80px rgba(51, 255, 102, 0.05),
-                inset 0 0 60px rgba(51, 255, 102, 0.03);
-            animation: boot-in 0.7s ease-out both;
-        }
+        .form-inner { width: 100%; max-width: 380px; margin: 0 auto; }
 
-        @keyframes boot-in {
-            0%   { opacity: 0; transform: scaleY(0.02); filter: brightness(4); }
-            45%  { opacity: 1; transform: scaleY(1.03); filter: brightness(1.6); }
-            100% { opacity: 1; transform: scaleY(1); filter: brightness(1); }
-        }
-
-        .term-titlebar {
+        .brand-mini {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 10px 14px;
-            border-bottom: 1px solid var(--term-line);
-            background: rgba(51, 255, 102, 0.04);
+            gap: 10px;
+            margin-bottom: 42px;
+        }
+        .brand-mini img { width: 26px; height: 26px; border-radius: 5px; }
+        .brand-mini span {
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.22em;
+            color: var(--text);
+        }
+
+        .welcome h1 {
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .welcome p {
+            font-size: 13px;
+            color: var(--muted);
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }
+
+        .prompt-line {
             font-size: 12px;
-            color: var(--term-muted);
-            letter-spacing: 0.08em;
-            user-select: none;
-        }
-
-        .term-dot {
-            width: 11px; height: 11px;
-            border-radius: 50%;
-            border: 1px solid var(--term-line);
-            position: relative;
-        }
-        .term-dot::after {
-            content: '';
-            position: absolute;
-            inset: 2px;
-            border-radius: 50%;
-            background: currentColor;
-            opacity: 0.7;
-        }
-        .dot-r { color: var(--term-red); }
-        .dot-a { color: var(--term-amber); }
-        .dot-g { color: var(--term-green); }
-
-        .term-titlebar .title {
-            margin-left: 8px;
-        }
-
-        .term-body {
-            padding: 28px 32px 32px;
-        }
-
-        /* ── Bannière ASCII ────────────────────────────── */
-        .ascii-banner {
-            color: var(--term-green);
-            font-size: clamp(5px, 1.45vw, 12.5px);
-            line-height: 1.15;
-            text-align: center;
-            text-shadow: 0 0 8px rgba(51, 255, 102, 0.55);
-            white-space: pre;
-            overflow: hidden;
-            margin-bottom: 4px;
-            user-select: none;
-        }
-
-        .ascii-dog {
-            color: var(--term-green-dim);
-            font-size: clamp(5px, 1.3vw, 11px);
-            line-height: 1.2;
-            text-align: center;
-            white-space: pre;
-            overflow: hidden;
-            user-select: none;
-            margin-bottom: 10px;
-        }
-
-        .boot-line {
-            font-size: 12px;
-            color: var(--term-muted);
-            margin-bottom: 22px;
-            letter-spacing: 0.04em;
-        }
-        .boot-line .ok { color: var(--term-green); }
-
-        /* ── Typing subtitle ───────────────────────────── */
-        .typeline {
-            font-size: 14px;
-            color: var(--term-text);
-            min-height: 22px;
-            margin-bottom: 24px;
-        }
-
-        .cursor {
-            display: inline-block;
-            width: 9px;
-            height: 16px;
-            background: var(--term-green);
-            vertical-align: -2px;
-            margin-left: 3px;
-            animation: blink 1s steps(1) infinite;
-            box-shadow: 0 0 8px rgba(51, 255, 102, 0.8);
-        }
-
-        @keyframes blink { 50% { opacity: 0; } }
-
-        /* ── Boîte formulaire ──────────────────────────── */
-        .form-box {
-            border: 1px solid var(--term-line);
-            padding: 22px 22px 24px;
+            color: var(--faint);
             margin-bottom: 18px;
-            background: rgba(51, 255, 102, 0.02);
         }
-
-        .box-label {
-            font-size: 12px;
-            color: var(--term-amber);
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            margin-bottom: 14px;
-            user-select: none;
-        }
+        .prompt-line .sig { color: var(--accent); }
 
         .field-label {
             display: block;
             font-size: 12px;
-            color: var(--term-muted);
-            margin-bottom: 6px;
+            color: var(--muted);
+            margin-bottom: 7px;
         }
-        .field-label::before { content: '> '; color: var(--term-green); }
+        .field-label::before { content: '> '; color: var(--accent); }
 
-        input[type="email"] {
+        input[type="email"], input[type="text"] {
             width: 100%;
             padding: 12px 14px;
-            background: #040604;
-            border: 1px solid var(--term-line);
-            color: var(--term-green);
+            background: var(--bg);
+            border: 1px solid var(--line);
+            color: var(--text);
             font-family: inherit;
-            font-size: 14px;
+            font-size: 13.5px;
             outline: none;
-            caret-color: var(--term-green);
+            border-radius: 6px;
+            caret-color: var(--accent);
             transition: border-color .15s ease, box-shadow .15s ease;
         }
-        input[type="email"]:focus {
-            border-color: var(--term-green);
-            box-shadow: 0 0 12px rgba(51, 255, 102, 0.25), inset 0 0 8px rgba(51, 255, 102, 0.06);
+        input:focus {
+            border-color: var(--accent-line);
+            box-shadow: 0 0 0 3px var(--accent-soft);
         }
-        input[type="email"]::placeholder { color: #2c4a33; }
+        input::placeholder { color: var(--faint); }
 
         .btn {
             width: 100%;
             padding: 12px;
             font-family: inherit;
-            font-size: 13px;
+            font-size: 12.5px;
             font-weight: 700;
-            letter-spacing: 0.14em;
+            letter-spacing: 0.1em;
             text-transform: uppercase;
             cursor: pointer;
-            border: 1px solid var(--term-green);
-            background: var(--term-green-faint);
-            color: var(--term-green);
+            border-radius: 6px;
+            border: 1px solid var(--accent);
+            background: var(--accent);
+            color: #1a120c;
             transition: all .15s ease;
             margin-top: 14px;
         }
-        .btn:hover:not(:disabled) {
-            background: var(--term-green);
-            color: #031007;
-            box-shadow: 0 0 18px rgba(51, 255, 102, 0.45);
-        }
-        .btn:disabled { opacity: 0.45; cursor: default; }
+        .btn:hover:not(:disabled) { filter: brightness(1.08); }
+        .btn:active:not(:disabled) { transform: translateY(1px); }
+        .btn:disabled { opacity: 0.5; cursor: default; }
 
         .rule {
             display: flex;
             align-items: center;
             gap: 14px;
-            margin: 4px 0 18px;
-            color: var(--term-muted);
-            font-size: 11px;
-            letter-spacing: 0.2em;
+            margin: 22px 0;
+            color: var(--faint);
+            font-size: 10.5px;
+            letter-spacing: 0.22em;
             user-select: none;
         }
         .rule::before, .rule::after {
             content: '';
             flex: 1;
             height: 1px;
-            background: var(--term-line);
+            background: var(--line);
         }
 
         .oauth-row { display: flex; flex-direction: column; gap: 10px; }
@@ -2114,111 +1996,166 @@ SUPABASE_LOGIN_HTML = r"""<!DOCTYPE html>
             justify-content: center;
             gap: 10px;
             background: transparent;
-            color: var(--term-text);
-            border: 1px solid var(--term-line);
+            color: var(--text);
+            border: 1px solid var(--line);
+            margin-top: 0;
         }
-        .btn-oauth:hover {
-            background: rgba(51, 255, 102, 0.06);
-            border-color: var(--term-green-dim);
-            color: var(--term-green);
-            box-shadow: none;
+        .btn-oauth:hover:not(:disabled) {
+            border-color: var(--accent-line);
+            background: var(--accent-soft);
+            color: var(--text);
+            filter: none;
         }
-        .btn-oauth svg { width: 16px; height: 16px; flex-shrink: 0; }
+        .btn-oauth svg { width: 15px; height: 15px; flex-shrink: 0; }
 
         .signup-note {
-            margin-top: 20px;
-            padding: 14px 16px;
-            border: 1px dashed var(--term-line);
-            font-size: 12px;
-            color: var(--term-muted);
+            margin-top: 26px;
+            padding-top: 20px;
+            border-top: 1px solid var(--line);
+            font-size: 11.5px;
+            color: var(--faint);
             line-height: 1.7;
         }
-        .signup-note strong { color: var(--term-amber); font-weight: 700; }
+        .signup-note strong { color: var(--muted); }
 
-        #alert-box:empty { display: none; }
+        .signup-link {
+            margin-top: 20px;
+            font-size: 12px;
+            color: var(--muted);
+        }
+        .signup-link a { color: var(--accent); text-decoration: none; }
+        .signup-link a:hover { text-decoration: underline; }
 
         .alert {
             padding: 11px 14px;
             font-size: 12.5px;
             line-height: 1.6;
             margin-bottom: 18px;
+            border-radius: 6px;
             font-family: inherit;
         }
         .alert-error {
-            border: 1px solid rgba(255, 85, 85, 0.5);
-            background: rgba(255, 85, 85, 0.07);
-            color: #ff9a9a;
+            border: 1px solid rgba(217, 106, 106, 0.4);
+            background: rgba(217, 106, 106, 0.08);
+            color: var(--error);
         }
         .alert-success {
-            border: 1px solid rgba(51, 255, 102, 0.5);
-            background: rgba(51, 255, 102, 0.07);
-            color: var(--term-green);
+            border: 1px solid var(--accent-line);
+            background: var(--accent-soft);
+            color: var(--accent);
         }
 
-        .statusbar {
-            border-top: 1px solid var(--term-line);
-            padding: 8px 14px;
-            font-size: 11px;
-            color: var(--term-muted);
+        /* DROITE — marque */
+        .pane-brand {
             display: flex;
-            justify-content: space-between;
-            letter-spacing: 0.06em;
-            user-select: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 48px;
+            background: var(--panel-2);
+            text-align: center;
+            position: relative;
+            overflow: hidden;
         }
-        .statusbar .live { color: var(--term-green); }
 
-        @media (max-width: 640px) {
-            .term-body { padding: 20px 16px 24px; }
-            .shell { padding: 16px 8px; }
+        .pane-brand::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(
+                ellipse 60% 45% at 50% 40%,
+                rgba(218, 119, 81, 0.07),
+                transparent 70%
+            );
+            pointer-events: none;
+        }
+
+        .brand-stack { position: relative; z-index: 1; }
+
+        .brand-logo {
+            width: 96px;
+            height: 96px;
+            border-radius: 16px;
+            margin-bottom: 30px;
+            box-shadow: 0 8px 40px rgba(218, 119, 81, 0.18);
+        }
+
+        .ascii-banner {
+            color: var(--accent);
+            font-size: clamp(6px, 1.1vw, 12px);
+            line-height: 1.18;
+            text-shadow: 0 0 14px rgba(218, 119, 81, 0.35);
+            white-space: pre;
+            overflow: hidden;
+            user-select: none;
+            margin-bottom: 18px;
+        }
+
+        .ascii-dog {
+            color: var(--accent);
+            opacity: 0.75;
+            font-size: clamp(5px, 0.95vw, 10.5px);
+            line-height: 1.25;
+            white-space: pre;
+            overflow: hidden;
+            user-select: none;
+            margin-bottom: 26px;
+        }
+
+        .brand-tagline {
+            font-size: 13px;
+            color: var(--muted);
+            letter-spacing: 0.06em;
+            line-height: 1.7;
+        }
+        .brand-tagline em { color: var(--accent); font-style: normal; }
+
+        .brand-specs {
+            margin-top: 28px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .spec {
+            font-size: 10.5px;
+            letter-spacing: 0.08em;
+            color: var(--faint);
+            border: 1px solid var(--line);
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+
+        @media (max-width: 900px) {
+            .shell { grid-template-columns: 1fr; }
+            .pane-brand { display: none; }
+            .pane-form { border-right: none; padding: 40px 24px; }
         }
     </style>
 </head>
 <body>
     <div class="shell">
-        <div class="terminal">
-            <div class="term-titlebar">
-                <span class="term-dot dot-r"></span>
-                <span class="term-dot dot-a"></span>
-                <span class="term-dot dot-g"></span>
-                <span class="title">cerbere@secure-gate:~$ auth --tty</span>
-            </div>
-
-            <div class="term-body">
-<pre class="ascii-banner">
- ██████╗███████╗██████╗ ██████╗ ███████╗██████╗ ███████╗
-██╔════╝██╔════╝██╔══██╗██╔══██╗██╔════╝██╔══██╗██╔════╝
-██║     █████╗  ██████╔╝██████╔╝█████╗  ██████╔╝█████╗
-██║     ██╔══╝  ██╔══██╗██╔══██╗██╔══╝  ██╔══██╗██╔══╝
-╚██████╗███████╗██║  ██║██████╔╝███████╗██║  ██║███████╗
- ╚═════╝╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚══════╝</pre>
-
-<pre class="ascii-dog">
-        /\___/\     /\___/\     /\___/\
-       ( o   o )   ( o   o )   ( o   o )
-        (  =^= )    (  =^= )    (  =^= )
-   ____/ \___/ ____ \___/ ____ \___/ \____
-  /                                     \
-</pre>
-
-                <div class="boot-line">
-                    [<span class="ok">OK</span>] guardian daemon loaded &nbsp; [<span class="ok">OK</span>] 3 heads online &nbsp; [<span class="ok">OK</span>] gate armed
+        <section class="pane-form">
+            <div class="form-inner">
+                <div class="brand-mini">
+                    <img src="/static/logo.svg" alt="Cerbere">
+                    <span>CERBERE</span>
                 </div>
 
-                <div class="typeline">
-                    <span style="color: var(--term-green);">$</span> <span id="typed"></span><span class="cursor"></span>
+                <div class="welcome">
+                    <h1>Sign in</h1>
+                    <p>Access your runtime security console.</p>
                 </div>
+
+                <div class="prompt-line"><span class="sig">cerbere@gate</span>:~$ auth --identity human</div>
 
                 <div id="alert-box"></div>
 
-                <div class="form-box">
-                    <div class="box-label">// authenticate</div>
-
-                    <form id="otp-form">
-                        <label class="field-label" for="email">work_email</label>
-                        <input type="email" id="email" placeholder="you@company.com" required autocomplete="email">
-                        <button type="submit" class="btn" id="otp-btn">[ Send magic link ]</button>
-                    </form>
-                </div>
+                <form id="otp-form">
+                    <label class="field-label" for="email">work_email</label>
+                    <input type="email" id="email" placeholder="you@company.com" required autocomplete="email">
+                    <button type="submit" class="btn" id="otp-btn">Send magic link</button>
+                </form>
 
                 <div class="rule">OR CONTINUE WITH</div>
 
@@ -2230,28 +2167,49 @@ SUPABASE_LOGIN_HTML = r"""<!DOCTYPE html>
                             <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
                             <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
                         </svg>
-                        google --oauth
+                        Continue with Google
                     </button>
                     <button class="btn btn-oauth" id="btn-github">
                         <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
                             <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
                         </svg>
-                        github --oauth
+                        Continue with GitHub
                     </button>
                 </div>
 
-                <div class="signup-note">
-                    <strong>// no signup needed</strong> — enter your email or use
-                    google / github above and cerbere provisions your workspace
-                    automatically. the three heads remember you.
+                <p class="signup-note">
+                    <strong>No sign-up needed</strong> — enter your email or use Google / GitHub
+                    and Cerbere provisions your workspace automatically.
+                </p>
+            </div>
+        </section>
+        <section class="pane-brand">
+            <div class="brand-stack">
+                <img src="/static/logo.svg" alt="Cerbere" class="brand-logo">
+<pre class="ascii-banner">
+ ██████╗███████╗██████╗ ██████╗ ███████╗██████╗ ███████╗
+██╔════╝██╔════╝██╔══██╗██╔══██╗██╔════╝██╔══██╗██╔════╝
+██║     █████╗  ██████╔╝██████╔╝█████╗  ██████╔╝█████╗
+██║     ██╔══╝  ██╔══██╗██╔══██╗██╔══╝  ██╔══██╗██╔══╝
+╚██████╗███████╗██║  ██║██████╔╝███████╗██║  ██║███████╗
+ ╚═════╝╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚══════╝</pre>
+<pre class="ascii-dog">
+     /\\___/\\     /\\___/\\     /\\___/\\
+    ( o   o )   ( o   o )   ( o   o )
+     (  =^= )    (  =^= )    (  =^= )
+ ___/ \\___/ ____ \\___/ ____ \\___/ \\___</pre>
+                <p class="brand-tagline">
+                    The <em>Three-Headed Guardian</em> of AI agents.<br>
+                    Runtime security, observability and audit for your stack.
+                </p>
+                <div class="brand-specs">
+                    <span class="spec">runtime security</span>
+                    <span class="spec">observability</span>
+                    <span class="spec">rbac + audit</span>
+                    <span class="spec">sub-ms checks</span>
                 </div>
             </div>
-
-            <div class="statusbar">
-                <span>tty1 · utf-8 · <span class="live">● SECURE CHANNEL</span></span>
-                <span id="clock">--:--:--</span>
-            </div>
-        </div>
+        </section>
     </div>
 
     <script>
@@ -2265,40 +2223,6 @@ SUPABASE_LOGIN_HTML = r"""<!DOCTYPE html>
             if (box) box.innerHTML = `<div class="alert alert-${kind}">${msg}</div>`;
         }
 
-        // ── Effet machine à écrire ────────────────────────
-        (function typewriter() {
-            const phrases = [
-                "auth --identity human",
-                "guardian watching. 3/3 heads online_",
-                "sudo let-me-in --verified",
-                "runtime security for AI agents"
-            ];
-            const el = document.getElementById("typed");
-            let pi = 0, ci = 0, deleting = false;
-
-            function tick() {
-                const phrase = phrases[pi];
-                el.textContent = phrase.slice(0, ci);
-
-                if (!deleting) {
-                    if (ci < phrase.length) { ci++; setTimeout(tick, 55); return; }
-                    deleting = true; setTimeout(tick, 2200); return;
-                }
-                if (ci > 0) { ci--; setTimeout(tick, 24); return; }
-                deleting = false; pi = (pi + 1) % phrases.length; setTimeout(tick, 400);
-            }
-            tick();
-        })();
-
-        // ── Horloge status bar ────────────────────────────
-        (function clock() {
-            const el = document.getElementById("clock");
-            function upd() {
-                el.textContent = new Date().toLocaleTimeString('en-GB');
-            }
-            upd(); setInterval(upd, 1000);
-        })();
-
         const otpForm = document.getElementById("otp-form");
         if (otpForm) {
             otpForm.addEventListener("submit", async (e) => {
@@ -2306,7 +2230,7 @@ SUPABASE_LOGIN_HTML = r"""<!DOCTYPE html>
                 const email = document.getElementById("email").value.trim();
                 const btn = document.getElementById("otp-btn");
                 btn.disabled = true;
-                btn.textContent = "[ transmitting... ]";
+                btn.textContent = "Sending...";
 
                 const { error } = await supabaseClient.auth.signInWithOtp({
                     email,
@@ -2314,12 +2238,12 @@ SUPABASE_LOGIN_HTML = r"""<!DOCTYPE html>
                 });
 
                 btn.disabled = false;
-                btn.textContent = "[ Send magic link ]";
+                btn.textContent = "Send magic link";
 
                 if (error) {
-                    showAlert("ERR: " + error.message, "error");
+                    showAlert(error.message, "error");
                 } else {
-                    showAlert("OK: check your inbox — secure sign-in link en route.", "success");
+                    showAlert("Check your inbox — your secure sign-in link is on its way.", "success");
                 }
             });
         }
@@ -2446,7 +2370,7 @@ LOGIN_HTML = r"""<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CERBERE // Secure Access</title>
+    <title>CERBERE — Sign in</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -2454,281 +2378,143 @@ LOGIN_HTML = r"""<!DOCTYPE html>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         :root {
-            --term-bg: #050805;
-            --term-panel: #0a0f0a;
-            --term-green: #33ff66;
-            --term-green-dim: #1a8f3c;
-            --term-green-faint: rgba(51, 255, 102, 0.12);
-            --term-amber: #ffb347;
-            --term-red: #ff5555;
-            --term-text: #b8ffcb;
-            --term-muted: #4e7a58;
-            --term-line: rgba(51, 255, 102, 0.22);
+            --bg: #121110;
+            --panel: #171512;
+            --panel-2: #1c1915;
+            --accent: #da7751;
+            --accent-soft: rgba(218, 119, 81, 0.12);
+            --accent-line: rgba(218, 119, 81, 0.30);
+            --text: #ece6db;
+            --muted: #8f8579;
+            --faint: #5c554c;
+            --error: #d96a6a;
+            --line: rgba(236, 230, 219, 0.09);
         }
 
         body {
             font-family: 'JetBrains Mono', 'Courier New', monospace;
-            background: var(--term-bg);
-            color: var(--term-text);
+            background: var(--bg);
+            color: var(--text);
             min-height: 100vh;
-            overflow-x: hidden;
-            position: relative;
-        }
-
-        body::before {
-            content: '';
-            position: fixed;
-            inset: 0;
-            background: repeating-linear-gradient(
-                to bottom,
-                transparent 0px,
-                transparent 2px,
-                rgba(0, 0, 0, 0.22) 3px,
-                rgba(0, 0, 0, 0.22) 4px
-            );
-            pointer-events: none;
-            z-index: 100;
-        }
-
-        body::after {
-            content: '';
-            position: fixed;
-            inset: 0;
-            background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
-            pointer-events: none;
-            z-index: 101;
+            -webkit-font-smoothing: antialiased;
         }
 
         .shell {
+            display: grid;
+            grid-template-columns: minmax(420px, 500px) 1fr;
             min-height: 100vh;
+        }
+
+        /* GAUCHE — formulaire */
+        .pane-form {
             display: flex;
-            align-items: center;
+            flex-direction: column;
             justify-content: center;
-            padding: 32px 16px;
-            position: relative;
-            z-index: 1;
+            padding: 48px 52px;
+            background: var(--panel);
+            border-right: 1px solid var(--line);
         }
 
-        .terminal {
-            width: 100%;
-            max-width: 760px;
-            background: var(--term-panel);
-            border: 1px solid var(--term-line);
-            box-shadow:
-                0 0 24px rgba(51, 255, 102, 0.10),
-                0 0 80px rgba(51, 255, 102, 0.05),
-                inset 0 0 60px rgba(51, 255, 102, 0.03);
-            animation: boot-in 0.7s ease-out both;
-        }
+        .form-inner { width: 100%; max-width: 380px; margin: 0 auto; }
 
-        @keyframes boot-in {
-            0%   { opacity: 0; transform: scaleY(0.02); filter: brightness(4); }
-            45%  { opacity: 1; transform: scaleY(1.03); filter: brightness(1.6); }
-            100% { opacity: 1; transform: scaleY(1); filter: brightness(1); }
-        }
-
-        .term-titlebar {
+        .brand-mini {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 10px 14px;
-            border-bottom: 1px solid var(--term-line);
-            background: rgba(51, 255, 102, 0.04);
+            gap: 10px;
+            margin-bottom: 42px;
+        }
+        .brand-mini img { width: 26px; height: 26px; border-radius: 5px; }
+        .brand-mini span {
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.22em;
+            color: var(--text);
+        }
+
+        .welcome h1 {
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .welcome p {
+            font-size: 13px;
+            color: var(--muted);
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }
+
+        .prompt-line {
             font-size: 12px;
-            color: var(--term-muted);
-            letter-spacing: 0.08em;
-            user-select: none;
-        }
-
-        .term-dot {
-            width: 11px; height: 11px;
-            border-radius: 50%;
-            border: 1px solid var(--term-line);
-            position: relative;
-        }
-        .term-dot::after {
-            content: '';
-            position: absolute;
-            inset: 2px;
-            border-radius: 50%;
-            background: currentColor;
-            opacity: 0.7;
-        }
-        .dot-r { color: var(--term-red); }
-        .dot-a { color: var(--term-amber); }
-        .dot-g { color: var(--term-green); }
-
-        .term-titlebar .title { margin-left: 8px; }
-
-        .term-body { padding: 28px 32px 32px; }
-
-        .ascii-banner {
-            color: var(--term-green);
-            font-size: clamp(5px, 1.45vw, 12.5px);
-            line-height: 1.15;
-            text-align: center;
-            text-shadow: 0 0 8px rgba(51, 255, 102, 0.55);
-            white-space: pre;
-            overflow: hidden;
-            margin-bottom: 4px;
-            user-select: none;
-        }
-
-        .ascii-dog {
-            color: var(--term-green-dim);
-            font-size: clamp(5px, 1.3vw, 11px);
-            line-height: 1.2;
-            text-align: center;
-            white-space: pre;
-            overflow: hidden;
-            user-select: none;
-            margin-bottom: 10px;
-        }
-
-        .boot-line {
-            font-size: 12px;
-            color: var(--term-muted);
-            margin-bottom: 22px;
-            letter-spacing: 0.04em;
-        }
-        .boot-line .ok { color: var(--term-green); }
-
-        .typeline {
-            font-size: 14px;
-            color: var(--term-text);
-            min-height: 22px;
-            margin-bottom: 24px;
-        }
-
-        .cursor {
-            display: inline-block;
-            width: 9px;
-            height: 16px;
-            background: var(--term-green);
-            vertical-align: -2px;
-            margin-left: 3px;
-            animation: blink 1s steps(1) infinite;
-            box-shadow: 0 0 8px rgba(51, 255, 102, 0.8);
-        }
-
-        @keyframes blink { 50% { opacity: 0; } }
-
-        .form-box {
-            border: 1px solid var(--term-line);
-            padding: 22px 22px 24px;
+            color: var(--faint);
             margin-bottom: 18px;
-            background: rgba(51, 255, 102, 0.02);
         }
-
-        .box-label {
-            font-size: 12px;
-            color: var(--term-amber);
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            margin-bottom: 14px;
-            user-select: none;
-        }
+        .prompt-line .sig { color: var(--accent); }
 
         .field-label {
             display: block;
             font-size: 12px;
-            color: var(--term-muted);
-            margin-bottom: 6px;
+            color: var(--muted);
+            margin-bottom: 7px;
         }
-        .field-label::before { content: '> '; color: var(--term-green); }
+        .field-label::before { content: '> '; color: var(--accent); }
 
         input[type="email"], input[type="text"] {
             width: 100%;
             padding: 12px 14px;
-            background: #040604;
-            border: 1px solid var(--term-line);
-            color: var(--term-green);
+            background: var(--bg);
+            border: 1px solid var(--line);
+            color: var(--text);
             font-family: inherit;
-            font-size: 14px;
+            font-size: 13.5px;
             outline: none;
-            caret-color: var(--term-green);
+            border-radius: 6px;
+            caret-color: var(--accent);
             transition: border-color .15s ease, box-shadow .15s ease;
         }
         input:focus {
-            border-color: var(--term-green);
-            box-shadow: 0 0 12px rgba(51, 255, 102, 0.25), inset 0 0 8px rgba(51, 255, 102, 0.06);
+            border-color: var(--accent-line);
+            box-shadow: 0 0 0 3px var(--accent-soft);
         }
-        input::placeholder { color: #2c4a33; }
+        input::placeholder { color: var(--faint); }
 
         .btn {
             width: 100%;
             padding: 12px;
             font-family: inherit;
-            font-size: 13px;
+            font-size: 12.5px;
             font-weight: 700;
-            letter-spacing: 0.14em;
+            letter-spacing: 0.1em;
             text-transform: uppercase;
             cursor: pointer;
-            border: 1px solid var(--term-green);
-            background: var(--term-green-faint);
-            color: var(--term-green);
+            border-radius: 6px;
+            border: 1px solid var(--accent);
+            background: var(--accent);
+            color: #1a120c;
             transition: all .15s ease;
             margin-top: 14px;
         }
-        .btn:hover:not(:disabled) {
-            background: var(--term-green);
-            color: #031007;
-            box-shadow: 0 0 18px rgba(51, 255, 102, 0.45);
-        }
-        .btn:disabled { opacity: 0.45; cursor: default; }
-
-        .tabs {
-            display: flex;
-            gap: 0;
-            margin-bottom: 18px;
-            border: 1px solid var(--term-line);
-            user-select: none;
-        }
-        .tab {
-            flex: 1;
-            padding: 10px;
-            background: transparent;
-            border: none;
-            border-right: 1px solid var(--term-line);
-            color: var(--term-muted);
-            font-family: inherit;
-            font-size: 12px;
-            letter-spacing: 0.1em;
-            cursor: pointer;
-            transition: all .15s ease;
-        }
-        .tab:last-child { border-right: none; }
-        .tab.active {
-            background: var(--term-green-faint);
-            color: var(--term-green);
-        }
-        .tab:hover:not(.active) { color: var(--term-text); }
-
-        .auth-form { display: none; }
-        .auth-form.active { display: block; animation: fadeIn 0.25s ease; }
-
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
-        .form-group { margin-bottom: 14px; }
+        .btn:hover:not(:disabled) { filter: brightness(1.08); }
+        .btn:active:not(:disabled) { transform: translateY(1px); }
+        .btn:disabled { opacity: 0.5; cursor: default; }
 
         .rule {
             display: flex;
             align-items: center;
             gap: 14px;
-            margin: 4px 0 18px;
-            color: var(--term-muted);
-            font-size: 11px;
-            letter-spacing: 0.2em;
+            margin: 22px 0;
+            color: var(--faint);
+            font-size: 10.5px;
+            letter-spacing: 0.22em;
             user-select: none;
         }
         .rule::before, .rule::after {
             content: '';
             flex: 1;
             height: 1px;
-            background: var(--term-line);
+            background: var(--line);
         }
 
-        .oauth-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+        .oauth-row { display: flex; flex-direction: column; gap: 10px; }
 
         .btn-oauth {
             display: flex;
@@ -2736,25 +2522,34 @@ LOGIN_HTML = r"""<!DOCTYPE html>
             justify-content: center;
             gap: 10px;
             background: transparent;
-            color: var(--term-text);
-            border: 1px solid var(--term-line);
+            color: var(--text);
+            border: 1px solid var(--line);
             margin-top: 0;
         }
-        .btn-oauth:hover {
-            background: rgba(51, 255, 102, 0.06);
-            border-color: var(--term-green-dim);
-            color: var(--term-green);
-            box-shadow: none;
+        .btn-oauth:hover:not(:disabled) {
+            border-color: var(--accent-line);
+            background: var(--accent-soft);
+            color: var(--text);
+            filter: none;
         }
-        .btn-oauth svg { width: 16px; height: 16px; flex-shrink: 0; }
+        .btn-oauth svg { width: 15px; height: 15px; flex-shrink: 0; }
+
+        .signup-note {
+            margin-top: 26px;
+            padding-top: 20px;
+            border-top: 1px solid var(--line);
+            font-size: 11.5px;
+            color: var(--faint);
+            line-height: 1.7;
+        }
+        .signup-note strong { color: var(--muted); }
 
         .signup-link {
-            text-align: center;
+            margin-top: 20px;
             font-size: 12px;
-            color: var(--term-muted);
-            margin-top: 4px;
+            color: var(--muted);
         }
-        .signup-link a { color: var(--term-green); text-decoration: none; }
+        .signup-link a { color: var(--accent); text-decoration: none; }
         .signup-link a:hover { text-decoration: underline; }
 
         .alert {
@@ -2762,72 +2557,160 @@ LOGIN_HTML = r"""<!DOCTYPE html>
             font-size: 12.5px;
             line-height: 1.6;
             margin-bottom: 18px;
+            border-radius: 6px;
             font-family: inherit;
         }
         .alert-error {
-            border: 1px solid rgba(255, 85, 85, 0.5);
-            background: rgba(255, 85, 85, 0.07);
-            color: #ff9a9a;
+            border: 1px solid rgba(217, 106, 106, 0.4);
+            background: rgba(217, 106, 106, 0.08);
+            color: var(--error);
         }
         .alert-success {
-            border: 1px solid rgba(51, 255, 102, 0.5);
-            background: rgba(51, 255, 102, 0.07);
-            color: var(--term-green);
+            border: 1px solid var(--accent-line);
+            background: var(--accent-soft);
+            color: var(--accent);
         }
 
-        .statusbar {
-            border-top: 1px solid var(--term-line);
-            padding: 8px 14px;
-            font-size: 11px;
-            color: var(--term-muted);
+        /* DROITE — marque */
+        .pane-brand {
             display: flex;
-            justify-content: space-between;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 48px;
+            background: var(--panel-2);
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .pane-brand::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(
+                ellipse 60% 45% at 50% 40%,
+                rgba(218, 119, 81, 0.07),
+                transparent 70%
+            );
+            pointer-events: none;
+        }
+
+        .brand-stack { position: relative; z-index: 1; }
+
+        .brand-logo {
+            width: 96px;
+            height: 96px;
+            border-radius: 16px;
+            margin-bottom: 30px;
+            box-shadow: 0 8px 40px rgba(218, 119, 81, 0.18);
+        }
+
+        .ascii-banner {
+            color: var(--accent);
+            font-size: clamp(6px, 1.1vw, 12px);
+            line-height: 1.18;
+            text-shadow: 0 0 14px rgba(218, 119, 81, 0.35);
+            white-space: pre;
+            overflow: hidden;
+            user-select: none;
+            margin-bottom: 18px;
+        }
+
+        .ascii-dog {
+            color: var(--accent);
+            opacity: 0.75;
+            font-size: clamp(5px, 0.95vw, 10.5px);
+            line-height: 1.25;
+            white-space: pre;
+            overflow: hidden;
+            user-select: none;
+            margin-bottom: 26px;
+        }
+
+        .brand-tagline {
+            font-size: 13px;
+            color: var(--muted);
             letter-spacing: 0.06em;
+            line-height: 1.7;
+        }
+        .brand-tagline em { color: var(--accent); font-style: normal; }
+
+        .brand-specs {
+            margin-top: 28px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .spec {
+            font-size: 10.5px;
+            letter-spacing: 0.08em;
+            color: var(--faint);
+            border: 1px solid var(--line);
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+
+        @media (max-width: 900px) {
+            .shell { grid-template-columns: 1fr; }
+            .pane-brand { display: none; }
+            .pane-form { border-right: none; padding: 40px 24px; }
+        }
+
+        .tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 18px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            overflow: hidden;
             user-select: none;
         }
-        .statusbar .live { color: var(--term-green); }
+        .tab {
+            flex: 1;
+            padding: 10px;
+            background: transparent;
+            border: none;
+            border-right: 1px solid var(--line);
+            color: var(--muted);
+            font-family: inherit;
+            font-size: 11.5px;
+            letter-spacing: 0.1em;
+            cursor: pointer;
+            transition: all .15s ease;
+        }
+        .tab:last-child { border-right: none; }
+        .tab.active { background: var(--accent-soft); color: var(--accent); }
+        .tab:hover:not(.active) { color: var(--text); }
 
-        @media (max-width: 640px) {
-            .term-body { padding: 20px 16px 24px; }
-            .shell { padding: 16px 8px; }
-            .oauth-row { grid-template-columns: 1fr; }
+        .auth-form { display: none; }
+        .auth-form.active { display: block; animation: fadeIn 0.25s ease; }
+        .form-group { margin-bottom: 14px; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        .oauth-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+        @media (max-width: 480px) {
+            .oauth-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
     <div class="shell">
-        <div class="terminal">
-            <div class="term-titlebar">
-                <span class="term-dot dot-r"></span>
-                <span class="term-dot dot-a"></span>
-                <span class="term-dot dot-g"></span>
-                <span class="title">cerbere@secure-gate:~$ auth --tty</span>
-            </div>
-
-            <div class="term-body">
-<pre class="ascii-banner">
- ██████╗███████╗██████╗ ██████╗ ███████╗██████╗ ███████╗
-██╔════╝██╔════╝██╔══██╗██╔══██╗██╔════╝██╔══██╗██╔════╝
-██║     █████╗  ██████╔╝██████╔╝█████╗  ██████╔╝█████╗
-██║     ██╔══╝  ██╔══██╗██╔══██╗██╔══╝  ██╔══██╗██╔══╝
-╚██████╗███████╗██║  ██║██████╔╝███████╗██║  ██║███████╗
- ╚═════╝╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚══════╝</pre>
-
-<pre class="ascii-dog">
-        /\___/\     /\___/\     /\___/\
-       ( o   o )   ( o   o )   ( o   o )
-        (  =^= )    (  =^= )    (  =^= )
-   ____/ \___/ ____ \___/ ____ \___/ \____
-  /                                     \
-</pre>
-
-                <div class="boot-line">
-                    [<span class="ok">OK</span>] guardian daemon loaded &nbsp; [<span class="ok">OK</span>] 3 heads online &nbsp; [<span class="ok">OK</span>] gate armed
+        <section class="pane-form">
+            <div class="form-inner">
+                <div class="brand-mini">
+                    <img src="/static/logo.svg" alt="Cerbere">
+                    <span>CERBERE</span>
                 </div>
 
-                <div class="typeline">
-                    <span style="color: var(--term-green);">$</span> <span id="typed"></span><span class="cursor"></span>
+                <div class="welcome">
+                    <h1>Sign in</h1>
+                    <p>Access your runtime security console.</p>
                 </div>
+
+                <div class="prompt-line"><span class="sig">cerbere@gate</span>:~$ auth --identity human</div>
 
                 {% if error %}
                 <div class="alert alert-error">ERR: {{ error }}</div>
@@ -2837,38 +2720,34 @@ LOGIN_HTML = r"""<!DOCTYPE html>
                 <div class="alert alert-success">OK: {{ success }}</div>
                 {% endif %}
 
-                <div class="form-box">
-                    <div class="box-label">// authenticate</div>
-
-                    <div class="tabs">
-                        <button class="tab active" onclick="switchTab('email')" id="tab-email">EMAIL</button>
-                        <button class="tab" onclick="switchTab('sso')" id="tab-sso">ENTERPRISE SSO</button>
-                    </div>
-
-                    <form class="auth-form active" id="email-form" method="post" action="/login">
-                        <div class="form-group">
-                            <label class="field-label" for="email">work_email</label>
-                            <input type="email" id="email" name="email" placeholder="name@company.com" required autocomplete="email" autocapitalize="none">
-                        </div>
-                        <button type="submit" class="btn">[ Send magic link ]</button>
-                    </form>
-
-                    <form class="auth-form" id="sso-form" method="post" action="/login">
-                        <div class="form-group">
-                            <label class="field-label" for="company-domain">company_domain</label>
-                            <input type="text" id="company-domain" name="domain" placeholder="company.com" required>
-                        </div>
-                        <div class="form-group">
-                            <label class="field-label" for="sso-email">work_email</label>
-                            <input type="email" id="sso-email" name="email" placeholder="name@company.com" required>
-                        </div>
-                        <button type="submit" class="btn">[ Continue with SSO ]</button>
-                    </form>
+                <div class="tabs">
+                    <button class="tab active" onclick="switchTab('email')" id="tab-email">WORK EMAIL</button>
+                    <button class="tab" onclick="switchTab('sso')" id="tab-sso">ENTERPRISE SSO</button>
                 </div>
+
+                <form class="auth-form active" id="email-form" method="post" action="/login">
+                    <div class="form-group">
+                        <label class="field-label" for="email">work_email</label>
+                        <input type="email" id="email" name="email" placeholder="name@company.com" required autocomplete="email" autocapitalize="none">
+                    </div>
+                    <button type="submit" class="btn">Send magic link</button>
+                </form>
+
+                <form class="auth-form" id="sso-form" method="post" action="/login">
+                    <div class="form-group">
+                        <label class="field-label" for="company-domain">company_domain</label>
+                        <input type="text" id="company-domain" name="domain" placeholder="company.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="field-label" for="sso-email">work_email</label>
+                        <input type="email" id="sso-email" name="email" placeholder="name@company.com" required>
+                    </div>
+                    <button type="submit" class="btn">Continue with SSO</button>
+                </form>
 
                 <div class="rule">OR CONTINUE WITH</div>
 
-                <div class="oauth-row">
+                <div class="oauth-grid">
                     <a href="/auth/google" class="btn btn-oauth">
                         <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
@@ -2876,26 +2755,48 @@ LOGIN_HTML = r"""<!DOCTYPE html>
                             <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
                             <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
                         </svg>
-                        google
+                        Google
                     </a>
                     <a href="/auth/github" class="btn btn-oauth">
                         <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
                             <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
                         </svg>
-                        github
+                        GitHub
                     </a>
                 </div>
 
                 <div class="signup-link">
-                    no account yet? <a href="/signup">./signup</a>
+                    No account yet? <a href="/signup">./signup</a>
                 </div>
             </div>
-
-            <div class="statusbar">
-                <span>tty1 · utf-8 · <span class="live">● SECURE CHANNEL</span></span>
-                <span id="clock">--:--:--</span>
+        </section>
+        <section class="pane-brand">
+            <div class="brand-stack">
+                <img src="/static/logo.svg" alt="Cerbere" class="brand-logo">
+<pre class="ascii-banner">
+ ██████╗███████╗██████╗ ██████╗ ███████╗██████╗ ███████╗
+██╔════╝██╔════╝██╔══██╗██╔══██╗██╔════╝██╔══██╗██╔════╝
+██║     █████╗  ██████╔╝██████╔╝█████╗  ██████╔╝█████╗
+██║     ██╔══╝  ██╔══██╗██╔══██╗██╔══╝  ██╔══██╗██╔══╝
+╚██████╗███████╗██║  ██║██████╔╝███████╗██║  ██║███████╗
+ ╚═════╝╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚══════╝</pre>
+<pre class="ascii-dog">
+     /\\___/\\     /\\___/\\     /\\___/\\
+    ( o   o )   ( o   o )   ( o   o )
+     (  =^= )    (  =^= )    (  =^= )
+ ___/ \\___/ ____ \\___/ ____ \\___/ \\___</pre>
+                <p class="brand-tagline">
+                    The <em>Three-Headed Guardian</em> of AI agents.<br>
+                    Runtime security, observability and audit for your stack.
+                </p>
+                <div class="brand-specs">
+                    <span class="spec">runtime security</span>
+                    <span class="spec">observability</span>
+                    <span class="spec">rbac + audit</span>
+                    <span class="spec">sub-ms checks</span>
+                </div>
             </div>
-        </div>
+        </section>
     </div>
 
     <script>
@@ -2911,36 +2812,6 @@ LOGIN_HTML = r"""<!DOCTYPE html>
                 document.getElementById('sso-form').classList.add('active');
             }
         }
-
-        (function typewriter() {
-            const phrases = [
-                "auth --identity human",
-                "guardian watching. 3/3 heads online_",
-                "sudo let-me-in --verified",
-                "runtime security for AI agents"
-            ];
-            const el = document.getElementById("typed");
-            let pi = 0, ci = 0, deleting = false;
-
-            function tick() {
-                const phrase = phrases[pi];
-                el.textContent = phrase.slice(0, ci);
-
-                if (!deleting) {
-                    if (ci < phrase.length) { ci++; setTimeout(tick, 55); return; }
-                    deleting = true; setTimeout(tick, 2200); return;
-                }
-                if (ci > 0) { ci--; setTimeout(tick, 24); return; }
-                deleting = false; pi = (pi + 1) % phrases.length; setTimeout(tick, 400);
-            }
-            tick();
-        })();
-
-        (function clock() {
-            const el = document.getElementById("clock");
-            function upd() { el.textContent = new Date().toLocaleTimeString('en-GB'); }
-            upd(); setInterval(upd, 1000);
-        })();
     </script>
 </body>
 </html>
