@@ -2,7 +2,7 @@
 import pytest
 import os
 from unittest.mock import Mock, patch
-from agentguard_sdk import (
+from agentguard import (
     AgentGuard, SecurityException, RiskLevel,
     GuardSpan, SecurityCheck
 )
