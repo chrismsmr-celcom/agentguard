@@ -14,7 +14,6 @@ from .runtime import TrajectoryAnalyzer, RuntimeRiskEngine
 
 logger = structlog.get_logger("agentguard.sdk")
 
-# ✅ Import global du gestionnaire de budget pour éviter les échecs silencieux
 try:
     from budget import AtomicBudgetManager, BudgetExceededException
     _BUDGET_MANAGER_AVAILABLE = True
@@ -43,7 +42,6 @@ class AgentGuard:
         self._trajectory = TrajectoryAnalyzer(max_events=100) if self._runtime_enabled else None
         self._runtime_risk = RuntimeRiskEngine(fail_closed=self._runtime_fail_closed) if self._runtime_enabled else None
 
-        # ✅ v3.4 : Atomic Budget Manager (Initialisation robuste)
         self._budget_manager = None
         if _BUDGET_MANAGER_AVAILABLE and AtomicBudgetManager:
             redis_url_for_budget = redis_url or os.getenv("AGENTGUARD_LIMITER_STORAGE")
@@ -132,7 +130,6 @@ class AgentGuard:
                 self.spans.append(span); self._send_to_collector(span)
                 raise SecurityException(f"🛡️ AgentGuard BLOCKED: {span.block_reason}")
 
-            # ✅ v3.4 : Reservation atomique du budget
             reservation = None
             if self._budget_manager:
                 estimated_tokens = max(1, len(input_text) / 4)
@@ -154,14 +151,23 @@ class AgentGuard:
             cost, input_tokens, output_tokens = self._estimate_cost(kwargs, result)
             if reservation and self._budget_manager: self._budget_manager.reconcile(reservation, cost)
             
-            self.total_spent += cost
-            checks.extend([self.policy_engine.check_pii(self._extract_output(result)), self.policy_engine.check_budget(cost, self.max_budget, self.total_spent - cost)])
+            # ✅ CORRECTION : Vérifier le budget AVANT d'incrémenter total_spent
+            budget_check = self.policy_engine.check_budget(cost, self.max_budget, self.total_spent)
+            output_pii = self.policy_engine.check_pii(self._extract_output(result))
+            checks.extend([output_pii, budget_check])
+            
             blocking_output = [c for c in checks if not c.passed and c.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL)]
             blocked = bool(blocking_output) and self.block_on_high
 
             span = GuardSpan(span_id, self.trace_id, "llm_call", start, latency, {"prompt": input_text[:500], "model": kwargs.get("model", "unknown")}, {"response": self._extract_output(result)[:500]}, checks, blocked, f"Output risk: {[c.check_name for c in blocking_output]}" if blocked else None, cost_usd=cost, input_tokens=input_tokens, output_tokens=output_tokens)
             self.spans.append(span); self._send_to_collector(span)
-            if blocked: raise SecurityException(f"🛡️ Output blocked: {span.block_reason}")
+            
+            if blocked: 
+                if reservation and self._budget_manager: self._budget_manager.rollback(reservation)
+                raise SecurityException(f"🛡️ Output blocked: {span.block_reason}")
+            
+            # ✅ N'incrémenter que si la requête a réussi
+            self.total_spent += cost
             return result
         return wrapper
 
@@ -217,4 +223,3 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     logger.info("Starting CerbereAG MCP Server (v1.x) on stdio...")
     from mcp.server.fastmcp import FastMCP
-    # Note: Le vrai point d'entrée MCP est dans mcp_server.py, ceci est un fallback
