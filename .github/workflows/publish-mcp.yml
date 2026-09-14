@@ -1,14 +1,17 @@
-name: Publish CerbereAG MCP to PyPI
+name: Publish cerbere-ag-mcp to PyPI
 
 on:
   release:
-    types: [published] # Se déclenche quand tu publies une "Release" sur GitHub
+    types: [published]
 
 jobs:
   publish:
-    runs-on: ubuntu-latest # On utilise Linux en ligne, beaucoup plus stable pour les builds Python
+    # Ne se déclenche que pour les releases GitHub dont le tag commence par "mcp-v"
+    # (ex: mcp-v0.1.0) — pour ne pas se confondre avec les releases du SDK.
+    if: startsWith(github.event.release.tag_name, 'mcp-v')
+    runs-on: ubuntu-latest
     permissions:
-      id-token: write # IMPORTANT : Requis pour la "Trusted Publishing" de PyPI
+      id-token: write   # requis pour le Trusted Publishing PyPI (pas de token à gérer)
       contents: read
 
     steps:
@@ -26,11 +29,17 @@ jobs:
           pip install build
 
       - name: Build package
+        working-directory: mcp
         run: python -m build
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        # NOTE : Si tu n'as pas configuré la "Trusted Publishing" sur PyPI, 
-        # décommente les lignes ci-dessous et ajoute un secret PYPI_API_TOKEN dans GitHub :
+        with:
+          packages-dir: mcp/dist
+        # Nécessite un Trusted Publisher configuré sur https://pypi.org/manage/account/publishing/
+        # (le projet cerbere-ag-mcp n'existe pas encore sur PyPI : PyPI permet de déclarer
+        # un "pending publisher" AVANT le premier publish — voir le guide ci-dessous).
+        # Si tu préfères un token classique à la place :
         # with:
-        #   password: ${{ secrets.PYPI_API_TOKEN }}
+        #   packages-dir: mcp/dist
+        #   password: ${{ secrets.PYPI_API_TOKEN_MCP }}
