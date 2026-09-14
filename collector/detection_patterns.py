@@ -40,7 +40,7 @@ DIRECT_INJECTION_PATTERNS = [
     r"\bcan\s+you\s+ignore\s+your\s+rules\b",
     
     # French variations
-    r"\boublie\s+(?:toutes?|vos)\s+instructions?\s+pr[ée]c[ée]dentes?\b",
+    r"\boublie\s+(?:toutes?|vos|tes|leurs)\s+instructions?\s+pr[ée]c[ée]dentes?\b",
     r"\bignore\s+(?:les|toutes?\s+les)\s+instructions?\s+(?:ci-dessus|pr[ée]c[ée]dentes?)\b",
     r"\btu\s+es\s+maintenant\s+en\s+mode\s+(?:d[ée]veloppeur|admin|dan|d[ée]bug)\b",
     r"\bnouvelles?\s+instructions?\s*:\s*ignore\b",
