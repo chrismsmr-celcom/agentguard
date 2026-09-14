@@ -44,23 +44,23 @@ class PolicyEngine:
         self._triple_judge = None
 
     def _compile_patterns(self):
-    if PolicyEngine._STRONG_PATTERNS is not None:
-        return
+        if PolicyEngine._STRONG_PATTERNS is not None:
+            return
 
-    # Import direct depuis le cœur du SDK. Fail-fast si absent.
-    from .patterns import get_extended_strong_patterns
-    extended_patterns = get_extended_strong_patterns()
+        # Import direct depuis le cœur du SDK. Fail-fast si absent.
+        from .patterns import get_extended_strong_patterns
+        extended_patterns = get_extended_strong_patterns()
 
-    # Motifs faibles (ambigus) - spécifiques à cette classe
-    weak = [
-        r"\bpretend\s+you\s+are\b", 
-        r"\broleplay\s+as\b", 
-        r"\bact\s+as\s+if\s+you\s+(?:are|were)\b", 
-        r"\bimagine\s+that\s+you\s+are\b"
-    ]
-    
-    PolicyEngine._STRONG_PATTERNS = re.compile("|".join(f"(?:{p})" for p in extended_patterns), re.IGNORECASE)
-    PolicyEngine._WEAK_PATTERNS = re.compile("|".join(f"(?:{p})" for p in weak), re.IGNORECASE)
+        # Motifs faibles (ambigus)
+        weak = [
+            r"\bpretend\s+you\s+are\b", 
+            r"\broleplay\s+as\b", 
+            r"\bact\s+as\s+if\s+you\s+(?:are|were)\b", 
+            r"\bimagine\s+that\s+you\s+are\b"
+        ]
+        
+        PolicyEngine._STRONG_PATTERNS = re.compile("|".join(f"(?:{p})" for p in extended_patterns), re.IGNORECASE)
+        PolicyEngine._WEAK_PATTERNS = re.compile("|".join(f"(?:{p})" for p in weak), re.IGNORECASE)
 
     def check_injection(self, text: str) -> SecurityCheck:
         text = str(text or "")
@@ -97,12 +97,7 @@ class PolicyEngine:
 
     def check_budget(self, cost: float, max_budget: float, current_spent: float) -> SecurityCheck:
         if current_spent + cost > max_budget:
-            return SecurityCheck(
-                "budget_policy", False, RiskLevel.HIGH, 
-                f"Budget exceeded: {current_spent + cost:.4f} > {max_budget:.4f}",
-                {"current_spent": current_spent, "cost": cost, "max_budget": max_budget},
-                SecurityAction.BLOCK
-            )
+            return SecurityCheck("budget_policy", False, RiskLevel.HIGH, f"Budget exceeded: {current_spent + cost:.4f} > {max_budget:.4f}", {"current_spent": current_spent, "cost": cost, "max_budget": max_budget}, SecurityAction.BLOCK)
         return SecurityCheck("budget_policy", True, RiskLevel.LOW, "Budget OK")
 
     def check_tool_policy(self, tool_name: str, params: Dict[str, Any], budget_remaining: float) -> SecurityCheck:
