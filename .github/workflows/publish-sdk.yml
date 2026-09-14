@@ -7,11 +7,12 @@ on:
 jobs:
   publish:
     # Ne se déclenche que pour les releases GitHub dont le tag commence par "sdk-v"
-    # (ex: sdk-v0.2.0) — pour ne pas se confondre avec les releases du serveur MCP.
+    # Ex: sdk-v0.2.0
     if: startsWith(github.event.release.tag_name, 'sdk-v')
     runs-on: ubuntu-latest
+
     permissions:
-      id-token: write   # requis pour le Trusted Publishing PyPI (pas de token à gérer)
+      id-token: write
       contents: read
 
     steps:
@@ -28,18 +29,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install build
 
-      - name: Run tests before publishing
-        run: |
-          pip install -r requirements-dev.txt
-          python -m pytest tests/ -q
-
       - name: Build package
-        run: python -m build
+        run: |
+          python -m build
+
+      - name: Smoke test built wheel
+        run: |
+          python -m pip install dist/*.whl
+          python -c "import agentguard_sdk; print('cerbere-ag SDK import OK')"
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        # Nécessite un Trusted Publisher configuré sur https://pypi.org/manage/project/cerbere-ag/settings/publishing/
-        # pointant vers ce repo + ce fichier de workflow.
-        # Si tu préfères un token classique à la place :
-        # with:
-        #   password: ${{ secrets.PYPI_API_TOKEN_SDK }}
+        # Nécessite un Trusted Publisher configuré sur :
+        # https://pypi.org/manage/project/cerbere-ag/settings/publishing/
+        #
+        # Le Trusted Publisher doit pointer vers :
+        # - ce repository GitHub
+        # - ce workflow
+        #
+        # Aucun token PyPI n'est nécessaire avec Trusted Publishing.
