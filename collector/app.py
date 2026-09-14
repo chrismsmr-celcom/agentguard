@@ -7,6 +7,7 @@ import secrets
 
 import structlog
 from flask import Flask
+from mcp_routes import mcp_bp
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -455,6 +456,7 @@ def _register_blueprints(app: Flask):
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(api_bp)
+    app.register_blueprint(mcp_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(audit_bp)
     app.register_blueprint(trace_bp)
