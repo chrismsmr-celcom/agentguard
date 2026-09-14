@@ -1,0 +1,17 @@
+# Dockerfile.mcp
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Installation des dépendances
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copie du code du serveur SSE
+COPY mcp_server_sse.py .
+
+# Exposition du port 8080 (standard pour la plupart des hébergeurs)
+EXPOSE 8080
+
+# Commande de lancement du serveur SSE
+CMD ["python", "mcp_server_sse.py"]
