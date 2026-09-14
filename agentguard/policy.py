@@ -47,11 +47,12 @@ class PolicyEngine:
         if PolicyEngine._STRONG_PATTERNS is not None:
             return
 
+        extended_patterns = []
         try:
             from collector.detection_patterns import get_extended_strong_patterns
             extended_patterns = get_extended_strong_patterns()
-        except ImportError:
-            extended_patterns = []
+        except Exception as e:
+            logger.warning(f"Could not load extended patterns, using base only: {e}")
 
         base_strong = [
             r"\bignore\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions|rules|prompts)\b",
@@ -107,12 +108,9 @@ class PolicyEngine:
         return SecurityCheck("pii_detection", True, RiskLevel.LOW, "No PII detected")
 
     def check_budget(self, cost: float, max_budget: float, current_spent: float) -> SecurityCheck:
-        """Vérifie si le coût estimé respecte le budget restant."""
         if current_spent + cost > max_budget:
             return SecurityCheck(
-                "budget_policy", 
-                False, 
-                RiskLevel.HIGH, 
+                "budget_policy", False, RiskLevel.HIGH, 
                 f"Budget exceeded: {current_spent + cost:.4f} > {max_budget:.4f}",
                 {"current_spent": current_spent, "cost": cost, "max_budget": max_budget},
                 SecurityAction.BLOCK
