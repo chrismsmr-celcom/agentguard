@@ -142,6 +142,27 @@ Requirements
 * Python 3.11+
 * pip
 
+### Option 1 — Install the SDK only (recommended if you already have a Collector)
+
+pip install cerbere-ag
+
+from agentguard import AgentGuard
+
+guard = AgentGuard(
+    collector_url="https://YOUR_AGENTGUARD_HOST",
+    api_key="ag-your-key",
+    agent_id="my-agent",
+)
+
+Optional extras:
+
+pip install "cerbere-ag[signing]"  # verify signed policy decisions (Ed25519)
+pip install "cerbere-ag[pii]"      # advanced PII detection via Presidio
+pip install "cerbere-ag[redis]"    # distributed rate limiting / LLM Judge cache
+pip install "cerbere-ag[ml]"       # local ML classifier (torch + transformers)
+
+### Option 2 — Run your own Collector (self-hosted)
+
 1. Clone
 
 git clone https://github.com/chrismsmr-celcom/agentguard.git
@@ -157,7 +178,7 @@ pip install -r requirements-ml.txt
 
 3. Start the Collector
 
-python collector.py
+gunicorn wsgi:app --bind 0.0.0.0:8080
 
 The default collector runs on:
 
@@ -170,6 +191,18 @@ python example_agent.py
 5. Check the API
 
 curl http://localhost:8080/api/metrics
+
+⸻
+
+🤖 MCP Server (for agents built with Claude, Cursor, etc.)
+
+If your agent is built on top of an LLM client that supports the Model
+Context Protocol, install the MCP server instead of wiring the SDK by hand:
+
+pip install cerbere-ag-mcp
+
+See [README_MCP.md](README_MCP.md) for the Claude Desktop / Cursor
+configuration snippets and the full list of exposed tools.
 
 ⸻
 
@@ -202,7 +235,7 @@ Services can include:
 
 AgentGuard can wrap LLM and tool execution.
 
-from agentguard_sdk import AgentGuard
+from agentguard import AgentGuard
 guard = AgentGuard(
     collector_url="http://localhost:8080",
     api_key="ag-your-key",
@@ -547,3 +580,4 @@ Runtime security infrastructure for agentic AI.
 Copyright © 2026 Christopher Dikesa
 
 </div>
+
