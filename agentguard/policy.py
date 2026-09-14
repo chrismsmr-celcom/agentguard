@@ -47,14 +47,12 @@ class PolicyEngine:
         if PolicyEngine._STRONG_PATTERNS is not None:
             return
 
-        # ✅ Import des motifs étendus depuis le module collector (comme dans l'original)
         try:
             from collector.detection_patterns import get_extended_strong_patterns
             extended_patterns = get_extended_strong_patterns()
         except ImportError:
             extended_patterns = []
 
-        # Motifs de base (fallback si le module n'est pas trouvé)
         base_strong = [
             r"\bignore\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions|rules|prompts)\b",
             r"\bdisregard\s+(?:your|the|all)\s+(?:instructions|rules|training)\b",
@@ -66,6 +64,7 @@ class PolicyEngine:
             r"\bignore\s+(?:les|ces)\s+instructions\s+(?:précédentes|pr[ée]c[ée]dentes)\b",
             r"\btu\s+es\s+maintenant\s+en\s+mode\s+(?:développeur|admin|dan)\b",
             r"\br[ée]v[èe]le\s+(?:ton|le)\s+(?:prompt|invite)\s+syst[èe]me\b",
+            r"\boublie\s+(?:toutes?|vos|tes|leurs)\s+instructions?\s+pr[ée]c[ée]dentes?\b",
         ]
         
         all_strong = list(set(base_strong + extended_patterns))
@@ -107,6 +106,19 @@ class PolicyEngine:
             return SecurityCheck("pii_detection", False, RiskLevel.HIGH, f"PII detected: {findings}", {"pii_types": findings}, SecurityAction.BLOCK)
         return SecurityCheck("pii_detection", True, RiskLevel.LOW, "No PII detected")
 
+    def check_budget(self, cost: float, max_budget: float, current_spent: float) -> SecurityCheck:
+        """Vérifie si le coût estimé respecte le budget restant."""
+        if current_spent + cost > max_budget:
+            return SecurityCheck(
+                "budget_policy", 
+                False, 
+                RiskLevel.HIGH, 
+                f"Budget exceeded: {current_spent + cost:.4f} > {max_budget:.4f}",
+                {"current_spent": current_spent, "cost": cost, "max_budget": max_budget},
+                SecurityAction.BLOCK
+            )
+        return SecurityCheck("budget_policy", True, RiskLevel.LOW, "Budget OK")
+
     def check_tool_policy(self, tool_name: str, params: Dict[str, Any], budget_remaining: float) -> SecurityCheck:
         if self._allowed_tools and tool_name not in self._allowed_tools:
             return SecurityCheck("tool_policy", False, RiskLevel.CRITICAL, f"Tool '{tool_name}' not in whitelist", {}, SecurityAction.BLOCK)
@@ -141,16 +153,3 @@ class PolicyEngine:
         if dangerous.search(command):
             return SecurityCheck("tool_policy", False, RiskLevel.CRITICAL, "Dangerous command pattern", {}, SecurityAction.BLOCK)
         return SecurityCheck("tool_policy", True, RiskLevel.LOW, "Command approved")
-
-  def check_budget(self, cost: float, max_budget: float, current_spent: float) -> SecurityCheck:
-      """Vérifie si le coût estimé respecte le budget restant."""
-     if current_spent + cost > max_budget:
-        return SecurityCheck(
-            "budget_policy", 
-            False, 
-            RiskLevel.HIGH, 
-            f"Budget exceeded: {current_spent + cost:.4f} > {max_budget:.4f}",
-            {"current_spent": current_spent, "cost": cost, "max_budget": max_budget},
-            SecurityAction.BLOCK
-        )
-    return SecurityCheck("budget_policy", True, RiskLevel.LOW, "Budget OK")
