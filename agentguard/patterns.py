@@ -7,14 +7,21 @@ Source de vérité unique pour tous les moteurs de détection (SDK et Collector)
 DIRECT_INJECTION_PATTERNS = [
     r"\bignore\s+(?:all\s+)?(?:previous|prior|above|earlier)\s+(?:instructions|rules|prompts|guidelines)\b",
     r"\bdisregard\s+(?:your|the|all|any)\s+(?:instructions|rules|training|guidelines|programming)\b",
-    r"\bforget\s+(?:all|everything|your|previous)\s+(?:instructions|rules|programming|above)\b",
+    r"\bforget\s+(?:all|everything|your|previous)\s+(?:instructions|rules|programming|prompts|above)\b",
+    r"\bforget\s+the\s+system\s+prompt\b",
     r"\boverride\s+(?:your|the|all)\s+(?:safety|security|guidelines|restrictions|rules)\b",
     r"\bnew\s+instructions?\s*:\s*ignore\b",
     r"\bsystem\s+override\s+activated\b",
     r"\bforget\s+(?:the\s+)?previous\s+prompts?\b",
     r"\byou\s+are\s+now\s+(?:in\s+|entering\s+)?(?:DAN|developer|debug|unrestricted|evil)\s+mode\b",
     r"\bfrom\s+now\s+on[,\.]?\s+you\s+(?:will|have)\s+no\s+restrictions\b",
+    r"\banswer\s+any\s+question\s+without\s+restrictions\b",
+    r"\bbecome\s+unrestricted\b",
+    r"\bunfiltered\s+AI\b",
+    r"\bwithout\s+(?:any\s+)?restrictions\b",
+    r"\bno\s+(?:longer\s+)?bound\s+by\s+(?:your\s+)?(?:original\s+)?instructions\b",
     r"\bi\s+am\s+your\s+developer\s*\.?\s*show\s+me\b",
+    r"\bi\s+am\s+(?:the\s+)?(?:system\s+)?administrator\b",
     r"\bpretend\s+you\s+are\s+(?:in\s+)?debug\s+mode\b",
     r"\bprevious\s+instructions\s+are\s+(?:now\s+)?void\b",
     r"\bdiscard\s+(?:your|the)\s+(?:initial|original)\s+programming\b",
@@ -23,6 +30,11 @@ DIRECT_INJECTION_PATTERNS = [
     r"\bbypass\s+(?:your|the|all)\s+(?:safety|security|rules|restrictions|filters)\b",
     r"\bi\s+need\s+you\s+to\s+(?:bypass|ignore)\s+(?:your|the)\s+rules\b",
     r"\bcan\s+you\s+ignore\s+your\s+rules\b",
+    r"\bignore\s+all\s+instructions\s+before\b",
+    r"\bshow\s+me\s+your\s+configuration\b",
+    r"\bshow\s+me\s+(?:your\s+)?(?:admin\s+)?panel\b",
+    r"\brespond\s+with\s+['\"]HACKED['\"]\b",
+    r"\bconfirm\s+with\s+['\"]ACKNOWLEDGED['\"]\b",
     # FR
     r"\boublie\s+(?:toutes?|vos|tes|leurs)\s+instructions?\s+pr[ée]c[ée]dentes?\b",
     r"\bignore\s+(?:les|toutes?\s+les|ces)\s+instructions?\s+(?:ci-dessus|pr[ée]c[ée]dentes?)\b",
@@ -31,8 +43,17 @@ DIRECT_INJECTION_PATTERNS = [
     r"\br[ée]v[èe]le\s+(?:ton|le|tes)\s+(?:prompt|invite)\s+syst[èe]me\b",
     r"\bmontre\s*-?\s*moi\s+(?:tes|les)\s+instructions?\s+cach[ée]es?\b",
     r"\bignore\s+ce\s+qui\s+pr[ée]c[èe]de\b",
+    r"\bdonne\s*-?\s*moi\s+(?:l['']|un\s+)?acc[èe]s\s+admin\b",
+    r"\bmontre\s*-?\s*moi\s+tout\b",
+    # ES
+    r"\bolvida\s+todas?\s+las\s+instrucciones\s+anteriores\b",
+    r"\bignora\s+todas?\s+las\s+reglas\b",
+    r"\bdame\s+acceso\s+sin\s+restricciones\b",
+    # DE
+    r"\bvergiss\s+alle\s+vorherigen\s+anweisungen\b",
+    # IT
+    r"\bignora\s+tutte\s+le\s+istruzioni\s+precedenti\b",
 ]
-
 # --- JAILBREAK (Modes non restreints) ---
 JAILBREAK_PATTERNS = [
     r"\byou\s+are\s+now\s+DAN\b",
