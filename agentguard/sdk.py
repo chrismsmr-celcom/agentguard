@@ -4,35 +4,27 @@ import hashlib
 import requests
 import structlog
 import tiktoken
+import logging
 from functools import wraps
 from typing import Optional, Dict, Any, List, Callable, Tuple
 
-from .models import (
-    SecurityCheck, RiskLevel, SecurityAction, SecurityException,
-    GuardSpan, SpanPayload, RuntimeRiskDecision, TrajectoryEvent
-)
+from .models import SecurityCheck, RiskLevel, SecurityAction, SecurityException, GuardSpan, SpanPayload, RuntimeRiskDecision, TrajectoryEvent
 from .policy import PolicyEngine
 from .runtime import TrajectoryAnalyzer, RuntimeRiskEngine
-from .banner import show_banner
 
 logger = structlog.get_logger("agentguard.sdk")
 
+# ✅ Import global du gestionnaire de budget pour éviter les échecs silencieux
+try:
+    from budget import AtomicBudgetManager, BudgetExceededException
+    _BUDGET_MANAGER_AVAILABLE = True
+except ImportError:
+    AtomicBudgetManager = None
+    BudgetExceededException = None
+    _BUDGET_MANAGER_AVAILABLE = False
+
 class AgentGuard:
-    def __init__(
-        self,
-        collector_url: str = "http://localhost:8080",
-        api_key: Optional[str] = None,
-        policies: Optional[List[Dict[str, Any]]] = None,
-        max_budget: float = 10.0,
-        block_on_high: bool = True,
-        debug: bool = False,
-        use_ml: Optional[bool] = None,
-        use_llm_judge: Optional[bool] = None,
-        redis_url: Optional[str] = None,
-        fail_open: bool = False,
-        agent_id: Optional[str] = None,
-    ):
-        show_banner()
+    def __init__(self, collector_url: str = "http://localhost:8080", api_key: Optional[str] = None, policies: Optional[List[Dict[str, Any]]] = None, max_budget: float = 10.0, block_on_high: bool = True, debug: bool = False, use_ml: Optional[bool] = None, use_llm_judge: Optional[bool] = None, redis_url: Optional[str] = None, fail_open: bool = False, agent_id: Optional[str] = None):
         self.collector_url = collector_url.rstrip("/")
         self.api_key = api_key or os.getenv("AGENTGUARD_API_KEY")
         self.agent_id = agent_id or os.getenv("AGENTGUARD_AGENT_ID", "default")
@@ -43,7 +35,6 @@ class AgentGuard:
         self.trace_id = hashlib.sha256(f"{time.time_ns()}:{id(self)}".encode()).hexdigest()[:16]
         self.spans: List[GuardSpan] = []
         self.collector_timeout = max(0.5, float(os.getenv("AGENTGUARD_COLLECTOR_TIMEOUT", "5.0")))
-
         self.policy_engine = PolicyEngine(policies or [], redis_url)
         self._verifier = None
         
@@ -52,7 +43,16 @@ class AgentGuard:
         self._trajectory = TrajectoryAnalyzer(max_events=100) if self._runtime_enabled else None
         self._runtime_risk = RuntimeRiskEngine(fail_closed=self._runtime_fail_closed) if self._runtime_enabled else None
 
-        logger.info("agentguard_initialized", agent_id=self.agent_id, runtime_risk=self._runtime_enabled)
+        # ✅ v3.4 : Atomic Budget Manager (Initialisation robuste)
+        self._budget_manager = None
+        if _BUDGET_MANAGER_AVAILABLE and AtomicBudgetManager:
+            redis_url_for_budget = redis_url or os.getenv("AGENTGUARD_LIMITER_STORAGE")
+            if redis_url_for_budget and redis_url_for_budget != "memory://":
+                self._budget_manager = AtomicBudgetManager(redis_url=redis_url_for_budget, max_budget_per_session=self.max_budget, max_budget_per_day=float(os.getenv("AGENTGUARD_DAILY_BUDGET", "100.0")))
+            else:
+                self._budget_manager = AtomicBudgetManager(redis_url=None, max_budget_per_session=self.max_budget, max_budget_per_day=float(os.getenv("AGENTGUARD_DAILY_BUDGET", "100.0")))
+
+        logger.info("agentguard_initialized", agent_id=self.agent_id, runtime_risk=self._runtime_enabled, budget_manager=self._budget_manager is not None)
 
     def _headers(self):
         h = {"Content-Type": "application/json"}
@@ -61,43 +61,28 @@ class AgentGuard:
 
     def _send_to_collector(self, span: GuardSpan):
         try:
-            payload = SpanPayload(
-                trace_id=span.trace_id, span_id=span.span_id, span_type=span.span_type,
-                timestamp=span.timestamp, latency_ms=span.latency_ms,
-                input_data=span.input_data, output_data=span.output_data,
-                security_checks=[c.to_model() for c in span.security_checks],
-                blocked=span.blocked, block_reason=span.block_reason,
-                cost_usd=span.cost_usd, input_tokens=span.input_tokens, output_tokens=span.output_tokens,
-            ).model_dump()
+            payload = SpanPayload(trace_id=span.trace_id, span_id=span.span_id, span_type=span.span_type, timestamp=span.timestamp, latency_ms=span.latency_ms, input_data=span.input_data, output_data=span.output_data, security_checks=[c.to_model() for c in span.security_checks], blocked=span.blocked, block_reason=span.block_reason, cost_usd=span.cost_usd, input_tokens=span.input_tokens, output_tokens=span.output_tokens).model_dump()
             requests.post(f"{self.collector_url}/span", json=payload, headers=self._headers(), timeout=self.collector_timeout)
-        except Exception as e:
-            logger.warning("collector_send_failed", error=str(e))
+        except Exception as e: logger.warning("collector_send_failed", error=str(e))
 
     def _request_signed_decision(self, tool_name: str, params: Dict[str, Any]) -> Optional[Dict]:
         if not self._verifier: return None
         try:
             r = requests.post(f"{self.collector_url}/api/decide", json={"tool_name": tool_name, "params": params or {}, "agent_id": self.agent_id}, headers=self._headers(), timeout=self.collector_timeout)
             if r.status_code == 200: return r.json()
-        except Exception as e:
-            logger.warning("signed_decision_request_failed", error=str(e))
+        except Exception as e: logger.warning("signed_decision_request_failed", error=str(e))
         return None
 
     def _record_trajectory_tool(self, tool_name: str, decision: RuntimeRiskDecision):
         if self._trajectory:
-            self._trajectory.record(self.agent_id, TrajectoryEvent(
-                timestamp=time.time(), event_type="tool_call", tool_name=tool_name,
-                risk_score=decision.risk_score, metadata=decision.metadata
-            ))
+            self._trajectory.record(self.agent_id, TrajectoryEvent(timestamp=time.time(), event_type="tool_call", tool_name=tool_name, risk_score=decision.risk_score, metadata=decision.metadata))
 
-    def track_input(self, value: Any, source: str = "user") -> Any:
-        """API publique : marque une donnée entrante pour taint tracking."""
-        return value
+    def track_input(self, value: Any, source: str = "user") -> Any: return value
 
     @staticmethod
     def _extract_input(args, kwargs):
         messages = kwargs.get("messages")
-        if isinstance(messages, list):
-            return "\n".join(m.get("content", "") for m in messages if isinstance(m, dict) and isinstance(m.get("content"), str))
+        if isinstance(messages, list): return "\n".join(m.get("content", "") for m in messages if isinstance(m, dict) and isinstance(m.get("content"), str))
         if args and isinstance(args[0], str): return args[0]
         return ""
 
@@ -133,26 +118,6 @@ class AgentGuard:
         in_p, out_p = pricing.get(model, (2.5e-6, 1.0e-5))
         return max(0.0, input_tokens * in_p + output_tokens * out_p), input_tokens, output_tokens
 
-    def _check_budget_exceeded(self, cost: float) -> Optional[SecurityCheck]:
-        """Vérifie si l'opération dépasserait le budget et retourne un SecurityCheck."""
-        if self.max_budget <= 0:
-            return None  # Budget illimité
-        
-        budget_remaining = self.max_budget - self.total_spent
-        if cost > budget_remaining:
-            return SecurityCheck(
-                check_name="budget_exceeded",
-                passed=False,
-                risk_level=RiskLevel.HIGH,
-                details=f"Cost ${cost:.6f} exceeds remaining budget ${budget_remaining:.6f}"
-            )
-        return SecurityCheck(
-            check_name="budget_check",
-            passed=True,
-            risk_level=RiskLevel.LOW,
-            details=f"Cost ${cost:.6f} within budget (remaining: ${budget_remaining:.6f})"
-        )
-
     def guard_llm_call(self, func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -167,26 +132,30 @@ class AgentGuard:
                 self.spans.append(span); self._send_to_collector(span)
                 raise SecurityException(f"🛡️ AgentGuard BLOCKED: {span.block_reason}")
 
+            # ✅ v3.4 : Reservation atomique du budget
+            reservation = None
+            if self._budget_manager:
+                estimated_tokens = max(1, len(input_text) / 4)
+                estimated_cost = max(0.001, min(estimated_tokens * 5e-6, 0.10))
+                reservation = self._budget_manager.reserve(org_id=self.agent_id, estimated_cost=estimated_cost, trace_id=self.trace_id)
+                if reservation is None:
+                    span = GuardSpan(span_id, self.trace_id, "llm_call", start, (time.time()-start)*1000, {"prompt": input_text[:500]}, {"blocked": True, "reason": "budget_exhausted"}, checks, True, "[BUDGET] No remaining budget")
+                    self.spans.append(span); self._send_to_collector(span)
+                    raise SecurityException("🛡️ Budget exhausted — call rejected")
+
             try: result = func(*args, **kwargs)
             except Exception as exc:
+                if reservation and self._budget_manager: self._budget_manager.rollback(reservation)
                 span = GuardSpan(span_id, self.trace_id, "llm_call", start, (time.time()-start)*1000, {"prompt": input_text[:500]}, {"error": str(exc)[:1000]}, checks)
                 self.spans.append(span); self._send_to_collector(span)
                 raise
 
             latency = (time.time() - start) * 1000
             cost, input_tokens, output_tokens = self._estimate_cost(kwargs, result)
+            if reservation and self._budget_manager: self._budget_manager.reconcile(reservation, cost)
             
-            # Vérifier le budget AVANT d'ajouter le coût
-            budget_check = self._check_budget_exceeded(cost)
-            if budget_check:
-                checks.append(budget_check)
-            
-            # Ajouter le coût au total dépensé
             self.total_spent += cost
-            
-            # Vérifier les risques dans la sortie
-            checks.append(self.policy_engine.check_pii(self._extract_output(result)))
-            
+            checks.extend([self.policy_engine.check_pii(self._extract_output(result)), self.policy_engine.check_budget(cost, self.max_budget, self.total_spent - cost)])
             blocking_output = [c for c in checks if not c.passed and c.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL)]
             blocked = bool(blocking_output) and self.block_on_high
 
@@ -197,22 +166,17 @@ class AgentGuard:
         return wrapper
 
     def guard_tool_call(self, tool_name: str, params: Optional[Dict[str, Any]] = None, func: Optional[Callable] = None):
-        # Support pour l'utilisation en décorateur : @guard.guard_tool_call("tool_name")
         if params is None and func is None:
             def decorator(wrapped: Callable):
                 @wraps(wrapped)
-                def wrapper(*args, **kwargs):
-                    return self.guard_tool_call(tool_name, kwargs, wrapped)
+                def wrapper(*args, **kwargs): return self.guard_tool_call(tool_name, kwargs, wrapped)
                 return wrapper
             return decorator
-
-        if params is None or func is None:
-            raise TypeError("params et func doivent être fournis ensemble")
+        if params is None or func is None: raise TypeError("params et func doivent être fournis ensemble")
 
         span_id = hashlib.sha256(f"{time.time_ns()}".encode()).hexdigest()[:16]
         start = time.time()
         budget_remaining = self.max_budget - self.total_spent
-
         check = self.policy_engine.check_tool_policy(tool_name, params, budget_remaining)
         runtime_decision = self._runtime_risk.evaluate(tool_name, params) if self._runtime_enabled else RuntimeRiskDecision("ALLOW", 0.0, RiskLevel.LOW)
         runtime_check = SecurityCheck("runtime_risk", runtime_decision.allowed, runtime_decision.risk_level, "; ".join(runtime_decision.reasons[:5]))
@@ -247,9 +211,10 @@ class AgentGuard:
         return result
 
     def get_report(self) -> Dict[str, Any]:
-        return {
-            "trace_id": self.trace_id, "total_spans": len(self.spans),
-            "blocked_operations": sum(1 for s in self.spans if s.blocked),
-            "total_cost_usd": round(self.total_spent, 6),
-            "runtime_risk_enabled": self._runtime_enabled,
-        }
+        return {"trace_id": self.trace_id, "total_spans": len(self.spans), "blocked_operations": sum(1 for s in self.spans if s.blocked), "total_cost_usd": round(self.total_spent, 6), "runtime_risk_enabled": self._runtime_enabled}
+
+def main():
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    logger.info("Starting CerbereAG MCP Server (v1.x) on stdio...")
+    from mcp.server.fastmcp import FastMCP
+    # Note: Le vrai point d'entrée MCP est dans mcp_server.py, ceci est un fallback
