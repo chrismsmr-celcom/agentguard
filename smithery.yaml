@@ -1,0 +1,13 @@
+name: cerbereag-mcp
+description: Runtime security, prompt injection detection, and PII redaction for AI agents.
+version: 0.1.0
+author: Christopher Dikesa
+repository: https://github.com/chrismsmr-celcom/agentguard
+
+# C'est ici qu'on dit à Smithery d'utiliser une commande locale, pas un site web
+mcpServers:
+  cerbereag:
+    command: uvx
+    args: ["cerbereag-mcp"]
+    env:
+      AGENTGUARD_MAX_BUDGET: "10.0"
