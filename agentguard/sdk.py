@@ -13,6 +13,7 @@ from .models import (
 )
 from .policy import PolicyEngine
 from .runtime import TrajectoryAnalyzer, RuntimeRiskEngine
+from .banner import show_banner
 
 logger = structlog.get_logger("agentguard.sdk")
 
@@ -31,6 +32,7 @@ class AgentGuard:
         fail_open: bool = False,
         agent_id: Optional[str] = None,
     ):
+        show_banner()
         self.collector_url = collector_url.rstrip("/")
         self.api_key = api_key or os.getenv("AGENTGUARD_API_KEY")
         self.agent_id = agent_id or os.getenv("AGENTGUARD_AGENT_ID", "default")
