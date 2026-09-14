@@ -141,3 +141,16 @@ class PolicyEngine:
         if dangerous.search(command):
             return SecurityCheck("tool_policy", False, RiskLevel.CRITICAL, "Dangerous command pattern", {}, SecurityAction.BLOCK)
         return SecurityCheck("tool_policy", True, RiskLevel.LOW, "Command approved")
+
+  def check_budget(self, cost: float, max_budget: float, current_spent: float) -> SecurityCheck:
+      """Vérifie si le coût estimé respecte le budget restant."""
+     if current_spent + cost > max_budget:
+        return SecurityCheck(
+            "budget_policy", 
+            False, 
+            RiskLevel.HIGH, 
+            f"Budget exceeded: {current_spent + cost:.4f} > {max_budget:.4f}",
+            {"current_spent": current_spent, "cost": cost, "max_budget": max_budget},
+            SecurityAction.BLOCK
+        )
+    return SecurityCheck("budget_policy", True, RiskLevel.LOW, "Budget OK")
