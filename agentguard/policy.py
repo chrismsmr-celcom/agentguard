@@ -44,35 +44,23 @@ class PolicyEngine:
         self._triple_judge = None
 
     def _compile_patterns(self):
-        if PolicyEngine._STRONG_PATTERNS is not None:
-            return
+    if PolicyEngine._STRONG_PATTERNS is not None:
+        return
 
-        extended_patterns = []
-        try:
-            from collector.detection_patterns import get_extended_strong_patterns
-            extended_patterns = get_extended_strong_patterns()
-        except Exception as e:
-            logger.warning(f"Could not load extended patterns, using base only: {e}")
+    # Import direct depuis le cœur du SDK. Fail-fast si absent.
+    from .patterns import get_extended_strong_patterns
+    extended_patterns = get_extended_strong_patterns()
 
-        base_strong = [
-            r"\bignore\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions|rules|prompts)\b",
-            r"\bdisregard\s+(?:your|the|all)\s+(?:instructions|rules|training)\b",
-            r"\byou\s+are\s+now\s+(?:in\s+|entering\s+)?(?:DAN|developer)\s+mode\b",
-            r"\bjailbreak(?:ing)?\b", r"\bsystem\s+override\b", r"\bnew\s+instructions?\s*:",
-            r"\[(?:system|admin|override)\]", r"\breveal\s+(?:your\s+|the\s+)?system\s+prompt\b",
-            r"\brepeat\b.{0,25}\babove\b", r"\bdo\s+anything\s+now\b", r"\brm\s+-rf\b",
-            r"\bdrop\s+(?:table|database)\b", r"\bexecute\s+(?:shell|command|code)\b",
-            r"\bignore\s+(?:les|ces)\s+instructions\s+(?:précédentes|pr[ée]c[ée]dentes)\b",
-            r"\btu\s+es\s+maintenant\s+en\s+mode\s+(?:développeur|admin|dan)\b",
-            r"\br[ée]v[èe]le\s+(?:ton|le)\s+(?:prompt|invite)\s+syst[èe]me\b",
-            r"\boublie\s+(?:toutes?|vos|tes|leurs)\s+instructions?\s+pr[ée]c[ée]dentes?\b",
-        ]
-        
-        all_strong = list(set(base_strong + extended_patterns))
-        weak = [r"\bpretend\s+you\s+are\b", r"\broleplay\s+as\b", r"\bact\s+as\s+if\s+you\s+(?:are|were)\b", r"\bimagine\s+that\s+you\s+are\b"]
-        
-        PolicyEngine._STRONG_PATTERNS = re.compile("|".join(f"(?:{p})" for p in all_strong), re.IGNORECASE)
-        PolicyEngine._WEAK_PATTERNS = re.compile("|".join(f"(?:{p})" for p in weak), re.IGNORECASE)
+    # Motifs faibles (ambigus) - spécifiques à cette classe
+    weak = [
+        r"\bpretend\s+you\s+are\b", 
+        r"\broleplay\s+as\b", 
+        r"\bact\s+as\s+if\s+you\s+(?:are|were)\b", 
+        r"\bimagine\s+that\s+you\s+are\b"
+    ]
+    
+    PolicyEngine._STRONG_PATTERNS = re.compile("|".join(f"(?:{p})" for p in extended_patterns), re.IGNORECASE)
+    PolicyEngine._WEAK_PATTERNS = re.compile("|".join(f"(?:{p})" for p in weak), re.IGNORECASE)
 
     def check_injection(self, text: str) -> SecurityCheck:
         text = str(text or "")
