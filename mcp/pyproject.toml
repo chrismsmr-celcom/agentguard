@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cerbere-ag-mcp"
+version = "0.1.0"
+description = "MCP server exposing CerbereAG runtime security checks (prompt injection, PII redaction, tool authorization) to any MCP-compatible AI agent (Claude, Cursor, Cline, custom agents)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+    { name = "Christopher Dikesa" }
+]
+keywords = ["ai", "agents", "security", "mcp", "model-context-protocol", "guardrails"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+]
+dependencies = [
+    "cerbere-ag>=0.2.0",
+    "mcp>=1.0.0,<2.0.0",
+    "tiktoken>=0.7.0,<1.0.0",
+    "requests>=2.31.0,<3.0.0",
+]
+
+[project.scripts]
+cerbere-ag-mcp = "mcp_server:main"
+
+[project.urls]
+Homepage = "https://app.cerbereag.site"
+Repository = "https://github.com/chrismsmr-celcom/agentguard"
+
+[tool.setuptools]
+py-modules = ["mcp_server"]
