@@ -4,7 +4,7 @@ Application factory and Flask configuration for Cerbere / AgentGuard.
 
 import os
 import secrets
-
+import time
 import structlog
 from flask import Flask
 from mcp_routes import mcp_bp
@@ -12,7 +12,10 @@ from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from itsdangerous import URLSafeTimedSerializer
-
+from .config import config
+from datetime import datetime
+from flask import Flask, jsonify
+from .db import get_db
 
 structlog.configure(
     processors=[
@@ -25,6 +28,18 @@ structlog.configure(
 
 logger = structlog.get_logger("agentguard.collector")
 
+def create_app():
+    app = Flask(__name__)
+    
+    # Utilisation de la config centralisée
+    app.config["SECRET_KEY"] = config.agentguard_flask_secret
+    
+    # CORS sécurisé par la config
+    cors_origins = config.agentguard_cors_origins.split(",") if config.agentguard_cors_origins != "*" else ["*"]
+    if config.environment == "production" and "*" in cors_origins:
+        raise RuntimeError("CORS '*' interdit en production")
+        
+    CORS(app, origins=cors_origins, supports_credentials=True)
 
 def create_app() -> Flask:
     """Create and configure the Flask application."""
@@ -468,7 +483,41 @@ def _register_blueprints(app: Flask):
     app.register_blueprint(billing_bp)
     app.register_blueprint(docs_bp)
     app.register_blueprint(devtools_bp)
+ # ═══════════════════════════════════════════════════════════
+    # ENDPOINTS DE SANTÉ (Requis pour Render / Production)
+    # ═══════════════════════════════════════════════════════════
+    @app.route("/health", methods=["GET"])
+    def health_check():
+        """Vérification complète pour les load balancers."""
+        checks = {}
+        is_healthy = True
+        
+        # 1. Check DB
+        try:
+            start = time.time()
+            db = get_db()
+            cursor = db.cursor()
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+            checks["database"] = {"status": "ok", "latency_ms": round((time.time() - start) * 1000, 2)}
+        except Exception as e:
+            checks["database"] = {"status": "error", "message": str(e)}
+            is_healthy = False
+            
+        status_code = 200 if is_healthy else 503
+        return jsonify({
+            "status": "healthy" if is_healthy else "unhealthy",
+            "timestamp": datetime.utcnow().isoformat(),
+            "version": "0.2.1",
+            "checks": checks
+        }), status_code
 
+    @app.route("/readiness", methods=["GET"])
+    def readiness_check():
+        """Vérification simple : le service est-il prêt à recevoir du trafic ?"""
+        return jsonify({"ready": True, "timestamp": datetime.utcnow().isoformat()}), 200
+
+    return app
 
 def init_db():
     """Initialize the database at boot."""
