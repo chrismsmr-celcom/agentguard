@@ -1,25 +1,24 @@
 """
-Backward compatibility shim.
-Core patterns have moved to the SDK: agentguard.patterns
+Backward-compatibility shim.
+
+The 107 extended detection patterns that used to live in this file have
+moved to `agentguard/patterns.py`, inside the SDK package itself, so they
+ship with every `pip install cerbere-ag` / `cerbere-ag-mcp` — not just
+when running from within this monorepo.
+
+Do not add new patterns here. Add them to agentguard/patterns.py instead.
+This file just re-exports the same functions so any existing import of
+`collector.detection_patterns` keeps working.
 """
-from agentguard.patterns import (
+from agentguard.patterns import (  # noqa: F401
     DIRECT_INJECTION_PATTERNS,
     JAILBREAK_PATTERNS,
     SYSTEM_EXTRACTION_PATTERNS,
     EXFILTRATION_PATTERNS,
     DANGEROUS_COMMANDS_PATTERNS,
     get_extended_strong_patterns,
-    get_pattern_stats
+    get_all_strong_patterns,
+    get_weak_patterns,
+    get_pattern_stats,
 )
 
-# Si get_pattern_stats n'existe pas dans le nouveau fichier, on le définit ici pour éviter les crashs
-if 'get_pattern_stats' not in dir():
-    def get_pattern_stats():
-        return {
-            "direct_injection": len(DIRECT_INJECTION_PATTERNS),
-            "jailbreak": len(JAILBREAK_PATTERNS),
-            "system_extraction": len(SYSTEM_EXTRACTION_PATTERNS),
-            "exfiltration": len(EXFILTRATION_PATTERNS),
-            "dangerous_commands": len(DANGEROUS_COMMANDS_PATTERNS),
-            "total": len(get_extended_strong_patterns()),
-        }
