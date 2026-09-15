@@ -452,7 +452,10 @@ def _register_blueprints(app: Flask):
     from collector.audit_routes import audit_bp
     from collector.trace_view import trace_bp
     from collector.identity_routes import identity_bp
-    from collector.legal import legal_bp  
+    from collector.legal import legal_bp
+    from collector.billing import billing_bp
+    from collector.docs import docs_bp
+    from collector.devtools import devtools_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(api_bp)
@@ -462,6 +465,9 @@ def _register_blueprints(app: Flask):
     app.register_blueprint(trace_bp)
     app.register_blueprint(identity_bp)
     app.register_blueprint(legal_bp)  
+    app.register_blueprint(billing_bp)
+    app.register_blueprint(docs_bp)
+    app.register_blueprint(devtools_bp)
 
 
 def init_db():
@@ -470,3 +476,4 @@ def init_db():
     from collector.db import init_db as _init_db
 
     _init_db()
+
