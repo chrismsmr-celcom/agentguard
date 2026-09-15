@@ -4,6 +4,7 @@ import json
 import secrets
 import structlog
 from flask import Blueprint, request, jsonify, g, current_app, send_from_directory
+
 from collector.db import (
     get_db,
     get_sqlite_conn,
@@ -1564,4 +1565,51 @@ def api_reject_approval(approval_id):
             org_id=org_id,
         )
         return jsonify({"error": "Failed to reject request"}), 500
+
+from flask import jsonify
+from datetime import datetime
+import time
+
+@api_bp.route("/health", methods=["GET"])
+def health_check():
+    """Vérification complète de la santé du service (pour les load balancers/Render)."""
+    checks = {}
+    is_healthy = True
+    
+    # 1. Vérification Base de Données
+    try:
+        start = time.time()
+        from collector.db import get_db
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("SELECT 1")
+        cursor.fetchone()
+        latency = round((time.time() - start) * 1000, 2)
+        checks["database"] = {"status": "ok", "latency_ms": latency}
+    except Exception as e:
+        checks["database"] = {"status": "error", "message": str(e)}
+        is_healthy = False
+        
+    # 2. Vérification Redis (si configuré)
+    try:
+        # Adapte selon ta configuration réelle de redis
+        if hasattr(current_app, 'extensions') and 'limiter' in current_app.extensions:
+            current_app.extensions['limiter'].storage.client.ping()
+            checks["redis"] = {"status": "ok"}
+    except Exception as e:
+        checks["redis"] = {"status": "degraded", "message": str(e)}
+        # Redis down n'est pas forcément fatal si on a un fallback, mais c'est dégradé
+
+    status_code = 200 if is_healthy else 503
+    return jsonify({
+        "status": "healthy" if is_healthy else "unhealthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "version": "0.2.1",
+        "checks": checks
+    }), status_code
+
+@api_bp.route("/readiness", methods=["GET"])
+def readiness_check():
+    """Vérification simple : le service accepte-t-il des requêtes ?"""
+    return jsonify({"ready": True, "timestamp": datetime.utcnow().isoformat()}), 200
 
