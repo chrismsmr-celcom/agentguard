@@ -1,4 +1,3 @@
-
 """
 Approval lifecycle storage for Cerbere / AgentGuard.
 
@@ -23,14 +22,21 @@ HITL flow:
 
 This module only manages the approval lifecycle.
 It does NOT execute tools.
+
+Security properties:
+- Approval requests are scoped to an organization.
+- Every approval is bound to the exact tool arguments through SHA-256.
+- Approval decisions are concurrency-safe.
+- Pending approvals expire automatically.
+- An approval can only transition once from PENDING.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import secrets
-import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -89,16 +95,41 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
 
 
 def _serialize_arguments(arguments: Any) -> str:
-    """Serialize tool arguments for durable storage."""
+    """
+    Serialize tool arguments deterministically.
+
+    The same logical arguments must always produce the same serialized
+    representation so that the approval hash can be verified later.
+    """
     try:
         return json.dumps(
             arguments if arguments is not None else {},
             ensure_ascii=False,
             separators=(",", ":"),
+            sort_keys=True,
             default=str,
         )
     except Exception:
-        return json.dumps({"_serialization_error": True})
+        return json.dumps(
+            {"_serialization_error": True},
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+
+def _arguments_hash(arguments: Any) -> str:
+    """
+    Return a deterministic SHA-256 hash of tool arguments.
+
+    This hash is used to bind an approval to the exact action that was
+    originally reviewed.
+    """
+    serialized = _serialize_arguments(arguments)
+
+    return hashlib.sha256(
+        serialized.encode("utf-8")
+    ).hexdigest()
 
 
 def _deserialize_arguments(value: Any) -> Any:
@@ -134,6 +165,7 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
             "span_id",
             "tool_name",
             "arguments",
+            "arguments_hash",
             "risk_score",
             "reason",
             "policy_name",
@@ -147,9 +179,58 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
 
         data = dict(zip(columns, row))
 
-    data["arguments"] = _deserialize_arguments(data.get("arguments"))
+    data["arguments"] = _deserialize_arguments(
+        data.get("arguments")
+    )
 
     return data
+
+
+def _ensure_arguments_hash_column() -> None:
+    """
+    Add arguments_hash to existing approval tables.
+
+    This is intentionally idempotent so existing SQLite/Postgres
+    installations can upgrade without dropping approval data.
+    """
+
+    db = get_db()
+
+    placeholder = sql_placeholder()
+
+    # SQLite supports:
+    #   ALTER TABLE ... ADD COLUMN ...
+    #
+    # PostgreSQL supports:
+    #   ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...
+    if is_postgres():
+        query = """
+            ALTER TABLE approval_requests
+            ADD COLUMN IF NOT EXISTS arguments_hash TEXT
+        """
+
+        db.execute(query)
+        db.commit()
+        return
+
+    # SQLite does not support ADD COLUMN IF NOT EXISTS.
+    cursor = db.execute(
+        "PRAGMA table_info(approval_requests)"
+    )
+
+    columns = {
+        str(row[1])
+        for row in cursor.fetchall()
+    }
+
+    if "arguments_hash" not in columns:
+        query = """
+            ALTER TABLE approval_requests
+            ADD COLUMN arguments_hash TEXT
+        """
+
+        db.execute(query)
+        db.commit()
 
 
 def ensure_approval_schema() -> None:
@@ -157,12 +238,12 @@ def ensure_approval_schema() -> None:
     Create the approval table if it does not exist.
 
     Safe to call during application startup or before the first approval.
+    Also performs a lightweight migration for existing installations.
     """
 
     db = get_db()
 
-    if is_postgres():
-        query = """
+    query = """
         CREATE TABLE IF NOT EXISTS approval_requests (
             approval_id TEXT PRIMARY KEY,
             org_id TEXT,
@@ -173,6 +254,7 @@ def ensure_approval_schema() -> None:
             span_id TEXT,
             tool_name TEXT NOT NULL,
             arguments TEXT NOT NULL,
+            arguments_hash TEXT,
             risk_score REAL,
             reason TEXT,
             policy_name TEXT,
@@ -183,33 +265,53 @@ def ensure_approval_schema() -> None:
             decided_by TEXT,
             decision_reason TEXT
         )
-        """
-    else:
-        query = """
-        CREATE TABLE IF NOT EXISTS approval_requests (
-            approval_id TEXT PRIMARY KEY,
-            org_id TEXT,
-            tenant_id TEXT,
-            agent_id TEXT,
-            session_id TEXT,
-            trace_id TEXT,
-            span_id TEXT,
-            tool_name TEXT NOT NULL,
-            arguments TEXT NOT NULL,
-            risk_score REAL,
-            reason TEXT,
-            policy_name TEXT,
-            status TEXT NOT NULL,
-            requested_at TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            decided_at TEXT,
-            decided_by TEXT,
-            decision_reason TEXT
-        )
-        """
+    """
 
     db.execute(query)
     db.commit()
+
+    # Upgrade tables created by previous versions.
+    _ensure_arguments_hash_column()
+
+    # Backfill hashes for existing approval records that do not have one.
+    cursor = db.execute(
+        """
+            SELECT approval_id, arguments
+            FROM approval_requests
+            WHERE arguments_hash IS NULL
+        """
+    )
+
+    rows = cursor.fetchall()
+
+    if rows:
+        placeholder = sql_placeholder()
+
+        update_query = f"""
+            UPDATE approval_requests
+            SET arguments_hash = {placeholder}
+            WHERE approval_id = {placeholder}
+        """
+
+        for row in rows:
+            if hasattr(row, "keys"):
+                approval_id = row["approval_id"]
+                arguments = row["arguments"]
+            else:
+                approval_id = row[0]
+                arguments = row[1]
+
+            parsed_arguments = _deserialize_arguments(arguments)
+
+            db.execute(
+                update_query,
+                (
+                    _arguments_hash(parsed_arguments),
+                    approval_id,
+                ),
+            )
+
+        db.commit()
 
 
 def create_approval(
@@ -230,6 +332,8 @@ def create_approval(
     """
     Create a new pending approval request.
 
+    The approval is cryptographically bound to the exact tool arguments.
+
     Returns the complete approval object.
     """
 
@@ -247,6 +351,9 @@ def create_approval(
 
     approval_id = f"apr_{secrets.token_urlsafe(18)}"
 
+    serialized_arguments = _serialize_arguments(arguments)
+    arguments_hash = _arguments_hash(arguments)
+
     db = get_db()
 
     query = """
@@ -260,6 +367,7 @@ def create_approval(
             span_id,
             tool_name,
             arguments,
+            arguments_hash,
             risk_score,
             reason,
             policy_name,
@@ -271,8 +379,8 @@ def create_approval(
             decision_reason
         )
         VALUES (
-            {p},{p},{p},{p},{p},{p},{p},{p},
-            {p},{p},{p},{p},{p},{p},{p},{p},{p},{p}
+            {p},{p},{p},{p},{p},{p},{p},{p},{p},{p},
+            {p},{p},{p},{p},{p},{p},{p},{p},{p}
         )
     """.format(p=sql_placeholder())
 
@@ -285,7 +393,8 @@ def create_approval(
         trace_id,
         span_id,
         tool_name,
-        _serialize_arguments(arguments),
+        serialized_arguments,
+        arguments_hash,
         risk_score,
         reason,
         policy_name,
@@ -300,10 +409,19 @@ def create_approval(
     db.execute(query, params)
     db.commit()
 
-    return get_approval(approval_id)  # type: ignore[return-value]
+    result = get_approval(approval_id)
+
+    if result is None:
+        raise RuntimeError(
+            "Approval was created but could not be retrieved"
+        )
+
+    return result
 
 
-def _expire_if_needed(approval: dict[str, Any]) -> dict[str, Any]:
+def _expire_if_needed(
+    approval: dict[str, Any],
+) -> dict[str, Any]:
     """
     Automatically transition an expired pending approval to EXPIRED.
     """
@@ -311,7 +429,9 @@ def _expire_if_needed(approval: dict[str, Any]) -> dict[str, Any]:
     if approval.get("status") != PENDING:
         return approval
 
-    expires_at = _parse_datetime(approval.get("expires_at"))
+    expires_at = _parse_datetime(
+        approval.get("expires_at")
+    )
 
     if expires_at is None:
         return approval
@@ -348,7 +468,10 @@ def _expire_if_needed(approval: dict[str, Any]) -> dict[str, Any]:
 
     db.commit()
 
-    return get_approval(approval["approval_id"]) or approval
+    return (
+        get_approval(approval["approval_id"])
+        or approval
+    )
 
 
 def get_approval(
@@ -376,7 +499,10 @@ def get_approval(
             LIMIT 1
         """
 
-        cursor = db.execute(query, (approval_id,))
+        cursor = db.execute(
+            query,
+            (approval_id,),
+        )
     else:
         query = f"""
             SELECT *
@@ -386,7 +512,13 @@ def get_approval(
             LIMIT 1
         """
 
-        cursor = db.execute(query, (approval_id, org_id))
+        cursor = db.execute(
+            query,
+            (
+                approval_id,
+                org_id,
+            ),
+        )
 
     row = cursor.fetchone()
 
@@ -412,7 +544,10 @@ def list_approvals(
 
     ensure_approval_schema()
 
-    limit = max(1, min(int(limit), 200))
+    limit = max(
+        1,
+        min(int(limit), 200),
+    )
 
     db = get_db()
 
@@ -422,24 +557,30 @@ def list_approvals(
     params: list[Any] = []
 
     if org_id is not None:
-        conditions.append(f"org_id = {placeholder}")
+        conditions.append(
+            f"org_id = {placeholder}"
+        )
         params.append(org_id)
 
     if status is not None:
         if status not in VALID_STATUSES:
-            raise ValueError(f"Invalid approval status: {status}")
+            raise ValueError(
+                f"Invalid approval status: {status}"
+            )
 
-        conditions.append(f"status = {placeholder}")
+        conditions.append(
+            f"status = {placeholder}"
+        )
         params.append(status)
 
     where_clause = ""
 
     if conditions:
-        where_clause = "WHERE " + " AND ".join(conditions)
+        where_clause = (
+            "WHERE " + " AND ".join(conditions)
+        )
 
-    # LIMIT cannot safely use the same placeholder strategy across
-    # all supported database drivers, so it is validated as an integer
-    # and interpolated directly.
+    # LIMIT is validated as an integer and interpolated directly.
     query = f"""
         SELECT *
         FROM approval_requests
@@ -448,15 +589,20 @@ def list_approvals(
         LIMIT {limit}
     """
 
-    cursor = db.execute(query, tuple(params))
+    cursor = db.execute(
+        query,
+        tuple(params),
+    )
 
     approvals = [
-        _expire_if_needed(_row_to_dict(row))
+        _expire_if_needed(
+            _row_to_dict(row)
+        )
         for row in cursor.fetchall()
     ]
 
-    # If the requested status is pending, expiration may have changed
-    # some results. Re-filter after lifecycle processing.
+    # Expiration may change pending -> expired.
+    # Re-filter after lifecycle processing.
     if status is not None:
         approvals = [
             approval
@@ -479,14 +625,18 @@ def decide_approval(
     Approve or reject a pending approval request.
 
     This operation is concurrency-safe:
-    only one caller can transition PENDING -> APPROVED/REJECTED.
+    only one caller can transition
+    PENDING -> APPROVED/REJECTED.
     """
 
     ensure_approval_schema()
 
     normalized = str(decision).strip().lower()
 
-    if normalized not in {APPROVED, REJECTED}:
+    if normalized not in {
+        APPROVED,
+        REJECTED,
+    }:
         raise ValueError(
             "decision must be 'approved' or 'rejected'"
         )
@@ -497,21 +647,34 @@ def decide_approval(
     )
 
     if approval is None:
-        raise KeyError(f"Approval not found: {approval_id}")
+        raise KeyError(
+            f"Approval not found: {approval_id}"
+        )
 
     if approval["status"] == EXPIRED:
-        raise ValueError("Approval request has expired")
+        raise ValueError(
+            "Approval request has expired"
+        )
 
     if approval["status"] != PENDING:
         raise ValueError(
-            f"Approval request is already {approval['status']}"
+            "Approval request is already "
+            f"{approval['status']}"
         )
 
-    expires_at = _parse_datetime(approval.get("expires_at"))
+    expires_at = _parse_datetime(
+        approval.get("expires_at")
+    )
 
-    if expires_at is not None and _now() >= expires_at:
+    if (
+        expires_at is not None
+        and _now() >= expires_at
+    ):
         _expire_if_needed(approval)
-        raise ValueError("Approval request has expired")
+
+        raise ValueError(
+            "Approval request has expired"
+        )
 
     db = get_db()
 
@@ -519,7 +682,6 @@ def decide_approval(
 
     now = _iso(_now())
 
-    # Important:
     # The WHERE status = pending clause makes the transition atomic.
     # Two simultaneous approvers cannot both successfully decide it.
     query = f"""
@@ -533,7 +695,7 @@ def decide_approval(
           AND status = {placeholder}
     """
 
-    params = (
+    params: tuple[Any, ...] = (
         normalized,
         now,
         decided_by,
@@ -546,9 +708,16 @@ def decide_approval(
         query += f"""
           AND org_id = {placeholder}
         """
-        params = params + (org_id,)
 
-    cursor = db.execute(query, params)
+        params = params + (
+            org_id,
+        )
+
+    cursor = db.execute(
+        query,
+        params,
+    )
+
     db.commit()
 
     if getattr(cursor, "rowcount", 1) == 0:
@@ -558,13 +727,18 @@ def decide_approval(
         )
 
         if current is None:
-            raise KeyError(f"Approval not found: {approval_id}")
+            raise KeyError(
+                f"Approval not found: {approval_id}"
+            )
 
         if current["status"] == EXPIRED:
-            raise ValueError("Approval request has expired")
+            raise ValueError(
+                "Approval request has expired"
+            )
 
         raise ValueError(
-            f"Approval request is already {current['status']}"
+            "Approval request is already "
+            f"{current['status']}"
         )
 
     result = get_approval(
@@ -574,7 +748,8 @@ def decide_approval(
 
     if result is None:
         raise RuntimeError(
-            "Approval was updated but could not be retrieved"
+            "Approval was updated but could not "
+            "be retrieved"
         )
 
     return result
