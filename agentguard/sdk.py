@@ -171,18 +171,37 @@ class AgentGuard:
             return result
         return wrapper
 
-    def guard_tool_call(self, tool_name: str, params: Optional[Dict[str, Any]] = None, func: Optional[Callable] = None):
-        if params is None and func is None:
+        def guard_tool_call(self, tool_name: Optional[str] = None, params: Optional[Dict[str, Any]] = None, func: Optional[Callable] = None):
+        # Cas 1 : Utilisé comme décorateur sans parenthèses @guard.guard_tool_call
+        if callable(tool_name):
+            actual_func = tool_name
+            actual_tool_name = actual_func.__name__
+            
+            @wraps(actual_func)
+            def wrapper(*args, **kwargs):
+                return self._execute_guarded_tool(actual_tool_name, kwargs, actual_func)
+            return wrapper
+            
+        # Cas 2 : Utilisé comme décorateur avec nom @guard.guard_tool_call("nom_outil")
+        if params is None and func is None and isinstance(tool_name, str):
             def decorator(wrapped: Callable):
                 @wraps(wrapped)
-                def wrapper(*args, **kwargs): return self.guard_tool_call(tool_name, kwargs, wrapped)
+                def wrapper(*args, **kwargs):
+                    return self._execute_guarded_tool(tool_name, kwargs, wrapped)
                 return wrapper
             return decorator
-        if params is None or func is None: raise TypeError("params et func doivent être fournis ensemble")
+            
+        # Cas 3 : Appel direct (pour compatibilité ou usage avancé)
+        if func is not None and isinstance(tool_name, str):
+            return self._execute_guarded_tool(tool_name, params or {}, func)
+            
+        raise TypeError("Usage invalide de guard_tool_call. Utilisez @guard.guard_tool_call ou @guard.guard_tool_call('nom')")
 
+    def _execute_guarded_tool(self, tool_name: str, params: Dict[str, Any], func: Callable):
         span_id = hashlib.sha256(f"{time.time_ns()}".encode()).hexdigest()[:16]
         start = time.time()
         budget_remaining = self.max_budget - self.total_spent
+        
         check = self.policy_engine.check_tool_policy(tool_name, params, budget_remaining)
         runtime_decision = self._runtime_risk.evaluate(tool_name, params) if self._runtime_enabled else RuntimeRiskDecision("ALLOW", 0.0, RiskLevel.LOW)
         runtime_check = SecurityCheck("runtime_risk", runtime_decision.allowed, runtime_decision.risk_level, "; ".join(runtime_decision.reasons[:5]))
@@ -190,7 +209,7 @@ class AgentGuard:
         if not runtime_decision.allowed:
             span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000, {"tool": tool_name, "params": params}, {"blocked": True}, [check, runtime_check], True, f"[RUNTIME {runtime_decision.action}] {runtime_decision.reasons[0] if runtime_decision.reasons else 'blocked'}")
             self.spans.append(span); self._send_to_collector(span); self._record_trajectory_tool(tool_name, runtime_decision)
-            raise SecurityException(f"🛡️ Runtime risk {runtime_decision.action}")
+            raise SecurityException(f"🛡️ Runtime risk {runtime_decision.action}: {runtime_decision.reasons[0] if runtime_decision.reasons else 'blocked'}")
 
         signed_decision = None
         if self._verifier:
@@ -206,7 +225,8 @@ class AgentGuard:
         if not check.passed and check.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL) and self.block_on_high:
             raise SecurityException(f"🛡️ Tool blocked: {check.details}")
 
-        try: result = func(**params)
+        try: 
+            result = func(**params)
         except Exception as exc:
             span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000, {"tool": tool_name, "params": params}, {"error": str(exc)[:1000]}, [check, runtime_check])
             self.spans.append(span); self._send_to_collector(span)
