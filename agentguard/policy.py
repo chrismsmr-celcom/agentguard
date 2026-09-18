@@ -104,17 +104,22 @@ class PolicyEngine:
         if budget_remaining < 0:
             return SecurityCheck("budget_policy", False, RiskLevel.HIGH, "Budget exceeded", {}, SecurityAction.BLOCK)
         
-        # --- NOUVEAU : Règle DLP (Data Loss Prevention) pour les envois d'emails ---
-        if tool_name == "COMPOSIO_MULTI_EXECUTE_TOOL":
-            tools_to_run = params.get("tools", [])
+        # --- NOUVEAU : Règle DLP (Data Loss Prevention) ---
+        if tool_name in ["COMPOSIO_MULTI_EXECUTE_TOOL", "GMAIL_SEND_EMAIL", "send_email"]:
+            tools_to_run = params.get("tools", []) if isinstance(params, dict) and "tools" in params else []
+            
+            # Si c'est un appel direct et non multi-execute
+            if tool_name in ["GMAIL_SEND_EMAIL", "send_email"]:
+                tools_to_run = [{"tool_slug": tool_name, "arguments": params}]
+                
             for tool in tools_to_run:
-                if tool.get("tool_slug") == "GMAIL_SEND_EMAIL":
+                if tool.get("tool_slug") in ["GMAIL_SEND_EMAIL", "send_email"]:
                     args = tool.get("arguments", {})
-                    recipient = args.get("recipient_email", "").lower()
-                    has_attachment = "attachment" in args
+                    recipient = str(args.get("recipient_email", args.get("to", ""))).lower()
+                    has_attachment = "attachment" in args or "attachments" in args
                     
-                    # Liste des domaines personnels à surveiller (en prod, ce serait "tout ce qui n'est pas @monentreprise.com")
-                    personal_domains = ["@gmail.com", "@yahoo.com", "@hotmail.com", "@outlook.com"]
+                    # Domaines personnels à surveiller (en prod, on vérifierait plutôt "not in allowed_domains")
+                    personal_domains = ["@gmail.com", "@yahoo.com", "@hotmail.com", "@outlook.com", "@icloud.com"]
                     
                     if any(domain in recipient for domain in personal_domains):
                         reason = f"Envoi vers domaine personnel détecté ({recipient})"
@@ -126,13 +131,11 @@ class PolicyEngine:
                             False, 
                             RiskLevel.HIGH, 
                             reason,
-                            metadata={"requires_approval": True, "recipient": recipient, "has_attachment": has_attachment}
+                            metadata={"requires_approval": True, "recipient": recipient, "has_attachment": has_attachment},
+                            action=SecurityAction.REVIEW
                         )
-        # ---------------------------------------------------------------------------
+        # --------------------------------------------------
 
-        if tool_name == "send_email":
-            check = self._check_email(params)
-            if not check.passed: return check
         if tool_name == "execute_command":
             check = self._check_command(params)
             if not check.passed: return check
