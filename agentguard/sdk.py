@@ -178,7 +178,7 @@ class AgentGuard:
             
         raise TypeError("Usage invalide de guard_tool_call. Utilisez @guard.guard_tool_call ou @guard.guard_tool_call('nom')")
 
-    def _execute_guarded_tool(self, tool_name: str, params: Dict[str, Any], func: Callable):
+        def _execute_guarded_tool(self, tool_name: str, params: Dict[str, Any], func: Callable):
         span_id = hashlib.sha256(f"{time.time_ns()}".encode()).hexdigest()[:16]
         start = time.time()
         budget_remaining = self.max_budget - self.total_spent
@@ -203,20 +203,8 @@ class AgentGuard:
             if signed_decision.get("action") == "DENY": raise SecurityException(f"🛡️ Signed DENY: {signed_decision.get('reason', 'policy violation')}")
             if signed_decision.get("action") == "REQUIRE_APPROVAL": raise SecurityException("🛡️ AgentGuard: human approval required")
 
-        # --- NOUVEAU : Gestion de l'approbation humaine (HITL) ---
+        # --- GESTION DE L'APPROBATION HUMAINE (HITL) ---
         if not check.passed:
-            if check.metadata.get("requires_approval"):
-                approval_id = f"req_{hashlib.sha256(f'{time.time()}'.encode()).hexdigest()[:8]}"
-                
-                logger.warning(
-                    "approval_required", 
-                    approval_id=approval_id, 
-                    tool=tool_name, 
-                    recipient=check.metadata.get("recipient"),
-                    message="Alerte envoyée à l'administrateur (Dashboard + Email)"
-                )
-                
-                 if not check.passed:
             if check.metadata.get("requires_approval"):
                 approval_id = f"req_{hashlib.sha256(f'{time.time()}'.encode()).hexdigest()[:8]}"
                 
@@ -248,8 +236,7 @@ class AgentGuard:
             if check.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL) and self.block_on_high:
                 span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000, {"tool": tool_name, "params": params}, {"blocked": True, "reason": "policy_block_on_high"}, [check, runtime_check], True, f"[POLICY] {check.details}")
                 self.spans.append(span); self._send_to_collector(span); self._record_trajectory_tool(tool_name, runtime_decision)
-                raise SecurityException(f"🛡️ AgentGuard DENY: {check.details}")
-        # ---------------------------------------------------------
+                raise SecurityException(f"🛡️ Tool blocked: {check.details}")
 
         try: 
             result = func(**params)
