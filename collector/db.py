@@ -421,11 +421,14 @@ def _migrate_api_keys_table():
 
 def init_db():
     """Initialize all database tables in correct dependency order."""
+    
+    # 1. Core independent tables & API Keys Migration
     if is_postgres():
         conn = get_pg_conn()
         cur = conn.cursor()
         cur.execute("SELECT pg_advisory_lock(727271)")
         try:
+            # SPANS
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS spans (
                     id SERIAL PRIMARY KEY,
@@ -473,6 +476,23 @@ def init_db():
                     cur.execute(f"ALTER TABLE spans ADD COLUMN IF NOT EXISTS {col} {dtype}")
                 except Exception:
                     conn.rollback()
+
+            # NOUVEAU : Table pour les demandes d'approbation humaine (HITL)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS approval_requests (
+                    id TEXT PRIMARY KEY,
+                    agent_id TEXT,
+                    tool_name TEXT,
+                    params JSONB,
+                    reason TEXT,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    resolved_at TIMESTAMP NULL,
+                    resolved_by TEXT NULL
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_requests(status)")
+
             conn.commit()
         finally:
             cur.execute("SELECT pg_advisory_unlock(727271)")
@@ -533,17 +553,40 @@ def init_db():
                     c.execute(f"ALTER TABLE spans ADD COLUMN {col} {dtype}")
                 except sqlite3.OperationalError:
                     pass
+
+            # NOUVEAU : Table pour les demandes d'approbation humaine (HITL) - SQLite
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS approval_requests (
+                    id TEXT PRIMARY KEY,
+                    agent_id TEXT,
+                    tool_name TEXT,
+                    params TEXT,
+                    reason TEXT,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    resolved_at TIMESTAMP NULL,
+                    resolved_by TEXT NULL
+                )
+            """)
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_requests(status)")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
         finally:
             conn.close()
 
+    # 2. Migrate / Initialize API Keys (Source of Truth)
     _migrate_api_keys_table()
 
+    # 3. Identity Tables (Creates tenants, orgs, users, agents, identity_events)
     try:
         init_identity_tables()
     except Exception as e:
         logger.warning("identity_tables_init_failed", error=str(e))
 
+    # 4. Magic Link Tokens (Depends on 'users' table existing)
     if is_postgres():
         conn = get_pg_conn()
         cur = conn.cursor()
@@ -590,22 +633,7 @@ def init_db():
             conn.commit()
         finally:
             conn.close()
-cur.execute("""
-                CREATE TABLE IF NOT EXISTS approval_requests (
-                    id TEXT PRIMARY KEY,
-                    agent_id TEXT,
-                    tool_name TEXT,
-                    params JSONB,
-                    reason TEXT,
-                    status TEXT DEFAULT 'pending',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    resolved_at TIMESTAMP NULL,
-                    resolved_by TEXT NULL
-                )
-            """)
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_requests(status)")
-            
-            conn.commit()
+
     logger.info("database_initialization_completed")
 
 
