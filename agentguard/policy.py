@@ -104,6 +104,32 @@ class PolicyEngine:
         if budget_remaining < 0:
             return SecurityCheck("budget_policy", False, RiskLevel.HIGH, "Budget exceeded", {}, SecurityAction.BLOCK)
         
+        # --- NOUVEAU : Règle DLP (Data Loss Prevention) pour les envois d'emails ---
+        if tool_name == "COMPOSIO_MULTI_EXECUTE_TOOL":
+            tools_to_run = params.get("tools", [])
+            for tool in tools_to_run:
+                if tool.get("tool_slug") == "GMAIL_SEND_EMAIL":
+                    args = tool.get("arguments", {})
+                    recipient = args.get("recipient_email", "").lower()
+                    has_attachment = "attachment" in args
+                    
+                    # Liste des domaines personnels à surveiller (en prod, ce serait "tout ce qui n'est pas @monentreprise.com")
+                    personal_domains = ["@gmail.com", "@yahoo.com", "@hotmail.com", "@outlook.com"]
+                    
+                    if any(domain in recipient for domain in personal_domains):
+                        reason = f"Envoi vers domaine personnel détecté ({recipient})"
+                        if has_attachment:
+                            reason += " avec pièce jointe. Approbation humaine OBLIGATOIRE."
+                            
+                        return SecurityCheck(
+                            "data_loss_prevention", 
+                            False, 
+                            RiskLevel.HIGH, 
+                            reason,
+                            metadata={"requires_approval": True, "recipient": recipient, "has_attachment": has_attachment}
+                        )
+        # ---------------------------------------------------------------------------
+
         if tool_name == "send_email":
             check = self._check_email(params)
             if not check.passed: return check
@@ -114,9 +140,10 @@ class PolicyEngine:
         try: params_string = json.dumps(params, default=str)
         except Exception: params_string = str(params)
         
-        dangerous_patterns = re.compile(r"\b(?:delete_all|drop\s+table|truncate|drop\s+database|rm\s+-rf|sudo|chmod\s+777|mkfs|dd\s+if=)\b", re.IGNORECASE)
+        dangerous_patterns = re.compile(r"\b(?:delete_all|drop\s+table|truncate|drop\s+database|rm\s+-rf|sudo|chmod\s+777|mkfs|dd\s+if=|attacker|evil\.com)\b", re.IGNORECASE)
         if dangerous_patterns.search(params_string):
             return SecurityCheck("dangerous_params", False, RiskLevel.HIGH, "Dangerous pattern in params", {}, SecurityAction.BLOCK)
+            
         return SecurityCheck("tool_policy", True, RiskLevel.LOW, "Tool call approved")
 
     def _check_email(self, params: Dict[str, Any]) -> SecurityCheck:
