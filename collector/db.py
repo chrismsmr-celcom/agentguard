@@ -12,7 +12,7 @@ from typing import Tuple, Optional, Any
 logger = structlog.get_logger("agentguard.db")
 
 # ═══════════════════════════════════════════════════════════════
-# POSTGRES CONNECTION POOL
+# POSTGRES CONNECTION POOL (Resilient to Render sleep/wake cycles)
 # ═══════════════════════════════════════════════════════════════
 
 _PG_POOL = None
@@ -30,11 +30,16 @@ def _get_pg_pool():
                 if not database_url:
                     raise RuntimeError("DATABASE_URL not configured for PostgreSQL")
 
+                logger.info("initializing_resilient_pg_pool")
                 _PG_POOL = ConnectionPool(
                     database_url,
                     min_size=1,
                     max_size=int(os.environ.get("AGENTGUARD_DB_POOL_MAX", "5")),
-                    timeout=10,
+                    timeout=15,  # Augmenté à 15s pour laisser le temps à Render de réveiller la DB
+                    max_lifetime=1800,  # Recycle les connexions toutes les 30 min (évite les connexions zombies)
+                    max_idle=300,  # Ferme les connexions inactives après 5 min
+                    reconnect_timeout=30,  # Attend jusqu'à 30s si la DB est temporairement indisponible
+                    check=ConnectionPool.check_connection,  # CRUCIAL : vérifie que la connexion est vivante avant de la donner
                     open=True,
                 )
                 logger.info(
@@ -49,10 +54,10 @@ class _PooledConnProxy:
 
     __slots__ = ("_conn", "_pool", "_returned")
 
-    def __init__(self, conn, pool):
-        object.__setattr__(self, "_conn", conn)
-        object.__setattr__(self, "_pool", pool)
-        object.__setattr__(self, "_returned", False)
+    def __init__(delf, conn, pool):
+        object.__setattr__(delf, "_conn", conn)
+        object.__setattr__(delf, "_pool", pool)
+        object.__setattr__(delf, "_returned", False)
 
     def close(self):
         if self._returned:
@@ -118,18 +123,45 @@ def is_postgres() -> bool:
 
 
 def get_pg_conn():
-    """Get a clean PostgreSQL connection from the pool."""
+    """
+    Get a clean PostgreSQL connection from the pool.
+    Includes a fallback to reset the pool if Render's sleep/wake cycle corrupts it.
+    """
+    global _PG_POOL
     pool = _get_pg_pool()
-    conn = pool.getconn(timeout=10)
+    
+    try:
+        # Le paramètre 'check' du pool garantit normalement une connexion vivante
+        conn = pool.getconn(timeout=15)
+    except Exception as e:
+        logger.warning("pg_pool_getconn_failed_attempting_reset", error=str(e))
+        # Fallback nucléaire : si le pool est complètement bloqué (fréquent au réveil Render),
+        # on le ferme et on le recrée.
+        try:
+            if _PG_POOL:
+                _PG_POOL.close()
+        except Exception:
+            pass
+        _PG_POOL = None
+        pool = _get_pg_pool()
+        conn = pool.getconn(timeout=15)
 
     try:
         conn.rollback()
-    except Exception:
+    except Exception as e:
+        logger.warning("pg_connection_rollback_failed_closing", error=str(e))
+        # La connexion est morte, on la ferme et on en demande une nouvelle
         try:
             conn.close()
         except Exception:
             pass
-        raise
+        
+        try:
+            conn = pool.getconn(timeout=15)
+            conn.rollback()
+        except Exception as e2:
+            logger.error("pg_connection_fully_failed", error=str(e2))
+            raise
 
     return _PooledConnProxy(conn, pool)
 
@@ -266,7 +298,6 @@ def _migrate_api_keys_table():
             table_exists = cur.fetchone() is not None
 
             if not table_exists:
-                # Case A: Create canonical directly
                 cur.execute("""
                     CREATE TABLE api_keys (
                         id TEXT PRIMARY KEY,
@@ -278,7 +309,6 @@ def _migrate_api_keys_table():
                     )
                 """)
             else:
-                # Check columns to detect legacy schema
                 cur.execute("""
                     SELECT column_name FROM information_schema.columns 
                     WHERE table_name = 'api_keys' AND column_name IN ('org_name', 'plan', 'name')
@@ -286,17 +316,10 @@ def _migrate_api_keys_table():
                 cols = [row[0] for row in cur.fetchall()]
 
                 if 'org_name' in cols or 'plan' in cols:
-                    # Case C: Legacy schema detected. Migrate.
                     logger.info("migrating_legacy_api_keys_to_canonical_schema")
-                    
-                    # Fetch legacy data
                     cur.execute("SELECT id, key_hash, org_id, org_name, active, created_at FROM api_keys")
                     legacy_rows = cur.fetchall()
-
-                    # Rename old table
                     cur.execute("ALTER TABLE api_keys RENAME TO api_keys_legacy")
-
-                    # Create canonical table
                     cur.execute("""
                         CREATE TABLE api_keys (
                             id TEXT PRIMARY KEY,
@@ -307,26 +330,19 @@ def _migrate_api_keys_table():
                             created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
                         )
                     """)
-
-                    # Migrate data
                     for row in legacy_rows:
                         old_id, key_hash, org_id, org_name, active, created_at = row
                         new_id = str(old_id) if old_id else str(uuid.uuid4())
                         name = (org_name or "").strip() or "Legacy API Key"
-                        
                         cur.execute("""
                             INSERT INTO api_keys (id, org_id, key_hash, name, active, created_at)
                             VALUES (%s, %s, %s, %s, %s, %s)
                         """, (new_id, org_id, key_hash, name, active, created_at))
-
-                    # Drop legacy table
                     cur.execute("DROP TABLE api_keys_legacy")
                     logger.info("api_keys_migration_completed_successfully")
 
-            # Ensure indexes exist (Case B & Post-migration)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_org_id ON api_keys(org_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_key_hash ON api_keys(key_hash)")
-            
             conn.commit()
         except Exception as e:
             conn.rollback()
@@ -334,20 +350,16 @@ def _migrate_api_keys_table():
             raise
         finally:
             conn.close()
-
     else:
-        # SQLite
         db_path = _get_db_path()
         conn = sqlite3.connect(db_path)
         conn.execute("PRAGMA foreign_keys = ON")
         c = conn.cursor()
         try:
-            # 1. Check if table exists
             c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='api_keys'")
             table_exists = c.fetchone() is not None
 
             if not table_exists:
-                # Case A: Create canonical directly
                 c.execute("""
                     CREATE TABLE api_keys (
                         id TEXT PRIMARY KEY,
@@ -359,19 +371,14 @@ def _migrate_api_keys_table():
                     )
                 """)
             else:
-                # Check columns
                 c.execute("PRAGMA table_info(api_keys)")
                 cols = [row[1] for row in c.fetchall()]
 
                 if 'org_name' in cols or 'plan' in cols:
-                    # Case C: Legacy schema detected. Migrate.
                     logger.info("migrating_legacy_api_keys_to_canonical_schema_sqlite")
-                    
                     c.execute("SELECT id, key_hash, org_id, org_name, active, created_at FROM api_keys")
                     legacy_rows = c.fetchall()
-
                     c.execute("ALTER TABLE api_keys RENAME TO api_keys_legacy")
-
                     c.execute("""
                         CREATE TABLE api_keys (
                             id TEXT PRIMARY KEY,
@@ -382,29 +389,23 @@ def _migrate_api_keys_table():
                             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                         )
                     """)
-
                     for row in legacy_rows:
                         old_id, key_hash, org_id, org_name, active, created_at = row
                         new_id = str(old_id) if old_id else str(uuid.uuid4())
                         name = (org_name or "").strip() or "Legacy API Key"
-                        # Ensure active is strictly 0 or 1 for SQLite
                         active_int = 1 if active else 0
-                        
                         c.execute("""
                             INSERT INTO api_keys (id, org_id, key_hash, name, active, created_at)
                             VALUES (?, ?, ?, ?, ?, ?)
                         """, (new_id, org_id, key_hash, name, active_int, created_at))
-
                     c.execute("DROP TABLE api_keys_legacy")
                     logger.info("api_keys_migration_completed_successfully_sqlite")
 
-            # Ensure indexes
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_org_id ON api_keys(org_id)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_key_hash ON api_keys(key_hash)")
             except sqlite3.OperationalError:
                 pass
-            
             conn.commit()
         except Exception as e:
             conn.rollback()
@@ -420,14 +421,11 @@ def _migrate_api_keys_table():
 
 def init_db():
     """Initialize all database tables in correct dependency order."""
-    
-    # 1. Core independent tables & API Keys Migration
     if is_postgres():
         conn = get_pg_conn()
         cur = conn.cursor()
         cur.execute("SELECT pg_advisory_lock(727271)")
         try:
-            # SPANS
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS spans (
                     id SERIAL PRIMARY KEY,
@@ -475,7 +473,6 @@ def init_db():
                     cur.execute(f"ALTER TABLE spans ADD COLUMN IF NOT EXISTS {col} {dtype}")
                 except Exception:
                     conn.rollback()
-
             conn.commit()
         finally:
             cur.execute("SELECT pg_advisory_unlock(727271)")
@@ -536,21 +533,17 @@ def init_db():
                     c.execute(f"ALTER TABLE spans ADD COLUMN {col} {dtype}")
                 except sqlite3.OperationalError:
                     pass
-
             conn.commit()
         finally:
             conn.close()
 
-    # 2. Migrate / Initialize API Keys (Source of Truth)
     _migrate_api_keys_table()
 
-    # 3. Identity Tables (Creates tenants, orgs, users, agents, identity_events)
     try:
         init_identity_tables()
     except Exception as e:
         logger.warning("identity_tables_init_failed", error=str(e))
 
-    # 4. Magic Link Tokens (Depends on 'users' table existing)
     if is_postgres():
         conn = get_pg_conn()
         cur = conn.cursor()
