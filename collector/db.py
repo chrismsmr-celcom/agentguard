@@ -590,7 +590,22 @@ def init_db():
             conn.commit()
         finally:
             conn.close()
-
+cur.execute("""
+                CREATE TABLE IF NOT EXISTS approval_requests (
+                    id TEXT PRIMARY KEY,
+                    agent_id TEXT,
+                    tool_name TEXT,
+                    params JSONB,
+                    reason TEXT,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    resolved_at TIMESTAMP NULL,
+                    resolved_by TEXT NULL
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_requests(status)")
+            
+            conn.commit()
     logger.info("database_initialization_completed")
 
 
