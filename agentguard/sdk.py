@@ -8,7 +8,7 @@ import logging
 from functools import wraps
 from typing import Optional, Dict, Any, List, Callable, Tuple
 
-from .models import SecurityCheck, RiskLevel, SecurityAction, SecurityException, GuardSpan, SpanPayload, RuntimeRiskDecision, TrajectoryEvent
+from .models import SecurityCheck, RiskLevel, SecurityAction, SecurityException, ApprovalRequiredException, GuardSpan, SpanPayload, RuntimeRiskDecision, TrajectoryEvent
 from .policy import PolicyEngine
 from .runtime import TrajectoryAnalyzer, RuntimeRiskEngine
 
@@ -46,16 +46,7 @@ class AgentGuard:
             payload = SpanPayload(trace_id=span.trace_id, span_id=span.span_id, span_type=span.span_type, timestamp=span.timestamp, latency_ms=span.latency_ms, input_data=span.input_data, output_data=span.output_data, security_checks=[c.to_model() for c in span.security_checks], blocked=span.blocked, block_reason=span.block_reason, cost_usd=span.cost_usd, input_tokens=span.input_tokens, output_tokens=span.output_tokens).model_dump()
             resp = requests.post(f"{self.collector_url}/span", json=payload, headers=self._headers(), timeout=self.collector_timeout)
             if resp.status_code >= 400:
-                # Le collector a REÇU la requête mais l'a rejetée (souvent une
-                # clé API invalide/non reconnue) — ce n'est pas une erreur
-                # réseau, requests.post() ne lève rien dans ce cas. Sans ce
-                # contrôle explicite, l'échec est totalement silencieux.
-                logger.warning(
-                    "collector_rejected_span",
-                    status_code=resp.status_code,
-                    body=resp.text[:300],
-                    collector_url=self.collector_url,
-                )
+                logger.warning("collector_rejected_span", status_code=resp.status_code, body=resp.text[:300], collector_url=self.collector_url)
         except Exception as e: 
             logger.warning("collector_send_failed", error=str(e))
 
@@ -153,17 +144,14 @@ class AgentGuard:
         return wrapper
 
     def guard_tool_call(self, tool_name: Optional[str] = None, params: Optional[Dict[str, Any]] = None, func: Optional[Callable] = None):
-        # Cas 1 : Utilisé comme décorateur sans parenthèses @guard.guard_tool_call
         if callable(tool_name):
             actual_func = tool_name
             actual_tool_name = actual_func.__name__
-            
             @wraps(actual_func)
             def wrapper(*args, **kwargs):
                 return self._execute_guarded_tool(actual_tool_name, kwargs, actual_func)
             return wrapper
             
-        # Cas 2 : Utilisé comme décorateur avec nom @guard.guard_tool_call("nom_outil")
         if params is None and func is None and isinstance(tool_name, str):
             def decorator(wrapped: Callable):
                 @wraps(wrapped)
@@ -172,13 +160,12 @@ class AgentGuard:
                 return wrapper
             return decorator
             
-        # Cas 3 : Appel direct (pour compatibilité ou usage avancé)
         if func is not None and isinstance(tool_name, str):
             return self._execute_guarded_tool(tool_name, params or {}, func)
             
         raise TypeError("Usage invalide de guard_tool_call. Utilisez @guard.guard_tool_call ou @guard.guard_tool_call('nom')")
 
-        def _execute_guarded_tool(self, tool_name: str, params: Dict[str, Any], func: Callable):
+    def _execute_guarded_tool(self, tool_name: str, params: Dict[str, Any], func: Callable):
         span_id = hashlib.sha256(f"{time.time_ns()}".encode()).hexdigest()[:16]
         start = time.time()
         budget_remaining = self.max_budget - self.total_spent
@@ -208,7 +195,6 @@ class AgentGuard:
             if check.metadata.get("requires_approval"):
                 approval_id = f"req_{hashlib.sha256(f'{time.time()}'.encode()).hexdigest()[:8]}"
                 
-                # 1. Notifier le backend pour l'enregistrer dans la DB et l'afficher au dashboard
                 try:
                     requests.post(
                         f"{self.collector_url}/api/approvals",
@@ -225,8 +211,6 @@ class AgentGuard:
                 except Exception as e:
                     logger.warning("failed_to_notify_collector_of_approval", error=str(e))
 
-                # 2. Lever l'exception pour bloquer l'agent localement
-                from . import ApprovalRequiredException
                 raise ApprovalRequiredException(
                     f"Action suspendue. Approbation requise pour l'envoi vers {check.metadata.get('recipient')}. (ID: {approval_id})",
                     approval_id=approval_id,
@@ -256,5 +240,3 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     logger.info("Starting CerbereAG MCP Server (v1.x) on stdio...")
     from mcp.server.fastmcp import FastMCP
-
-
