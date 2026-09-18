@@ -3,6 +3,10 @@ from enum import Enum
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 
+# ==============================================================================
+# ENUMS
+# ==============================================================================
+
 class RiskLevel(Enum):
     LOW = "low"
     MEDIUM = "medium"
@@ -19,6 +23,10 @@ class DetectionConfidence(Enum):
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
+
+# ==============================================================================
+# PYDANTIC MODELS (Pour la sérialisation vers le Collector)
+# ==============================================================================
 
 class SecurityCheckModel(BaseModel):
     check_name: str
@@ -43,6 +51,10 @@ class SpanPayload(BaseModel):
     input_tokens: int = Field(0, ge=0)
     output_tokens: int = Field(0, ge=0)
 
+# ==============================================================================
+# DATACLASSES (Pour la logique interne du SDK)
+# ==============================================================================
+
 @dataclass
 class SecurityCheck:
     check_name: str
@@ -54,14 +66,13 @@ class SecurityCheck:
 
     def to_model(self) -> SecurityCheckModel:
         return SecurityCheckModel(
-            check_name=self.check_name, passed=self.passed,
-            risk_level=self.risk_level.value, details=self.details,
-            metadata=self.metadata, action=self.action.value,
+            check_name=self.check_name, 
+            passed=self.passed,
+            risk_level=self.risk_level.value, 
+            details=self.details,
+            metadata=self.metadata, 
+            action=self.action.value,
         )
-
-class SecurityException(Exception):
-    """Exception levée lorsqu'une opération est bloquée par AgentGuard."""
-    pass
 
 @dataclass
 class RuntimeRiskDecision:
@@ -101,3 +112,22 @@ class GuardSpan:
     cost_usd: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
+
+# ==============================================================================
+# EXCEPTIONS
+# ==============================================================================
+
+class SecurityException(Exception):
+    """Exception levée lorsqu'une opération est bloquée par AgentGuard."""
+    pass
+
+class ApprovalRequiredException(Exception):
+    """
+    Exception levée lorsqu'une opération nécessite une approbation humaine (Human-in-the-Loop).
+    Utilisé pour les cas de DLP (Data Loss Prevention) où l'action n'est ni bloquée brutalement, 
+    ni autorisée aveuglément.
+    """
+    def __init__(self, message: str, approval_id: str, details: Dict[str, Any]):
+        super().__init__(message)
+        self.approval_id = approval_id
+        self.details = details
