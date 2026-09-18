@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cerbere-ag"
-version = "0.3.0"
+version = "0.3.1"
 description = "Runtime security & observability guard for AI agents — intercepts LLM calls and tool calls before execution."
 readme = "README.md"
 requires-python = ">=3.10"
