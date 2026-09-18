@@ -203,10 +203,31 @@ class AgentGuard:
             if signed_decision.get("action") == "DENY": raise SecurityException(f"🛡️ Signed DENY: {signed_decision.get('reason', 'policy violation')}")
             if signed_decision.get("action") == "REQUIRE_APPROVAL": raise SecurityException("🛡️ AgentGuard: human approval required")
 
-        if not check.passed and check.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL) and self.block_on_high:
-            span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000, {"tool": tool_name, "params": params}, {"blocked": True, "reason": "policy_block_on_high"}, [check, runtime_check], True, f"[POLICY] {check.details}")
-            self.spans.append(span); self._send_to_collector(span); self._record_trajectory_tool(tool_name, runtime_decision)
-            raise SecurityException(f"🛡️ Tool blocked: {check.details}")
+        # --- NOUVEAU : Gestion de l'approbation humaine (HITL) ---
+        if not check.passed:
+            if check.metadata.get("requires_approval"):
+                approval_id = f"req_{hashlib.sha256(f'{time.time()}'.encode()).hexdigest()[:8]}"
+                
+                logger.warning(
+                    "approval_required", 
+                    approval_id=approval_id, 
+                    tool=tool_name, 
+                    recipient=check.metadata.get("recipient"),
+                    message="Alerte envoyée à l'administrateur (Dashboard + Email)"
+                )
+                
+                from . import ApprovalRequiredException
+                raise ApprovalRequiredException(
+                    f"Action suspendue. Approbation requise pour l'envoi vers {check.metadata.get('recipient')}. (ID: {approval_id})",
+                    approval_id=approval_id,
+                    details=check.metadata
+                )
+                
+            if check.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL) and self.block_on_high:
+                span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000, {"tool": tool_name, "params": params}, {"blocked": True, "reason": "policy_block_on_high"}, [check, runtime_check], True, f"[POLICY] {check.details}")
+                self.spans.append(span); self._send_to_collector(span); self._record_trajectory_tool(tool_name, runtime_decision)
+                raise SecurityException(f"🛡️ Tool blocked: {check.details}")
+        # ---------------------------------------------------------
 
         try: 
             result = func(**params)
