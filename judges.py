@@ -14,8 +14,17 @@ Decision policy:
 
 IMPORTANT:
   UNAVAILABLE is never equivalent to SAFE.
+
+SECURITY:
+  Tous les juges de ce fichier envoient du texte à des API tierces
+  (HuggingFace, Groq, Together). Ce texte peut contenir des secrets
+  (clés API, tokens, PEM, SSN, cartes bancaires...) collectés depuis
+  les tool calls surveillés. _scrub_before_external_call() est donc
+  appliqué systématiquement AVANT toute troncature/envoi, pour ne
+  jamais faire fuiter un secret vers un tiers, même partiellement.
 """
 import os
+import re
 import time
 import json
 import hashlib
@@ -24,6 +33,38 @@ from typing import Optional, Dict, Any, Tuple
 from enum import Enum
 
 import requests
+
+
+# ─────────────────────────────────────────────────────────────
+# SCRUBBING — appliqué avant tout envoi à une API externe
+# ─────────────────────────────────────────────────────────────
+# Volontairement autonome (pas d'import de `collector`, qui tire
+# Flask/DB et casserait l'usage léger côté SDK client).
+_SECRET_SCRUB_PATTERNS: Tuple[Tuple["re.Pattern[str]", str], ...] = (
+    # Blocs de clé privée entiers (multi-lignes) — en premier, pour ne
+    # pas laisser les patterns suivants matcher leur contenu interne.
+    (re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"), "[REDACTED_PRIVATE_KEY]"),
+    (re.compile(r"\bsk-[A-Za-z0-9]{16,}\b"), "[REDACTED_API_KEY]"),
+    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[REDACTED_AWS_KEY]"),
+    (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"), "[REDACTED_GITHUB_TOKEN]"),
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"), "[REDACTED_JWT]"),
+    (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[REDACTED_SSN]"),
+    (re.compile(r"\b(?:\d{4}[-\s]?){3}\d{4}\b"), "[REDACTED_CARD]"),
+    (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "[REDACTED_EMAIL]"),
+)
+
+
+def _scrub_before_external_call(text: str) -> str:
+    """Retire les secrets connus d'un texte avant envoi à un juge externe.
+
+    Appliqué sur le texte COMPLET, avant toute troncature (ex. text[:2000]),
+    pour éviter qu'une troncature ne coupe un secret en deux et n'en
+    laisse fuiter la moitié.
+    """
+    text = text or ""
+    for pattern, replacement in _SECRET_SCRUB_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 class JudgeVerdict(Enum):
@@ -95,6 +136,9 @@ class PromptGuardJudge:
     def evaluate(self, text: str) -> JudgeResult:
         start = time.time()
         text = (text or "").strip()
+        # Scrub AVANT tout : cache key, troncature et envoi HTTP portent
+        # tous sur la version nettoyée, jamais sur le texte brut.
+        text = _scrub_before_external_call(text)
         
         if not self.enabled:
             return JudgeResult("prompt_guard", JudgeVerdict.UNAVAILABLE, 0.0, latency_ms=0)
