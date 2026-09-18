@@ -44,7 +44,18 @@ class AgentGuard:
     def _send_to_collector(self, span: GuardSpan):
         try:
             payload = SpanPayload(trace_id=span.trace_id, span_id=span.span_id, span_type=span.span_type, timestamp=span.timestamp, latency_ms=span.latency_ms, input_data=span.input_data, output_data=span.output_data, security_checks=[c.to_model() for c in span.security_checks], blocked=span.blocked, block_reason=span.block_reason, cost_usd=span.cost_usd, input_tokens=span.input_tokens, output_tokens=span.output_tokens).model_dump()
-            requests.post(f"{self.collector_url}/span", json=payload, headers=self._headers(), timeout=self.collector_timeout)
+            resp = requests.post(f"{self.collector_url}/span", json=payload, headers=self._headers(), timeout=self.collector_timeout)
+            if resp.status_code >= 400:
+                # Le collector a REÇU la requête mais l'a rejetée (souvent une
+                # clé API invalide/non reconnue) — ce n'est pas une erreur
+                # réseau, requests.post() ne lève rien dans ce cas. Sans ce
+                # contrôle explicite, l'échec est totalement silencieux.
+                logger.warning(
+                    "collector_rejected_span",
+                    status_code=resp.status_code,
+                    body=resp.text[:300],
+                    collector_url=self.collector_url,
+                )
         except Exception as e: 
             logger.warning("collector_send_failed", error=str(e))
 
@@ -215,4 +226,5 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     logger.info("Starting CerbereAG MCP Server (v1.x) on stdio...")
     from mcp.server.fastmcp import FastMCP
+
 
