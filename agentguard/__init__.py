@@ -1,10 +1,11 @@
 from .models import (
     RiskLevel, SecurityAction, DetectionConfidence,
-    SecurityCheck, SecurityException, GuardSpan,
-    RuntimeRiskDecision, TrajectoryEvent
+    SecurityCheck, SecurityException, ApprovalRequiredException,
+    GuardSpan, RuntimeRiskDecision, TrajectoryEvent
 )
 from .policy import PolicyEngine
 from .sdk import AgentGuard
+
 
 # NOUVEAU : Exception pour le workflow d'approbation humaine
 class ApprovalRequiredException(Exception):
@@ -15,7 +16,7 @@ class ApprovalRequiredException(Exception):
 
 __all__ = [
     "RiskLevel", "SecurityAction", "DetectionConfidence",
-    "SecurityCheck", "SecurityException", "ApprovalRequiredException", # <-- Ajouté
+    "SecurityCheck", "SecurityException", "ApprovalRequiredException",
     "GuardSpan", "RuntimeRiskDecision", "TrajectoryEvent",
     "PolicyEngine", "AgentGuard"
 ]
