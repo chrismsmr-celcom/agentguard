@@ -1613,3 +1613,65 @@ def readiness_check():
     """Vérification simple : le service accepte-t-il des requêtes ?"""
     return jsonify({"ready": True, "timestamp": datetime.utcnow().isoformat()}), 200
 
+@app.route("/api/approvals", methods=["POST"])
+def create_approval_request():
+    """Reçue une demande d'approbation depuis le SDK AgentGuard."""
+    data = request.get_json()
+    approval_id = data.get("approval_id")
+    agent_id = data.get("agent_id", "unknown")
+    tool_name = data.get("tool_name")
+    params = data.get("params", {})
+    reason = data.get("reason", "Approval required by policy")
+    
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO approval_requests (id, agent_id, tool_name, params, reason, status)
+            VALUES (%s, %s, %s, %s, %s, 'pending')
+            ON CONFLICT (id) DO NOTHING
+        """, (approval_id, agent_id, tool_name, json.dumps(params), reason))
+        conn.commit()
+        
+        # TODO: Ici, tu pourras ajouter l'envoi d'email via smtplib ou Resend
+        logger.warning("approval_request_created", approval_id=approval_id, tool=tool_name)
+        
+        return jsonify({"status": "success", "approval_id": approval_id}), 201
+    except Exception as e:
+        logger.error("approval_request_failed", error=str(e))
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/approvals", methods=["GET"])
+def get_pending_approvals():
+    """Récupère les demandes en attente pour le dashboard."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, agent_id, tool_name, params, reason, created_at 
+            FROM approval_requests 
+            WHERE status = 'pending' 
+            ORDER BY created_at DESC
+        """)
+        rows = cur.fetchall()
+        
+        approvals = []
+        for row in rows:
+            approvals.append({
+                "id": row[0],
+                "agent_id": row[1],
+                "tool_name": row[2],
+                "params": row[3],
+                "reason": row[4],
+                "created_at": row[5].isoformat() if row[5] else None
+            })
+            
+        return jsonify({"approvals": approvals}), 200
+    except Exception as e:
+        logger.error("get_approvals_failed", error=str(e))
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
