@@ -216,6 +216,28 @@ class AgentGuard:
                     message="Alerte envoyée à l'administrateur (Dashboard + Email)"
                 )
                 
+                 if not check.passed:
+            if check.metadata.get("requires_approval"):
+                approval_id = f"req_{hashlib.sha256(f'{time.time()}'.encode()).hexdigest()[:8]}"
+                
+                # 1. Notifier le backend pour l'enregistrer dans la DB et l'afficher au dashboard
+                try:
+                    requests.post(
+                        f"{self.collector_url}/api/approvals",
+                        json={
+                            "approval_id": approval_id,
+                            "agent_id": self.agent_id,
+                            "tool_name": tool_name,
+                            "params": params,
+                            "reason": check.details
+                        },
+                        headers=self._headers(),
+                        timeout=5
+                    )
+                except Exception as e:
+                    logger.warning("failed_to_notify_collector_of_approval", error=str(e))
+
+                # 2. Lever l'exception pour bloquer l'agent localement
                 from . import ApprovalRequiredException
                 raise ApprovalRequiredException(
                     f"Action suspendue. Approbation requise pour l'envoi vers {check.metadata.get('recipient')}. (ID: {approval_id})",
