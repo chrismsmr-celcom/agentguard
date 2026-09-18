@@ -1,17 +1,18 @@
-from .banner import * 
-from .models import (
-    RiskLevel, SecurityAction, DetectionConfidence,
-    SecurityCheck, SecurityException, GuardSpan,
-    RuntimeRiskDecision, TrajectoryEvent
-)
+# agentguard/__init__.py
+from .models import RiskLevel, SecurityAction, DetectionConfidence, SecurityCheck, SecurityException, GuardSpan, RuntimeRiskDecision, TrajectoryEvent
 from .policy import PolicyEngine
-from .runtime import TrajectoryAnalyzer, RuntimeRiskEngine
 from .sdk import AgentGuard
 
-__version__ = "3.6.0"
+# NOUVEAU : Exception pour le workflow d'approbation humaine
+class ApprovalRequiredException(Exception):
+    def __init__(self, message: str, approval_id: str, details: dict):
+        super().__init__(message)
+        self.approval_id = approval_id
+        self.details = details
 
 __all__ = [
-    "AgentGuard", "SecurityException", "RiskLevel", "SecurityAction",
-    "DetectionConfidence", "SecurityCheck", "GuardSpan", "PolicyEngine",
-    "RuntimeRiskDecision", "RuntimeRiskEngine", "TrajectoryEvent", "TrajectoryAnalyzer",
+    "RiskLevel", "SecurityAction", "DetectionConfidence", 
+    "SecurityCheck", "SecurityException", "ApprovalRequiredException", # <-- Ajouté ici
+    "GuardSpan", "RuntimeRiskDecision", "TrajectoryEvent",
+    "PolicyEngine", "AgentGuard"
 ]
