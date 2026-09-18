@@ -177,7 +177,10 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
 <div class="body">
 <aside class="fside" id="fside"></aside>
 <main class="main">
-
+<div id="approval-banner" style="display: none; background: #fef3c7; border-left: 4px solid #f59e0b; padding: 1rem; margin-bottom: 1rem; border-radius: 4px;">
+    <strong>⚠️ <span id="approval-count">0</span> Action(s) en attente d'approbation</strong>
+    <ul id="approval-list" style="margin-top: 0.5rem; font-size: 0.9rem;"></ul>
+</div>
 <section id="view-overview" class="view">
   <div class="sec">Service Health &amp; Performance</div>
   <div class="grid" style="grid-template-columns:170px 1fr 1fr 1fr;gap:12px">
@@ -364,6 +367,7 @@ function renderIcons(root) {
         if (ICON_PATHS[key]) el.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICON_PATHS[key] + '</svg>';
     });
 }
+
 renderIcons(document);
 
 var esc = function(v) {
@@ -1323,6 +1327,40 @@ if (!document.hidden) {
     navigator.clipboard.writeText(copyText.value);
     alert("Clé copiée dans le presse-papiers !");
   }
+  async function checkApprovals() {
+    try {
+        const response = await fetch('/api/approvals', {
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } // Adapte selon ton auth
+        });
+        const data = await response.json();
+        
+        const banner = document.getElementById('approval-banner');
+        const list = document.getElementById('approval-list');
+        const count = document.getElementById('approval-count');
+        
+        if (data.approvals && data.approvals.length > 0) {
+            banner.style.display = 'block';
+            count.textContent = data.approvals.length;
+            list.innerHTML = data.approvals.map(app => `
+                <li style="margin-bottom: 0.5rem; border-bottom: 1px solid #fcd34d; padding-bottom: 0.5rem;">
+                    <strong>${app.tool_name}</strong> pour l'agent <em>${app.agent_id}</em><br>
+                    <small>Raison: ${app.reason}</small><br>
+                    <small>Params: ${JSON.stringify(app.params).substring(0, 100)}...</small><br>
+                    <button onclick="resolveApproval('${app.id}', 'approved')" style="background: #10b981; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; margin-top: 4px;">Approuver</button>
+                    <button onclick="resolveApproval('${app.id}', 'rejected')" style="background: #ef4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; margin-top: 4px;">Rejeter</button>
+                </li>
+            `).join('');
+        } else {
+            banner.style.display = 'none';
+        }
+    } catch (e) {
+        console.error("Failed to fetch approvals", e);
+    }
+}
+
+// Rafraîchir toutes les 10 secondes
+setInterval(checkApprovals, 10000);
+checkApprovals(); // Appel initial
 </script>
 </body>
 </html>
