@@ -558,9 +558,9 @@ function openCardMenu(evt, btn) {
     }
     closeAllPopovers();
     _cardMenuTarget = card;
-    pop.innerHTML =
-        '<button onclick="exportCardData(\\'json\\')">Copier en JSON</button>' +
-        '<button onclick="exportCardData(\\'csv\\')">Exporter en CSV</button>' +
+   pop.innerHTML =
+        '<button onclick="exportCardData(\'json\')">Copier en JSON</button>' +
+        '<button onclick="exportCardData(\'csv\')">Exporter en CSV</button>' +
         '<button onclick="hideCard()">Masquer cette carte</button>';
     pop.classList.add('open');
     positionPopover(pop, btn);
