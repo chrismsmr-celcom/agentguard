@@ -142,6 +142,16 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
 @media(max-width:760px){.connect-modal{padding:12px}.connect-panel{max-height:calc(100vh - 24px)}.connect-grid{grid-template-columns:1fr}.connect-body{padding:14px}}
 @media(max-width:1200px){.g5{grid-template-columns:repeat(3,1fr)}.g4,.g3{grid-template-columns:repeat(2,1fr)}.tr-body{grid-template-columns:1fr}.fside{display:none}}
 @media(max-width:760px){.g5,.g4,.g3,.g2{grid-template-columns:1fr}.tabs{overflow-x:auto}}
+button.menu,button.info,button.help,button.alert-btn{font:inherit}
+.card{overflow:visible}
+.popover{position:fixed;z-index:1100;background:var(--card2);border:1px solid var(--border2);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.4);min-width:160px;padding:6px;display:none}
+.popover.open{display:block}
+.popover button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--text);padding:7px 10px;border-radius:5px;font-size:12px;cursor:pointer}
+.popover button:hover{background:var(--card)}
+.popover.info-pop{max-width:260px;color:var(--muted);font-size:12px;line-height:1.5;padding:10px 12px;cursor:default}
+.alert-flag{display:inline-block;margin-left:8px;font-size:11px;color:var(--red2);font-weight:600;vertical-align:middle}
+.alert-rule-row{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#151515;border:1px solid #333;border-radius:6px;padding:6px 10px;margin-bottom:6px;font-size:12px;color:#ccc}
+.alert-rule-row button{background:none;border:0;color:#ef4444;cursor:pointer;font-size:14px;line-height:1}
 </style>
 </head>
 <body>
@@ -163,9 +173,55 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
   </nav>
   <div class="tb-right">
    <button class="btn" onclick="openConnectModal()">+ Connection</button>
-    <span class="help">?</span>
+    <button class="help" type="button" onclick="openHelpModal()">?</button>
   </div>
 </header>
+
+<div id="helpModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;" onclick="if(event.target===this)closeHelpModal()">
+  <div style="background: #1a1a1a; color: white; padding: 24px; border-radius: 12px; width: 480px; max-width: 90%; border: 1px solid #333;">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h3 style="margin: 0;">Aide rapide</h3>
+      <button onclick="closeHelpModal()" style="background:none;border:0;color:#aaa;font-size:20px;cursor:pointer;line-height:1">×</button>
+    </div>
+    <ul style="color:#ccc;font-size:13px;line-height:1.7;padding-left:18px;margin-top:14px">
+      <li><b>Overview / Service Health</b> — santé et coût de vos agents sur la période affichée.</li>
+      <li><b>Explorer</b> — inspection détaillée d'une trace (spans, checks de sécurité, blocages).</li>
+      <li><b>Compliance Audit</b> — journal d'audit inaltérable de toutes les décisions.</li>
+      <li><b>+ New alert</b> — définir un seuil sur une métrique (coût, tokens) ; un dépassement est signalé visuellement sur la carte concernée.</li>
+      <li><b>⋮ sur une carte</b> — copier les données, exporter en CSV, ou masquer la carte.</li>
+    </ul>
+    <div style="margin-top:14px;display:flex;gap:10px">
+      <a href="https://github.com/chrismsmr-celcom/agentguard" target="_blank" rel="noopener" style="color:#a78bfa;font-size:13px">Documentation (README)</a>
+      <a href="https://github.com/chrismsmr-celcom/agentguard/blob/main/README_MCP.md" target="_blank" rel="noopener" style="color:#a78bfa;font-size:13px">Configuration MCP</a>
+    </div>
+  </div>
+</div>
+
+<div id="cardMenuPopover" class="popover"></div>
+<div id="infoPopover" class="popover info-pop"></div>
+
+<div id="alertModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;" onclick="if(event.target===this)closeAlertModal()">
+  <div style="background: #1a1a1a; color: white; padding: 24px; border-radius: 12px; width: 440px; max-width: 92%; border: 1px solid #333;">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h3 style="margin: 0;" id="alertModalTitle">Nouvelle alerte</h3>
+      <button onclick="closeAlertModal()" style="background:none;border:0;color:#aaa;font-size:20px;cursor:pointer;line-height:1">×</button>
+    </div>
+    <p style="color:#aaa;font-size:13px" id="alertModalSubtitle"></p>
+
+    <div id="alertRulesExisting" style="margin: 10px 0;"></div>
+
+    <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+      <select id="alertComparison" style="flex:0 0 auto;padding:8px;background:#111;color:#eee;border:1px solid #444;border-radius:6px">
+        <option value="above">au-dessus de</option>
+        <option value="below">en-dessous de</option>
+      </select>
+      <input id="alertThreshold" type="number" step="any" placeholder="Seuil (ex: 100)" style="flex:1;padding:8px;background:#111;color:#eee;border:1px solid #444;border-radius:6px">
+    </div>
+    <button onclick="submitAlertRule()" style="width:100%;margin-top:12px;padding:10px;background:#8b5cf6;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold">
+      + Créer l'alerte
+    </button>
+  </div>
+</div>
 <div class="toolbar">
   <div class="filter-pill"><span class="ui-icon" data-icon="filter"></span><span>Service in (<b>agentguard-collector</b>)</span><span class="x" title="clear">✕</span></div>
   <div class="right">
@@ -177,9 +233,19 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
 <div class="body">
 <aside class="fside" id="fside"></aside>
 <main class="main">
-<div id="approval-banner" style="display: none; background: #fef3c7; border-left: 4px solid #f59e0b; padding: 1rem; margin-bottom: 1rem; border-radius: 4px;">
-    <strong>⚠️ <span id="approval-count">0</span> Action(s) en attente d'approbation</strong>
-    <ul id="approval-list" style="margin-top: 0.5rem; font-size: 0.9rem;"></ul>
+<button id="approval-pill" type="button" onclick="openApprovalModal()" style="display: none; background: #fef3c7; color:#7c4a03; border: 1px solid #f59e0b; padding: 8px 14px; margin-bottom: 1rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px;">
+    ⚠️ <span id="approval-count">0</span> action(s) en attente d'approbation — cliquer pour traiter
+</button>
+
+<div id="approvalModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;" onclick="if(event.target===this)closeApprovalModal()">
+  <div style="background: #1a1a1a; color: white; padding: 24px; border-radius: 12px; width: 560px; max-width: 92%; max-height: 80vh; overflow-y: auto; border: 1px solid #333;">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h3 style="margin: 0;">Approbations en attente</h3>
+      <button onclick="closeApprovalModal()" style="background:none;border:0;color:#aaa;font-size:20px;cursor:pointer;line-height:1">×</button>
+    </div>
+    <p style="color: #aaa; font-size: 13px;">Ces actions ont été bloquées par la politique de sécurité et attendent une décision humaine.</p>
+    <div id="approvalModalList" style="margin-top: 14px;"></div>
+  </div>
 </div>
 <section id="view-overview" class="view">
   <div class="sec">Service Health &amp; Performance</div>
@@ -205,22 +271,22 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
 </section>
 
 <section id="view-health" class="view active">
-  <div class="sec"><span class="ico"><span class="ui-icon" data-icon="latency"></span></span>Traffic and Latency <span class="info">i</span></div>
+  <div class="sec"><span class="ico"><span class="ui-icon" data-icon="latency"></span></span>Traffic and Latency <button class="info" type="button" onclick="showInfoPopover(event,'traffic')">i</button></div>
   <div class="stat-tabs" id="latTabs"><button class="active" data-s="avg">AVG</button><button data-s="p50">p50</button><button data-s="p90">p90</button><button data-s="p95">p95</button></div>
   <div class="grid g2">
-    <div class="card"><span class="menu">⋮</span><div class="clabel">Time to response</div><div class="hero" style="text-align:center" id="ttrHero">—</div><div class="chart" id="ttrChart"></div></div>
-    <div class="card"><span class="menu">⋮</span><div class="clabel">Response time per model</div><div id="rtModel" style="height:290px"></div></div>
+    <div class="card"><button class="menu" type="button" onclick="openCardMenu(event,this)">⋮</button><div class="clabel">Time to response</div><div class="hero" style="text-align:center" id="ttrHero">—</div><div class="chart" id="ttrChart"></div></div>
+    <div class="card"><button class="menu" type="button" onclick="openCardMenu(event,this)">⋮</button><div class="clabel">Response time per model</div><div id="rtModel" style="height:290px"></div></div>
   </div>
-  <div class="sec"><span class="ico">◈</span>Cost <span class="info">i</span></div>
+  <div class="sec"><span class="ico">◈</span>Cost <button class="info" type="button" onclick="showInfoPopover(event,'cost')">i</button></div>
   <div class="grid g3">
-    <div class="card"><button class="alert-btn">+ New alert</button><span class="menu">⋮</span><div class="clabel">Token count</div><div class="hero" id="tokHero">0</div></div>
-    <div class="card"><span class="menu">⋮</span><div class="clabel">Average cost per request</div><div class="hero" id="avgCostHero">—</div><div class="chart" id="avgCostChart" style="height:120px"></div></div>
-    <div class="card"><button class="alert-btn">+ New alert</button><span class="menu">⋮</span><div class="clabel">Token usage forecast</div><div class="chart tall" id="tokForecast"></div><div class="legend"><span><i style="background:var(--purple2)"></i>Total amount of tokens used</span></div></div>
+    <div class="card"><button class="alert-btn" type="button" onclick="openAlertModal('token_count','Token count')">+ New alert</button><button class="menu" type="button" onclick="openCardMenu(event,this)">⋮</button><div class="clabel">Token count</div><div class="hero" id="tokHero">0</div><div id="tokHeroAlertFlag"></div></div>
+    <div class="card"><button class="alert-btn" type="button" onclick="openAlertModal('avg_cost_per_request','Average cost per request')">+ New alert</button><button class="menu" type="button" onclick="openCardMenu(event,this)">⋮</button><div class="clabel">Average cost per request</div><div class="hero" id="avgCostHero">—</div><div id="avgCostHeroAlertFlag"></div><div class="chart" id="avgCostChart" style="height:120px"></div></div>
+    <div class="card"><button class="alert-btn" type="button" onclick="openAlertModal('token_forecast','Token usage forecast')">+ New alert</button><button class="menu" type="button" onclick="openCardMenu(event,this)">⋮</button><div class="clabel">Token usage forecast</div><div class="chart tall" id="tokForecast"></div><div class="legend"><span><i style="background:var(--purple2)"></i>Total amount of tokens used</span></div></div>
   </div>
-  <div class="sec"><span class="ico"><span class="ui-icon" data-icon="security"></span></span>Guardrails <span class="info">i</span></div>
+  <div class="sec"><span class="ico"><span class="ui-icon" data-icon="security"></span></span>Guardrails <button class="info" type="button" onclick="showInfoPopover(event,'guardrails')">i</button></div>
   <div class="grid g2">
-    <div class="card"><span class="menu">⋮</span><div class="clabel">Number of requests with guardrail enabled</div><div class="hero" id="grHero">0</div></div>
-    <div class="card"><span class="menu">⋮</span><div class="clabel">Guardrail activation by type</div><div class="chart tall" id="grStacked"></div><div class="legend" id="grLegend"></div></div>
+    <div class="card"><button class="menu" type="button" onclick="openCardMenu(event,this)">⋮</button><div class="clabel">Number of requests with guardrail enabled</div><div class="hero" id="grHero">0</div></div>
+    <div class="card"><button class="menu" type="button" onclick="openCardMenu(event,this)">⋮</button><div class="clabel">Guardrail activation by type</div><div class="chart tall" id="grStacked"></div><div class="legend" id="grLegend"></div></div>
   </div>
   <div class="sec"><span class="ico">◎</span>Tokens per model</div>
   <div class="card"><div id="tokModel" style="min-height:60px"></div></div>
@@ -415,6 +481,264 @@ function api(u) {
         return r.json();
     });
 }
+
+function apiSend(u, method, body) {
+    return fetch(u, {
+        method: method,
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: body !== undefined ? JSON.stringify(body) : undefined
+    }).then(function(r) {
+        return r.json().catch(function() { return {}; }).then(function(data) {
+            if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+            return data;
+        });
+    });
+}
+
+// ─────────────────────────────────────────────────────────────
+// GENERIC POPOVER PLUMBING (card menu + info tooltips)
+// ─────────────────────────────────────────────────────────────
+function closeAllPopovers() {
+    ['cardMenuPopover', 'infoPopover'].forEach(function(id) {
+        var el = $(id);
+        if (el) el.classList.remove('open');
+    });
+}
+
+document.addEventListener('click', function(e) {
+    if (e.target.closest && (e.target.closest('.menu') || e.target.closest('.info') || e.target.closest('.popover'))) return;
+    closeAllPopovers();
+});
+
+function positionPopover(el, anchorEl) {
+    var r = anchorEl.getBoundingClientRect();
+    el.style.display = 'block';
+    var w = el.offsetWidth || 180;
+    var left = Math.min(r.left, window.innerWidth - w - 12);
+    el.style.top = (r.bottom + 6) + 'px';
+    el.style.left = Math.max(8, left) + 'px';
+}
+
+// ─────────────────────────────────────────────────────────────
+// INFO TOOLTIPS
+// ─────────────────────────────────────────────────────────────
+var INFO_TEXT = {
+    traffic: "Volume de requêtes et temps de réponse de vos agents sur la période sélectionnée. Basculez AVG/p50/p90/p95 pour changer la statistique affichée.",
+    cost: "Consommation de tokens et coût par requête. Utilisez « + New alert » sur une carte pour être averti visuellement quand un seuil est dépassé.",
+    guardrails: "Nombre de requêtes ayant déclenché un contrôle de sécurité (injection, PII, politique d'outil...) et répartition par type de contrôle."
+};
+
+function showInfoPopover(evt, key) {
+    evt.stopPropagation();
+    var pop = $('infoPopover');
+    if (pop.classList.contains('open') && pop.dataset.key === key) {
+        closeAllPopovers();
+        return;
+    }
+    closeAllPopovers();
+    pop.textContent = INFO_TEXT[key] || '';
+    pop.dataset.key = key;
+    pop.classList.add('open');
+    positionPopover(pop, evt.currentTarget);
+}
+
+// ─────────────────────────────────────────────────────────────
+// CARD MENU (⋮) — copier JSON, exporter CSV, masquer la carte
+// ─────────────────────────────────────────────────────────────
+var _cardMenuTarget = null;
+
+function openCardMenu(evt, btn) {
+    evt.stopPropagation();
+    var card = btn.closest('.card');
+    var pop = $('cardMenuPopover');
+    if (pop.classList.contains('open') && _cardMenuTarget === card) {
+        closeAllPopovers();
+        return;
+    }
+    closeAllPopovers();
+    _cardMenuTarget = card;
+    pop.innerHTML =
+        '<button onclick="exportCardData(\\'json\\')">Copier en JSON</button>' +
+        '<button onclick="exportCardData(\\'csv\\')">Exporter en CSV</button>' +
+        '<button onclick="hideCard()">Masquer cette carte</button>';
+    pop.classList.add('open');
+    positionPopover(pop, btn);
+}
+
+function extractCardRows(card) {
+    var label = (card.querySelector('.clabel') || {}).textContent || 'metric';
+    var rows = [];
+    var hero = card.querySelector('.hero');
+    if (hero) rows.push([label.trim(), hero.textContent.trim()]);
+    card.querySelectorAll('.legend span').forEach(function(sp) {
+        rows.push([sp.textContent.trim(), '']);
+    });
+    return rows;
+}
+
+function exportCardData(fmt) {
+    if (!_cardMenuTarget) return;
+    var rows = extractCardRows(_cardMenuTarget);
+    var label = (_cardMenuTarget.querySelector('.clabel') || {}).textContent || 'card';
+    label = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    if (fmt === 'json') {
+        var obj = {};
+        rows.forEach(function(r) { obj[r[0]] = r[1]; });
+        navigator.clipboard.writeText(JSON.stringify(obj, null, 2))
+            .then(function() { toast('Copié en JSON'); })
+            .catch(function() { toast('Impossible de copier (permissions navigateur)'); });
+    } else {
+        var csv = rows.map(function(r) { return '"' + r[0].replace(/"/g, '""') + '","' + r[1].replace(/"/g, '""') + '"'; }).join('\n');
+        var blob = new Blob([csv], { type: 'text/csv' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = label + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        toast('Export CSV lancé');
+    }
+    closeAllPopovers();
+}
+
+function hideCard() {
+    if (!_cardMenuTarget) return;
+    _cardMenuTarget.style.display = 'none';
+    state.hiddenCards = (state.hiddenCards || 0) + 1;
+    var pill = $('reshowCardsPill');
+    if (pill) {
+        pill.style.display = 'inline-flex';
+        pill.querySelector('span').textContent = state.hiddenCards;
+    }
+    closeAllPopovers();
+}
+
+function reshowAllCards() {
+    document.querySelectorAll('.card').forEach(function(c) { c.style.display = ''; });
+    state.hiddenCards = 0;
+    var pill = $('reshowCardsPill');
+    if (pill) pill.style.display = 'none';
+}
+
+// ─────────────────────────────────────────────────────────────
+// HELP MODAL
+// ─────────────────────────────────────────────────────────────
+function openHelpModal() { $('helpModal').style.display = 'flex'; }
+function closeHelpModal() { $('helpModal').style.display = 'none'; }
+
+// ─────────────────────────────────────────────────────────────
+// ALERT RULES
+// ─────────────────────────────────────────────────────────────
+var ALERT_METRIC_LABELS = {
+    token_count: 'Token count',
+    avg_cost_per_request: 'Average cost per request',
+    token_forecast: 'Token usage forecast'
+};
+var _alertModalMetric = null;
+
+function openAlertModal(metric, label) {
+    _alertModalMetric = metric;
+    $('alertModalTitle').textContent = 'Nouvelle alerte — ' + label;
+    $('alertModalSubtitle').textContent = "Soyez averti visuellement sur cette carte quand la métrique franchit un seuil.";
+    $('alertThreshold').value = '';
+    $('alertModal').style.display = 'flex';
+    loadAlertRulesForModal();
+}
+
+function closeAlertModal() { $('alertModal').style.display = 'none'; }
+
+function loadAlertRulesForModal() {
+    var box = $('alertRulesExisting');
+    box.innerHTML = '<p style="color:#777;font-size:12px">Chargement…</p>';
+    api('/api/alert-rules').then(function(data) {
+        state.alertRules = data.alert_rules || [];
+        var mine = state.alertRules.filter(function(r) { return r.metric === _alertModalMetric; });
+        if (mine.length === 0) {
+            box.innerHTML = '<p style="color:#777;font-size:12px">Aucune alerte sur cette métrique.</p>';
+            return;
+        }
+        box.innerHTML = mine.map(function(r) {
+            return '<div class="alert-rule-row"><span>' +
+                (r.comparison === 'above' ? 'au-dessus de ' : 'en-dessous de ') +
+                esc(String(r.threshold)) + '</span>' +
+                '<button onclick="deleteAlertRuleUI(\\'' + r.alert_id + '\\')" title="Supprimer">×</button></div>';
+        }).join('');
+    }).catch(function() {
+        box.innerHTML = '<p style="color:#f87171;font-size:12px">Impossible de charger les alertes.</p>';
+    });
+}
+
+function submitAlertRule() {
+    var threshold = parseFloat($('alertThreshold').value);
+    if (isNaN(threshold)) { toast('Entrez un seuil valide'); return; }
+    var comparison = $('alertComparison').value;
+    apiSend('/api/alert-rules', 'POST', { metric: _alertModalMetric, comparison: comparison, threshold: threshold })
+        .then(function() {
+            toast('Alerte créée');
+            $('alertThreshold').value = '';
+            loadAlertRulesForModal();
+            refreshAlertRules();
+        })
+        .catch(function(e) { toast('Erreur : ' + e.message); });
+}
+
+function deleteAlertRuleUI(alertId) {
+    apiSend('/api/alert-rules/' + alertId, 'DELETE')
+        .then(function() {
+            toast('Alerte supprimée');
+            loadAlertRulesForModal();
+            refreshAlertRules();
+        })
+        .catch(function(e) { toast('Erreur : ' + e.message); });
+}
+
+function refreshAlertRules() {
+    return api('/api/alert-rules').then(function(data) {
+        state.alertRules = data.alert_rules || [];
+        evaluateAlertRules();
+    }).catch(function() {});
+}
+
+function evaluateAlertRules() {
+    var rules = state.alertRules || [];
+    if (rules.length === 0) {
+        ['tokHeroAlertFlag', 'avgCostHeroAlertFlag'].forEach(function(id) {
+            var el = $(id); if (el) el.innerHTML = '';
+        });
+        return;
+    }
+    var m = state.metrics || {};
+    var tokens = m.total_tokens || 0;
+    var avgCost = (m.total_cost_usd || 0) / Math.max(1, m.total_spans || 0);
+
+    var hist = (state.costTrend || []).map(function(d) { return d.tokens || 0; });
+    var forecast = tokens;
+    if (hist.length >= 2) {
+        var delta = (hist[hist.length - 1] - hist[0]) / (hist.length - 1);
+        forecast = Math.max(0, hist[hist.length - 1] + delta * 6);
+    }
+
+    var values = { token_count: tokens, avg_cost_per_request: avgCost, token_forecast: forecast };
+    var flagIds = { token_count: 'tokHeroAlertFlag', avg_cost_per_request: 'avgCostHeroAlertFlag', token_forecast: null };
+
+    var triggeredByMetric = {};
+    rules.forEach(function(r) {
+        var v = values[r.metric];
+        if (v === undefined) return;
+        var hit = r.comparison === 'above' ? v > r.threshold : v < r.threshold;
+        if (hit) triggeredByMetric[r.metric] = true;
+    });
+
+    Object.keys(flagIds).forEach(function(metric) {
+        var id = flagIds[metric];
+        if (!id) return;
+        var el = $(id);
+        if (!el) return;
+        el.innerHTML = triggeredByMetric[metric] ? '<span class="alert-flag">⚠ seuil dépassé</span>' : '';
+    });
+}
+
 
 function trendPct(s) {
     if (!s || s.length < 2) return null;
@@ -1327,36 +1651,75 @@ if (!document.hidden) {
     navigator.clipboard.writeText(copyText.value);
     alert("Clé copiée dans le presse-papiers !");
   }
+  var _pendingApprovals = [];
+
   async function checkApprovals() {
     try {
-        const response = await fetch('/api/approvals', {
-            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } // Adapte selon ton auth
-        });
-        const data = await response.json();
-        
-        const banner = document.getElementById('approval-banner');
-        const list = document.getElementById('approval-list');
+        // Même mécanisme d'auth que le reste du dashboard : cookie de
+        // session httpOnly, pas de token dans localStorage (il n'y en a
+        // jamais eu — l'ancien code envoyait toujours "Bearer null").
+        const data = await api('/api/approvals?status=pending');
+        _pendingApprovals = data.approvals || [];
+
+        const pill = document.getElementById('approval-pill');
         const count = document.getElementById('approval-count');
-        
-        if (data.approvals && data.approvals.length > 0) {
-            banner.style.display = 'block';
-            count.textContent = data.approvals.length;
-            list.innerHTML = data.approvals.map(app => `
-                <li style="margin-bottom: 0.5rem; border-bottom: 1px solid #fcd34d; padding-bottom: 0.5rem;">
-                    <strong>${app.tool_name}</strong> pour l'agent <em>${app.agent_id}</em><br>
-                    <small>Raison: ${app.reason}</small><br>
-                    <small>Params: ${JSON.stringify(app.params).substring(0, 100)}...</small><br>
-                    <button onclick="resolveApproval('${app.id}', 'approved')" style="background: #10b981; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; margin-top: 4px;">Approuver</button>
-                    <button onclick="resolveApproval('${app.id}', 'rejected')" style="background: #ef4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; margin-top: 4px;">Rejeter</button>
-                </li>
-            `).join('');
+
+        if (_pendingApprovals.length > 0) {
+            pill.style.display = 'inline-block';
+            count.textContent = _pendingApprovals.length;
         } else {
-            banner.style.display = 'none';
+            pill.style.display = 'none';
+            closeApprovalModal();
+        }
+
+        if ($('approvalModal').style.display === 'flex') {
+            renderApprovalModalList();
         }
     } catch (e) {
         console.error("Failed to fetch approvals", e);
     }
-}
+  }
+
+  function renderApprovalModalList() {
+    const list = document.getElementById('approvalModalList');
+    if (_pendingApprovals.length === 0) {
+        list.innerHTML = '<p style="color:#aaa;font-size:13px">Aucune approbation en attente.</p>';
+        return;
+    }
+    list.innerHTML = _pendingApprovals.map(function(app) {
+        var argsPreview = '';
+        try { argsPreview = JSON.stringify(app.arguments).substring(0, 160); } catch (e) { argsPreview = ''; }
+        return '<div style="border:1px solid #333;border-radius:8px;padding:12px;margin-bottom:10px;background:#151515">' +
+            '<div><strong>' + esc(app.tool_name || '') + '</strong> — agent <em>' + esc(app.agent_id || '') + '</em></div>' +
+            '<div style="color:#aaa;font-size:12px;margin-top:4px">Raison : ' + esc(app.reason || '—') + '</div>' +
+            (argsPreview ? '<div style="color:#777;font-size:11px;margin-top:4px;font-family:monospace;word-break:break-all">' + esc(argsPreview) + '</div>' : '') +
+            '<div style="margin-top:10px;display:flex;gap:8px">' +
+                '<button onclick="resolveApproval(\\'' + app.approval_id + '\\', \\'approve\\')" style="background:#10b981;color:#fff;border:0;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:600">Approuver</button>' +
+                '<button onclick="resolveApproval(\\'' + app.approval_id + '\\', \\'reject\\')" style="background:#ef4444;color:#fff;border:0;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:600">Rejeter</button>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  function openApprovalModal() {
+    $('approvalModal').style.display = 'flex';
+    renderApprovalModalList();
+  }
+
+  function closeApprovalModal() {
+    var m = $('approvalModal');
+    if (m) m.style.display = 'none';
+  }
+
+  async function resolveApproval(approvalId, action) {
+    try {
+        await apiSend('/api/approvals/' + approvalId + '/' + action, 'POST', {});
+        toast(action === 'approve' ? 'Action approuvée' : 'Action rejetée');
+        await checkApprovals();
+    } catch (e) {
+        toast('Erreur : ' + e.message);
+    }
+  }
 
 // Rafraîchir toutes les 10 secondes
 setInterval(checkApprovals, 10000);
