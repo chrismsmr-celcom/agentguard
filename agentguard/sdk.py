@@ -220,7 +220,27 @@ class AgentGuard:
             if check.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL) and self.block_on_high:
                 span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000, {"tool": tool_name, "params": params}, {"blocked": True, "reason": "policy_block_on_high"}, [check, runtime_check], True, f"[POLICY] {check.details}")
                 self.spans.append(span); self._send_to_collector(span); self._record_trajectory_tool(tool_name, runtime_decision)
-                raise SecurityException(f"🛡️ Tool blocked: {check.details}")
+                details = check.details or "policy violation"
+
+metadata = getattr(check, "metadata", {}) or {}
+
+reason_parts = [details]
+
+if metadata.get("taint"):
+    reason_parts.append(f"Taint: {metadata['taint']}")
+
+if metadata.get("secret"):
+    reason_parts.append(f"SECRET: {metadata['secret']}")
+
+if metadata.get("action"):
+    reason_parts.append(f"Action: {metadata['action']}")
+
+if metadata.get("reason"):
+    reason_parts.append(str(metadata["reason"]))
+
+raise SecurityException(
+    f"🛡️ Tool blocked: {' | '.join(reason_parts)}"
+)
 
         try: 
             result = func(**params)
