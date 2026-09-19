@@ -4,6 +4,10 @@ import json
 import secrets
 import structlog
 from flask import Blueprint, request, jsonify, g, current_app, send_from_directory
+from datetime import datetime
+import time
+import sqlite3
+import os
 
 from collector.db import (
     get_db,
@@ -30,8 +34,6 @@ from collector.alerts import (
     VALID_METRICS,
     VALID_COMPARISONS,
 )
-import sqlite3
-import os
 
 from collector.auth import require_auth
 
@@ -43,22 +45,13 @@ from decision_engine import (
 )
 
 api_bp = Blueprint("api", __name__)
+
 # Single authoritative runtime decision engine.
-#
-# IMPORTANT:
-# This engine is intentionally created once per collector process.
-# Policies should be registered here or loaded through a dedicated
-# policy provider in production.
 decision_engine = DecisionEngine()
 
 
 def get_decision_signer():
-    """Return the process-wide signer used for authoritative decisions.
-
-    A persistent signing key is mandatory in production. The signer is cached
-    in the Flask application extensions so /api/decide and /api/public-key
-    always expose the same public key.
-    """
+    """Return the process-wide signer used for authoritative decisions."""
     signer = current_app.extensions.get("agentguard_decision_signer")
     if signer is not None:
         return signer
@@ -81,12 +74,7 @@ def get_decision_signer():
 
 
 def is_server_registered_tool(tool_name):
-    """Check tool registration from server-side policy state only.
-
-    Client supplied `tool_registered` values are never trusted. A tool is
-    considered registered only when an active server-side policy explicitly
-    lists it in `allowed_tools`.
-    """
+    """Check tool registration from server-side policy state only."""
     tool_name = str(tool_name or "").strip()
     if not tool_name:
         return False
@@ -100,22 +88,20 @@ def is_server_registered_tool(tool_name):
             return True
 
     return False
+
+
 # ═══════════════════════════════════════════════════════════════
 # STATIC ASSETS (logo, favicon)
 # ═══════════════════════════════════════════════════════════════
 
 @api_bp.route("/logo.svg")
 def serve_logo():
-    """Serve AgentGuard logo SVG.
-
-    Fixes dashboard 404 error on logo.svg resource.
-    """
+    """Serve AgentGuard logo SVG."""
     static_path = os.path.join(os.path.dirname(__file__), "static")
     try:
         return send_from_directory(static_path, "logo.svg", mimetype="image/svg+xml")
     except Exception as e:
         logger.warning("logo_serve_failed", error=str(e))
-        # Fallback : retourner un SVG minimal inline
         fallback_svg = """<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
   <rect width="100" height="100" fill="#2563eb"/>
@@ -131,14 +117,13 @@ def serve_favicon():
     try:
         return send_from_directory(static_path, "logo.svg", mimetype="image/x-icon")
     except Exception:
-        return "", 204  # No content
+        return "", 204
 
 
 # ═══════════════════════════════════════════════════════════════
 # SPAN INGESTION
 # ═══════════════════════════════════════════════════════════════
-# ✅ P0 FIX : removed @cross_origin(origins=["*"]) — /span now inherits
-# the global CORS policy from app.py (strict in production).
+
 @api_bp.route("/span", methods=["POST"])
 def receive_span():
     """Ingestion de span (LLM call ou tool call)."""
@@ -178,7 +163,6 @@ def receive_span():
     data.setdefault("security_checks", [])
     data.setdefault("blocked", False)
 
-    # ── Détection layer extraction (BEFORE redaction — these are non-PII metadata) ──
     detection_layer = None
     ml_score = None
     llm_score = None
@@ -204,9 +188,6 @@ def receive_span():
                     llm_reason = check.get("details")
                 break
 
-    # ✅ P0 FIX : PII + secrets redaction on ALL persisted fields
-    # Before: only input_data/output_data were redacted.
-    # Now: security_checks, block_reason, metadata, llm_reason too.
     data["input_data"] = redact_pii(data.get("input_data", {}))
     data["output_data"] = redact_pii(data.get("output_data", {}))
     data["security_checks"] = redact_pii(data.get("security_checks", []))
@@ -214,13 +195,11 @@ def receive_span():
         data["block_reason"] = redact_pii(data["block_reason"])
     if "metadata" in data and data["metadata"] is not None:
         data["metadata"] = redact_pii(data["metadata"])
-    # llm_reason may contain PII echoed from LLM output
     if llm_reason and isinstance(llm_reason, str):
         llm_reason = redact_pii(llm_reason)
 
     model = data.get("input_data", {}).get("model") if isinstance(data.get("input_data"), dict) else None
 
-    # DB insert — ✅ utilisation de _get_db_path() dynamique
     p = sql_placeholder()
 
     if is_postgres():
@@ -273,7 +252,6 @@ def receive_span():
         finally:
             conn.close()
 
-    # Alerting (uses already-redacted data)
     if data["blocked"]:
         try:
             import alerting
@@ -296,7 +274,6 @@ def receive_span():
         except Exception as e:
             logger.warning("alerting_failed", error=str(e))
 
-    # ✅ Audit log APRÈS commit
     try:
         from collector.audit_routes import get_audit_log, AuditEventType
         audit = get_audit_log()
@@ -407,19 +384,11 @@ def get_trace(trace_id):
 
 
 # ═══════════════════════════════════════════════════════════════
-# METRICS — ✅ ROBUST VERSION (fixes 500 errors)
+# METRICS
 # ═══════════════════════════════════════════════════════════════
 
 @api_bp.route("/api/metrics")
 def get_metrics():
-    """Metrics endpoint — robust with comprehensive error handling.
-
-    Fixes dashboard 500 error by:
-    1. Guarding against missing g.org_id
-    2. try/except around each DB query
-    3. Returning empty metrics instead of 500 on failure
-    """
-    # ✅ Empty metrics template for fallback
     empty_metrics = {
         "total_spans": 0,
         "total_traces": 0,
@@ -436,7 +405,6 @@ def get_metrics():
         "version": "v6.0.0",
     }
 
-    # ✅ Guard: ensure g.org_id is set
     org_id = getattr(g, "org_id", None)
     if not org_id:
         logger.warning("metrics_no_org_id", endpoint=request.endpoint)
@@ -453,31 +421,24 @@ def get_metrics():
 
         cur = conn.cursor()
         try:
-            # Total spans
             cur.execute(f"SELECT COUNT(*) FROM spans WHERE org_id = {p}", (org_id,))
             total_spans = cur.fetchone()[0] or 0
 
-            # Total traces
             cur.execute(f"SELECT COUNT(DISTINCT trace_id) FROM spans WHERE org_id = {p}", (org_id,))
             total_traces = cur.fetchone()[0] or 0
 
-            # Blocked
             cur.execute(f"SELECT SUM(CASE WHEN blocked THEN 1 ELSE 0 END) FROM spans WHERE org_id = {p}", (org_id,))
             blocked = cur.fetchone()[0] or 0
 
-            # Total cost
             cur.execute(f"SELECT SUM(cost_usd) FROM spans WHERE org_id = {p}", (org_id,))
             total_cost = cur.fetchone()[0] or 0
 
-            # Total tokens
             cur.execute(f"SELECT COALESCE(SUM(input_tokens + output_tokens), 0) FROM spans WHERE org_id = {p}", (org_id,))
             total_tokens = cur.fetchone()[0] or 0
 
-            # Avg latency
             cur.execute(f"SELECT AVG(latency_ms) FROM spans WHERE latency_ms > 0 AND org_id = {p}", (org_id,))
             avg_latency = cur.fetchone()[0] or 0
 
-            # Detection layers
             try:
                 if is_postgres():
                     cur.execute("""
@@ -496,7 +457,6 @@ def get_metrics():
                 logger.warning("metrics_detection_query_failed", error=str(e))
                 detection_stats = {}
 
-            # ML scores
             try:
                 cur.execute(f"SELECT AVG(ml_score) FROM spans WHERE ml_score IS NOT NULL AND org_id = {p}", (org_id,))
                 avg_ml_score = cur.fetchone()[0] or 0
@@ -510,7 +470,6 @@ def get_metrics():
                 avg_llm_score = 0
                 llm_count = 0
 
-            # Risk distribution
             risk_counts = {"low": 0, "medium": 0, "high": 0, "critical": 0}
             try:
                 if is_postgres():
@@ -540,7 +499,6 @@ def get_metrics():
             except Exception as e:
                 logger.warning("metrics_risk_query_failed", error=str(e))
 
-            # Top threats
             try:
                 cur.execute(f"""
                     SELECT block_reason, COUNT(*) as count
@@ -573,7 +531,6 @@ def get_metrics():
 
     except Exception as e:
         logger.error("metrics_endpoint_failed", error=str(e), org_id=org_id)
-        # Return empty metrics instead of 500 — dashboard stays functional
         empty_metrics["error"] = str(e)[:200]
         return jsonify(empty_metrics), 200
 
@@ -1058,12 +1015,11 @@ def api_trend_daily():
 
 
 # ═══════════════════════════════════════════════════════════════
-# AUDIT TRAIL (legacy, pour dashboard)
+# AUDIT TRAIL
 # ═══════════════════════════════════════════════════════════════
 
 @api_bp.route("/api/audit/trail")
 def api_audit_trail():
-    """Audit trail : 50 derniers événements avec prompt."""
     p = sql_placeholder()
     if is_postgres():
         conn = get_db()
@@ -1101,12 +1057,11 @@ def api_audit_trail():
 
 
 # ═══════════════════════════════════════════════════════════════
-# SIGNED DECISIONS (Ed25519) — Zero-trust authority
+# SIGNED DECISIONS (Ed25519)
 # ═══════════════════════════════════════════════════════════════
 
 @api_bp.route("/api/public-key")
 def public_key():
-    """Retourne la clé publique (NON protégé, distribuable)."""
     try:
         signer = get_decision_signer()
         return jsonify({"public_key_pem": signer.public_key_pem()}), 200
@@ -1117,57 +1072,25 @@ def public_key():
 
 @api_bp.route("/api/decide", methods=["POST"])
 def decide():
-    """
-    Authoritative zero-trust runtime decision endpoint.
-
-    The client may REQUEST a decision, but it never supplies
-    the decision itself.
-
-    Flow:
-
-        authenticated request
-                ↓
-        server-side DecisionEngine
-                ↓
-        ALLOW / BLOCK / REQUIRE_APPROVAL
-                ↓
-        Ed25519 signature
-    """
-
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
     data = request.get_json(silent=True)
 
     if not isinstance(data, dict):
-        return jsonify({
-            "error": "Body must be a JSON object"
-        }), 400
+        return jsonify({"error": "Body must be a JSON object"}), 400
 
     tool_name = str(data.get("tool_name", "")).strip()
 
     if not tool_name:
-        return jsonify({
-            "error": "tool_name is required"
-        }), 400
+        return jsonify({"error": "tool_name is required"}), 400
 
     params = data.get("params")
-
     if params is None:
         params = {}
-
     if not isinstance(params, dict):
-        return jsonify({
-            "error": "params must be an object"
-        }), 400
+        return jsonify({"error": "params must be an object"}), 400
 
-    # IMPORTANT:
-    # Do NOT trust an arbitrary agent_id supplied by the client.
-    #
-    # The authenticated organization is the security boundary.
-    #
-    # If your auth middleware exposes a verified agent identity,
-    # use it. Otherwise fall back to the organization identity.
     authenticated_agent_id = (
         getattr(g, "agent_id", None)
         or getattr(g, "api_key_id", None)
@@ -1175,69 +1098,33 @@ def decide():
     )
 
     requested_policy = data.get("policy")
-
-    metadata = {
-        "org_id": g.org_id,
-        "source": "api_decide",
-    }
-
+    metadata = {"org_id": g.org_id, "source": "api_decide"}
     if requested_policy:
         metadata["policy"] = str(requested_policy)
 
-    # Server-side decision request.
     decision_request = DecisionRequest(
         agent_id=str(authenticated_agent_id),
         tool_name=tool_name,
-        tool_category=str(
-            data.get("tool_category", "read")
-        ),
+        tool_category=str(data.get("tool_category", "read")),
         identity_trusted=True,
         model_score=float(data.get("model_score", 0.0) or 0.0),
         anomaly_score=float(data.get("anomaly_score", 0.0) or 0.0),
-        taint_level=str(
-            data.get("taint_level", "PUBLIC")
-        ).upper(),
-        trajectory_length=int(
-            data.get("trajectory_length", 0) or 0
-        ),
-        previous_risky_actions=int(
-            data.get("previous_risky_actions", 0) or 0
-        ),
-        external_side_effect=bool(
-            data.get("external_side_effect", False)
-        ),
-        irreversible=bool(
-            data.get("irreversible", False)
-        ),
-        # SECURITY: tool registration is authoritative server-side.
-        # Never trust `tool_registered` from the client.
+        taint_level=str(data.get("taint_level", "PUBLIC")).upper(),
+        trajectory_length=int(data.get("trajectory_length", 0) or 0),
+        previous_risky_actions=int(data.get("previous_risky_actions", 0) or 0),
+        external_side_effect=bool(data.get("external_side_effect", False)),
+        irreversible=bool(data.get("irreversible", False)),
         tool_registered=is_server_registered_tool(tool_name),
         metadata=metadata,
     )
 
-    # ──────────────────────────────────────────────
-    # AUTHORITATIVE SERVER-SIDE DECISION
-    # ──────────────────────────────────────────────
-
     try:
         result = decision_engine.evaluate(decision_request)
-
     except Exception as exc:
-        logger.exception(
-            "decision_engine_failed",
-            error=str(exc),
-            org_id=g.org_id,
-            tool_name=tool_name,
-        )
-
-        # SECURITY:
-        # If the decision engine itself fails,
-        # NEVER return ALLOW.
+        logger.exception("decision_engine_failed", error=str(exc), org_id=g.org_id, tool_name=tool_name)
         result = None
-
         try:
             signer = get_decision_signer()
-
             signed = signer.sign_decision({
                 "request_id": secrets.token_hex(16),
                 "action": "DENY",
@@ -1245,21 +1132,12 @@ def decide():
                 "policy_version": 0,
                 "reason": "Decision engine failure",
             })
-
             return jsonify(signed), 503
-
         except Exception:
-            return jsonify({
-                "error": "security decision unavailable"
-            }), 503
-
-    # ──────────────────────────────────────────────
-    # SIGN SERVER DECISION
-    # ──────────────────────────────────────────────
+            return jsonify({"error": "security decision unavailable"}), 503
 
     try:
         signer = get_decision_signer()
-
         signed = signer.sign_decision({
             "request_id": secrets.token_hex(16),
             "action": result.decision.value.upper(),
@@ -1267,46 +1145,27 @@ def decide():
             "policy_version": 1,
             "reason": "; ".join(result.reasons[:5]),
         })
-
-        # Include server-generated decision metadata.
         signed["risk_score"] = result.risk_score
         signed["risk_level"] = result.risk_level
         signed["reason_codes"] = result.reason_codes
         signed["enforcement"] = result.enforcement
-
         return jsonify(signed), 200
-
     except Exception as exc:
-        logger.exception(
-            "decision_signing_failed",
-            error=str(exc),
-        )
+        logger.exception("decision_signing_failed", error=str(exc))
+        return jsonify({"error": "security signing unavailable"}), 503
 
-        return jsonify({
-            "error": "security signing unavailable"
-        }), 503
 
 # ═══════════════════════════════════════════════════════════════
-# HUMAN-IN-THE-LOOP — APPROVALS
+# HUMAN-IN-THE-LOOP — APPROVALS (sophisticated, via collector.approvals)
 # ═══════════════════════════════════════════════════════════════
 
-@api_bp.route("/api/approvals", methods=["GET"])
+@api_bp.route("/api/approvals", methods=["GET"], endpoint="api_list_approvals")
 def api_list_approvals():
-    """
-    List approval requests for the authenticated organization.
-
-    Optional:
-        ?status=pending
-        ?status=approved
-        ?status=rejected
-        ?status=expired
-        ?limit=50
-    """
+    """List approval requests for the authenticated organization."""
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
     org_id = getattr(g, "org_id", None)
-
     if not org_id:
         return jsonify({"error": "Organization context required"}), 400
 
@@ -1322,83 +1181,45 @@ def api_list_approvals():
         return jsonify({"error": "Invalid approval status"}), 400
 
     try:
-        approvals = list_approvals(
-            org_id=org_id,
-            status=status,
-            limit=limit,
-        )
-
-        return jsonify({
-            "approvals": approvals,
-            "count": len(approvals),
-        }), 200
-
+        approvals = list_approvals(org_id=org_id, status=status, limit=limit)
+        return jsonify({"approvals": approvals, "count": len(approvals)}), 200
     except Exception as e:
-        logger.error(
-            "approval_list_failed",
-            error=str(e),
-            org_id=org_id,
-        )
+        logger.error("approval_list_failed", error=str(e), org_id=org_id)
         return jsonify({"error": "Failed to list approvals"}), 500
 
 
-@api_bp.route("/api/approvals/<approval_id>", methods=["GET"])
+@api_bp.route("/api/approvals/<approval_id>", methods=["GET"], endpoint="api_get_approval")
 def api_get_approval(approval_id):
-    """
-    Get one approval request.
-
-    The organization filter prevents cross-tenant access.
-    """
+    """Get one approval request."""
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
     org_id = getattr(g, "org_id", None)
-
     if not org_id:
         return jsonify({"error": "Organization context required"}), 400
 
     try:
-        approval = get_approval(
-            approval_id,
-            org_id=org_id,
-        )
-
+        approval = get_approval(approval_id, org_id=org_id)
         if approval is None:
             return jsonify({"error": "Approval not found"}), 404
-
         return jsonify(approval), 200
-
     except Exception as e:
-        logger.error(
-            "approval_get_failed",
-            error=str(e),
-            approval_id=approval_id,
-            org_id=org_id,
-        )
+        logger.error("approval_get_failed", error=str(e), approval_id=approval_id, org_id=org_id)
         return jsonify({"error": "Failed to retrieve approval"}), 500
 
 
-@api_bp.route("/api/approvals/<approval_id>/approve", methods=["POST"])
+@api_bp.route("/api/approvals/<approval_id>/approve", methods=["POST"], endpoint="api_approve_approval")
 def api_approve_approval(approval_id):
-    """
-    Approve a pending tool action.
-
-    The action is NOT executed here.
-    This endpoint only changes the approval state.
-    """
+    """Approve a pending tool action."""
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
     org_id = getattr(g, "org_id", None)
-
     if not org_id:
         return jsonify({"error": "Organization context required"}), 400
 
     data = request.get_json(silent=True) or {}
-
     decision_reason = data.get("reason")
-
-    # Best-effort human identity from the authenticated context.
     decided_by = (
         getattr(g, "user_id", None)
         or getattr(g, "identity_id", None)
@@ -1414,19 +1235,12 @@ def api_approve_approval(approval_id):
             org_id=org_id,
         )
 
-        # Audit lifecycle event.
         try:
             from collector.audit_routes import get_audit_log, AuditEventType
-
             audit = get_audit_log()
-
             if audit:
                 audit.log_event(
-                    event_type=getattr(
-                        AuditEventType,
-                        "APPROVAL_GRANTED",
-                        AuditEventType.SPAN_INGESTED,
-                    ),
+                    event_type=getattr(AuditEventType, "APPROVAL_GRANTED", AuditEventType.SPAN_INGESTED),
                     org_id=org_id,
                     actor=str(decided_by),
                     resource=f"approval:{approval_id}",
@@ -1441,60 +1255,33 @@ def api_approve_approval(approval_id):
                     risk_level="high",
                 )
         except Exception as audit_error:
-            logger.warning(
-                "approval_audit_failed",
-                error=str(audit_error),
-                approval_id=approval_id,
-            )
+            logger.warning("approval_audit_failed", error=str(audit_error), approval_id=approval_id)
 
-        return jsonify({
-            "status": "approved",
-            "approval": approval,
-        }), 200
-
+        return jsonify({"status": "approved", "approval": approval}), 200
     except KeyError:
         return jsonify({"error": "Approval not found"}), 404
-
     except ValueError as e:
         message = str(e)
-
         if "expired" in message.lower():
-            return jsonify({
-                "error": "Approval expired",
-                "status": "expired",
-            }), 409
-
-        return jsonify({
-            "error": message,
-        }), 409
-
+            return jsonify({"error": "Approval expired", "status": "expired"}), 409
+        return jsonify({"error": message}), 409
     except Exception as e:
-        logger.error(
-            "approval_approve_failed",
-            error=str(e),
-            approval_id=approval_id,
-            org_id=org_id,
-        )
+        logger.error("approval_approve_failed", error=str(e), approval_id=approval_id, org_id=org_id)
         return jsonify({"error": "Failed to approve request"}), 500
 
 
-@api_bp.route("/api/approvals/<approval_id>/reject", methods=["POST"])
+@api_bp.route("/api/approvals/<approval_id>/reject", methods=["POST"], endpoint="api_reject_approval")
 def api_reject_approval(approval_id):
-    """
-    Reject a pending tool action.
-    """
+    """Reject a pending tool action."""
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
     org_id = getattr(g, "org_id", None)
-
     if not org_id:
         return jsonify({"error": "Organization context required"}), 400
 
     data = request.get_json(silent=True) or {}
-
     decision_reason = data.get("reason")
-
     decided_by = (
         getattr(g, "user_id", None)
         or getattr(g, "identity_id", None)
@@ -1510,19 +1297,12 @@ def api_reject_approval(approval_id):
             org_id=org_id,
         )
 
-        # Audit lifecycle event.
         try:
             from collector.audit_routes import get_audit_log, AuditEventType
-
             audit = get_audit_log()
-
             if audit:
                 audit.log_event(
-                    event_type=getattr(
-                        AuditEventType,
-                        "APPROVAL_REJECTED",
-                        AuditEventType.SPAN_INGESTED,
-                    ),
+                    event_type=getattr(AuditEventType, "APPROVAL_REJECTED", AuditEventType.SPAN_INGESTED),
                     org_id=org_id,
                     actor=str(decided_by),
                     resource=f"approval:{approval_id}",
@@ -1537,53 +1317,30 @@ def api_reject_approval(approval_id):
                     risk_level="high",
                 )
         except Exception as audit_error:
-            logger.warning(
-                "approval_audit_failed",
-                error=str(audit_error),
-                approval_id=approval_id,
-            )
+            logger.warning("approval_audit_failed", error=str(audit_error), approval_id=approval_id)
 
-        return jsonify({
-            "status": "rejected",
-            "approval": approval,
-        }), 200
-
+        return jsonify({"status": "rejected", "approval": approval}), 200
     except KeyError:
         return jsonify({"error": "Approval not found"}), 404
-
     except ValueError as e:
         message = str(e)
-
         if "expired" in message.lower():
-            return jsonify({
-                "error": "Approval expired",
-                "status": "expired",
-            }), 409
-
-        return jsonify({
-            "error": message,
-        }), 409
-
+            return jsonify({"error": "Approval expired", "status": "expired"}), 409
+        return jsonify({"error": message}), 409
     except Exception as e:
-        logger.error(
-            "approval_reject_failed",
-            error=str(e),
-            approval_id=approval_id,
-            org_id=org_id,
-        )
+        logger.error("approval_reject_failed", error=str(e), approval_id=approval_id, org_id=org_id)
         return jsonify({"error": "Failed to reject request"}), 500
 
-from flask import jsonify
-from datetime import datetime
-import time
+
+# ═══════════════════════════════════════════════════════════════
+# HEALTH / READINESS
+# ═══════════════════════════════════════════════════════════════
 
 @api_bp.route("/health", methods=["GET"])
 def health_check():
-    """Vérification complète de la santé du service (pour les load balancers/Render)."""
     checks = {}
     is_healthy = True
-    
-    # 1. Vérification Base de Données
+
     try:
         start = time.time()
         from collector.db import get_db
@@ -1596,16 +1353,13 @@ def health_check():
     except Exception as e:
         checks["database"] = {"status": "error", "message": str(e)}
         is_healthy = False
-        
-    # 2. Vérification Redis (si configuré)
+
     try:
-        # Adapte selon ta configuration réelle de redis
         if hasattr(current_app, 'extensions') and 'limiter' in current_app.extensions:
             current_app.extensions['limiter'].storage.client.ping()
             checks["redis"] = {"status": "ok"}
     except Exception as e:
         checks["redis"] = {"status": "degraded", "message": str(e)}
-        # Redis down n'est pas forcément fatal si on a un fallback, mais c'est dégradé
 
     status_code = 200 if is_healthy else 503
     return jsonify({
@@ -1615,49 +1369,66 @@ def health_check():
         "checks": checks
     }), status_code
 
+
 @api_bp.route("/readiness", methods=["GET"])
 def readiness_check():
-    """Vérification simple : le service accepte-t-il des requêtes ?"""
     return jsonify({"ready": True, "timestamp": datetime.utcnow().isoformat()}), 200
 
-@api_bp.route("/api/approvals", methods=["POST"])
-def create_approval_request():
-    """Reçue une demande d'approbation depuis le SDK AgentGuard."""
-    data = request.get_json()
+
+# ═══════════════════════════════════════════════════════════════
+# APPROVAL INGESTION (SDK → Backend)
+# ═══════════════════════════════════════════════════════════════
+# Cette route est appelée par le SDK AgentGuard quand une action
+# nécessite une approbation humaine. Elle crée une entrée dans
+# la table approval_requests pour que le dashboard puisse l'afficher.
+
+@api_bp.route("/api/approvals", methods=["POST"], endpoint="api_sdk_create_approval")
+def hitl_sdk_create_approval():
+    """Reçoit une demande d'approbation depuis le SDK AgentGuard."""
+    data = request.get_json() or {}
     approval_id = data.get("approval_id")
     agent_id = data.get("agent_id", "unknown")
     tool_name = data.get("tool_name")
     params = data.get("params", {})
     reason = data.get("reason", "Approval required by policy")
-    
+
+    if not approval_id:
+        return jsonify({"error": "approval_id is required"}), 400
+
+    org_id = getattr(g, "org_id", None) or "default"
+
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO approval_requests (id, agent_id, tool_name, params, reason, status)
-            VALUES (%s, %s, %s, %s, %s, 'pending')
-            ON CONFLICT (id) DO NOTHING
-        """, (approval_id, agent_id, tool_name, json.dumps(params), reason))
-        conn.commit()
-        
-        # TODO: Ici, tu pourras ajouter l'envoi d'email via smtplib ou Resend
-        logger.warning("approval_request_created", approval_id=approval_id, tool=tool_name)
-        
+        try:
+            if is_postgres():
+                cur.execute("""
+                    INSERT INTO approval_requests (id, org_id, agent_id, tool_name, params, reason, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, 'pending')
+                    ON CONFLICT (id) DO NOTHING
+                """, (approval_id, org_id, agent_id, tool_name, json.dumps(params), reason))
+            else:
+                cur.execute("""
+                    INSERT INTO approval_requests (id, org_id, agent_id, tool_name, params, reason, status)
+                    VALUES (?, ?, ?, ?, ?, ?, 'pending')
+                """, (approval_id, org_id, agent_id, tool_name, json.dumps(params), reason))
+            conn.commit()
+        finally:
+            conn.close()
+
+        logger.warning("approval_request_created", approval_id=approval_id, tool=tool_name, org_id=org_id)
         return jsonify({"status": "success", "approval_id": approval_id}), 201
     except Exception as e:
         logger.error("approval_request_failed", error=str(e))
         return jsonify({"error": str(e)}), 500
-    finally:
-        conn.close()
 
 
 # ═══════════════════════════════════════════════════════════════
-# ALERT RULES (seuils dashboard : token count, coût moyen, forecast)
+# ALERT RULES
 # ═══════════════════════════════════════════════════════════════
 
 @api_bp.route("/api/alert-rules", methods=["GET"])
 def api_list_alert_rules():
-    """Liste les règles d'alerte de l'organisation authentifiée."""
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
@@ -1675,7 +1446,6 @@ def api_list_alert_rules():
 
 @api_bp.route("/api/alert-rules", methods=["POST"])
 def api_create_alert_rule():
-    """Crée une règle d'alerte : { metric, comparison, threshold, label? }."""
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
@@ -1717,7 +1487,6 @@ def api_create_alert_rule():
 
 @api_bp.route("/api/alert-rules/<alert_id>", methods=["DELETE"])
 def api_delete_alert_rule(alert_id):
-    """Supprime une règle d'alerte, scopée à l'organisation authentifiée."""
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
@@ -1733,95 +1502,3 @@ def api_delete_alert_rule(alert_id):
     except Exception as e:
         logger.error("alert_rule_delete_failed", error=str(e), org_id=org_id)
         return jsonify({"error": "Failed to delete alert rule"}), 500
-# ==============================================================================
-# APPROVAL WORKFLOW (Human-in-the-Loop)
-# ==============================================================================
-
-@api_bp.route("/approvals", methods=["POST"])
-def create_approval_request():
-    """Reçue une demande d'approbation depuis le SDK AgentGuard."""
-    data = request.get_json()
-    approval_id = data.get("approval_id")
-    agent_id = data.get("agent_id", "unknown")
-    tool_name = data.get("tool_name")
-    params = data.get("params", {})
-    reason = data.get("reason", "Approval required by policy")
-    
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO approval_requests (id, agent_id, tool_name, params, reason, status)
-            VALUES (%s, %s, %s, %s, %s, 'pending')
-            ON CONFLICT (id) DO NOTHING
-        """, (approval_id, agent_id, tool_name, json.dumps(params), reason))
-        conn.commit()
-        
-        logger.warning("approval_request_created", approval_id=approval_id, tool=tool_name)
-        return jsonify({"status": "success", "approval_id": approval_id}), 201
-    except Exception as e:
-        logger.error("approval_request_failed", error=str(e))
-        return jsonify({"error": str(e)}), 500
-    finally:
-        conn.close()
-
-
-@api_bp.route("/approvals", methods=["GET"])
-def get_pending_approvals():
-    """Récupère les demandes en attente pour le dashboard."""
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT id, agent_id, tool_name, params, reason, created_at 
-            FROM approval_requests 
-            WHERE status = 'pending' 
-            ORDER BY created_at DESC
-        """)
-        rows = cur.fetchall()
-        
-        approvals = []
-        for row in rows:
-            approvals.append({
-                "id": row[0],
-                "agent_id": row[1],
-                "tool_name": row[2],
-                "params": row[3],
-                "reason": row[4],
-                "created_at": row[5].isoformat() if row[5] else None
-            })
-            
-        return jsonify({"approvals": approvals}), 200
-    except Exception as e:
-        logger.error("get_approvals_failed", error=str(e))
-        return jsonify({"error": str(e)}), 500
-    finally:
-        conn.close()
-
-
-@api_bp.route("/approvals/<approval_id>/<action>", methods=["POST"])
-def resolve_approval(approval_id, action):
-    """Approuve ou rejette une demande d'approbation."""
-    if action not in ('approve', 'reject'):
-        return jsonify({"error": "Invalid action"}), 400
-    
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        status = 'approved' if action == 'approve' else 'rejected'
-        cur.execute("""
-            UPDATE approval_requests 
-            SET status = %s, resolved_at = CURRENT_TIMESTAMP
-            WHERE id = %s AND status = 'pending'
-        """, (status, approval_id))
-        conn.commit()
-        
-        if cur.rowcount == 0:
-            return jsonify({"error": "Approval not found or already resolved"}), 404
-            
-        return jsonify({"status": "success"}), 200
-    except Exception as e:
-        logger.error("resolve_approval_failed", error=str(e))
-        return jsonify({"error": str(e)}), 500
-    finally:
-        conn.close()
