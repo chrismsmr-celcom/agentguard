@@ -1161,31 +1161,66 @@ def decide():
 
 @api_bp.route("/api/approvals", methods=["GET"], endpoint="api_list_approvals")
 def api_list_approvals():
-    """List approval requests for the authenticated organization."""
+    """Liste les demandes d'approbation en attente."""
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
-    org_id = getattr(g, "org_id", None)
-    if not org_id:
-        return jsonify({"error": "Organization context required"}), 400
-
-    status = request.args.get("status")
+    org_id = getattr(g, "org_id", None) or "default"
+    status = request.args.get("status", "pending")
     limit = request.args.get("limit", 50)
 
     try:
         limit = int(limit)
     except (TypeError, ValueError):
-        return jsonify({"error": "limit must be an integer"}), 400
-
-    if status and status not in {"pending", "approved", "rejected", "expired"}:
-        return jsonify({"error": "Invalid approval status"}), 400
+        limit = 50
 
     try:
-        approvals = list_approvals(org_id=org_id, status=status, limit=limit)
-        return jsonify({"approvals": approvals, "count": len(approvals)}), 200
+        conn = get_db()
+        cur = conn.cursor()
+        try:
+            if is_postgres():
+                cur.execute("""
+                    SELECT id, agent_id, tool_name, params, reason, created_at
+                    FROM approval_requests
+                    WHERE org_id = %s AND status = %s
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                """, (org_id, status, limit))
+            else:
+                cur.execute("""
+                    SELECT id, agent_id, tool_name, params, reason, created_at
+                    FROM approval_requests
+                    WHERE org_id = ? AND status = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                """, (org_id, status, limit))
+
+            rows = cur.fetchall()
+            approvals = []
+            for row in rows:
+                created_at = row[5]
+                if hasattr(created_at, 'isoformat'):
+                    created_at = created_at.isoformat()
+                else:
+                    created_at = str(created_at)
+
+                approvals.append({
+                    "id": row[0],
+                    "agent_id": row[1],
+                    "tool_name": row[2],
+                    "params": row[3],
+                    "reason": row[4],
+                    "created_at": created_at
+                })
+            return jsonify({"approvals": approvals, "count": len(approvals)}), 200
+            
+        finally:
+            conn.close()
+            
     except Exception as e:
         logger.error("approval_list_failed", error=str(e), org_id=org_id)
-        return jsonify({"error": "Failed to list approvals"}), 500
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+
 
 
 @api_bp.route("/api/approvals/<approval_id>", methods=["GET"], endpoint="api_get_approval")
@@ -1210,126 +1245,86 @@ def api_get_approval(approval_id):
 
 @api_bp.route("/api/approvals/<approval_id>/approve", methods=["POST"], endpoint="api_approve_approval")
 def api_approve_approval(approval_id):
-    """Approve a pending tool action."""
+    """Approuve une demande d'approbation."""
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
-    org_id = getattr(g, "org_id", None)
-    if not org_id:
-        return jsonify({"error": "Organization context required"}), 400
-
-    data = request.get_json(silent=True) or {}
-    decision_reason = data.get("reason")
-    decided_by = (
-        getattr(g, "user_id", None)
-        or getattr(g, "identity_id", None)
-        or getattr(g, "email", None)
-        or f"org:{org_id}"
-    )
+    org_id = getattr(g, "org_id", None) or "default"
+    decided_by = getattr(g, "user_id", None) or getattr(g, "email", None) or f"org:{org_id}"
 
     try:
-        approval = approve_approval(
-            approval_id,
-            decided_by=str(decided_by),
-            decision_reason=decision_reason,
-            org_id=org_id,
-        )
-
+        conn = get_db()
+        cur = conn.cursor()
         try:
-            from collector.audit_routes import get_audit_log, AuditEventType
-            audit = get_audit_log()
-            if audit:
-                audit.log_event(
-                    event_type=getattr(AuditEventType, "APPROVAL_GRANTED", AuditEventType.SPAN_INGESTED),
-                    org_id=org_id,
-                    actor=str(decided_by),
-                    resource=f"approval:{approval_id}",
-                    action="approved",
-                    details={
-                        "approval_id": approval_id,
-                        "tool_name": approval.get("tool_name"),
-                        "agent_id": approval.get("agent_id"),
-                        "trace_id": approval.get("trace_id"),
-                        "decision_reason": decision_reason,
-                    },
-                    risk_level="high",
-                )
-        except Exception as audit_error:
-            logger.warning("approval_audit_failed", error=str(audit_error), approval_id=approval_id)
-
-        return jsonify({"status": "approved", "approval": approval}), 200
-    except KeyError:
-        return jsonify({"error": "Approval not found"}), 404
-    except ValueError as e:
-        message = str(e)
-        if "expired" in message.lower():
-            return jsonify({"error": "Approval expired", "status": "expired"}), 409
-        return jsonify({"error": message}), 409
+            if is_postgres():
+                cur.execute("""
+                    UPDATE approval_requests
+                    SET status = 'approved', resolved_at = CURRENT_TIMESTAMP, resolved_by = %s
+                    WHERE id = %s AND org_id = %s AND status = 'pending'
+                """, (decided_by, approval_id, org_id))
+            else:
+                cur.execute("""
+                    UPDATE approval_requests
+                    SET status = 'approved', resolved_at = CURRENT_TIMESTAMP, resolved_by = ?
+                    WHERE id = ? AND org_id = ? AND status = 'pending'
+                """, (decided_by, approval_id, org_id))
+            
+            conn.commit()
+            
+            if cur.rowcount == 0:
+                return jsonify({"error": "Approval not found or already resolved"}), 404
+            
+            return jsonify({"status": "approved", "approval_id": approval_id}), 200
+            
+        finally:
+            conn.close()
+            
     except Exception as e:
         logger.error("approval_approve_failed", error=str(e), approval_id=approval_id, org_id=org_id)
-        return jsonify({"error": "Failed to approve request"}), 500
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+
 
 
 @api_bp.route("/api/approvals/<approval_id>/reject", methods=["POST"], endpoint="api_reject_approval")
 def api_reject_approval(approval_id):
-    """Reject a pending tool action."""
+    """Rejette une demande d'approbation."""
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
-    org_id = getattr(g, "org_id", None)
-    if not org_id:
-        return jsonify({"error": "Organization context required"}), 400
-
-    data = request.get_json(silent=True) or {}
-    decision_reason = data.get("reason")
-    decided_by = (
-        getattr(g, "user_id", None)
-        or getattr(g, "identity_id", None)
-        or getattr(g, "email", None)
-        or f"org:{org_id}"
-    )
+    org_id = getattr(g, "org_id", None) or "default"
+    decided_by = getattr(g, "user_id", None) or getattr(g, "email", None) or f"org:{org_id}"
 
     try:
-        approval = reject_approval(
-            approval_id,
-            decided_by=str(decided_by),
-            decision_reason=decision_reason,
-            org_id=org_id,
-        )
-
+        conn = get_db()
+        cur = conn.cursor()
         try:
-            from collector.audit_routes import get_audit_log, AuditEventType
-            audit = get_audit_log()
-            if audit:
-                audit.log_event(
-                    event_type=getattr(AuditEventType, "APPROVAL_REJECTED", AuditEventType.SPAN_INGESTED),
-                    org_id=org_id,
-                    actor=str(decided_by),
-                    resource=f"approval:{approval_id}",
-                    action="rejected",
-                    details={
-                        "approval_id": approval_id,
-                        "tool_name": approval.get("tool_name"),
-                        "agent_id": approval.get("agent_id"),
-                        "trace_id": approval.get("trace_id"),
-                        "decision_reason": decision_reason,
-                    },
-                    risk_level="high",
-                )
-        except Exception as audit_error:
-            logger.warning("approval_audit_failed", error=str(audit_error), approval_id=approval_id)
-
-        return jsonify({"status": "rejected", "approval": approval}), 200
-    except KeyError:
-        return jsonify({"error": "Approval not found"}), 404
-    except ValueError as e:
-        message = str(e)
-        if "expired" in message.lower():
-            return jsonify({"error": "Approval expired", "status": "expired"}), 409
-        return jsonify({"error": message}), 409
+            if is_postgres():
+                cur.execute("""
+                    UPDATE approval_requests
+                    SET status = 'rejected', resolved_at = CURRENT_TIMESTAMP, resolved_by = %s
+                    WHERE id = %s AND org_id = %s AND status = 'pending'
+                """, (decided_by, approval_id, org_id))
+            else:
+                cur.execute("""
+                    UPDATE approval_requests
+                    SET status = 'rejected', resolved_at = CURRENT_TIMESTAMP, resolved_by = ?
+                    WHERE id = ? AND org_id = ? AND status = 'pending'
+                """, (decided_by, approval_id, org_id))
+            
+            conn.commit()
+            
+            if cur.rowcount == 0:
+                return jsonify({"error": "Approval not found or already resolved"}), 404
+            
+            return jsonify({"status": "rejected", "approval_id": approval_id}), 200
+            
+        finally:
+            conn.close()
+            
     except Exception as e:
         logger.error("approval_reject_failed", error=str(e), approval_id=approval_id, org_id=org_id)
-        return jsonify({"error": "Failed to reject request"}), 500
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1386,7 +1381,7 @@ def readiness_check():
 def hitl_sdk_create_approval():
     """Reçoit une demande d'approbation depuis le SDK AgentGuard."""
     data = request.get_json() or {}
-    approval_id = data.get("approval_id")
+    approval_id = data.get("approval_id") or data.get("id")
     agent_id = data.get("agent_id", "unknown")
     tool_name = data.get("tool_name")
     params = data.get("params", {})
