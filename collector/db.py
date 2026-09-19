@@ -54,10 +54,10 @@ class _PooledConnProxy:
 
     __slots__ = ("_conn", "_pool", "_returned")
 
-    def __init__(delf, conn, pool):
-        object.__setattr__(delf, "_conn", conn)
-        object.__setattr__(delf, "_pool", pool)
-        object.__setattr__(delf, "_returned", False)
+    def __init__(self, conn, pool):
+        object.__setattr__(self, "_conn", conn)
+        object.__setattr__(self, "_pool", pool)
+        object.__setattr__(self, "_returned", False)
 
     def close(self):
         if self._returned:
@@ -477,10 +477,11 @@ def init_db():
                 except Exception:
                     conn.rollback()
 
-            # NOUVEAU : Table pour les demandes d'approbation humaine (HITL)
+            # NOUVEAU : Table pour les demandes d'approbation humaine (HITL) avec org_id
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS approval_requests (
                     id TEXT PRIMARY KEY,
+                    org_id TEXT DEFAULT 'default',
                     agent_id TEXT,
                     tool_name TEXT,
                     params JSONB,
@@ -554,10 +555,11 @@ def init_db():
                 except sqlite3.OperationalError:
                     pass
 
-            # NOUVEAU : Table pour les demandes d'approbation humaine (HITL) - SQLite
+            # NOUVEAU : Table pour les demandes d'approbation humaine (HITL) - SQLite avec org_id
             c.execute("""
                 CREATE TABLE IF NOT EXISTS approval_requests (
                     id TEXT PRIMARY KEY,
+                    org_id TEXT DEFAULT 'default',
                     agent_id TEXT,
                     tool_name TEXT,
                     params TEXT,
