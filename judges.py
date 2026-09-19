@@ -302,6 +302,8 @@ class LlamaGuardJudge:
     def evaluate(self, text: str) -> JudgeResult:
         start = time.time()
         text = (text or "").strip()
+        # Scrub AVANT troncature/envoi — voir _scrub_before_external_call.
+        text = _scrub_before_external_call(text)
         
         if not self.enabled:
             return JudgeResult("llama_guard", JudgeVerdict.UNAVAILABLE, 0.0, latency_ms=0)
@@ -474,7 +476,10 @@ class TripleJudge:
         # Sinon : cas ambigu → DeepSeek en tie-breaker
         if self._deepseek_fn:
             try:
-                ds_result = self._deepseek_fn(text)
+                # `_deepseek_fn` est un callback fourni par l'appelant : on ne
+                # contrôle pas son implémentation, donc on scrub nous-mêmes
+                # avant de lui passer le texte.
+                ds_result = self._deepseek_fn(_scrub_before_external_call(text))
                 judges_results["deepseek"] = ds_result.to_dict() if hasattr(ds_result, "to_dict") else ds_result
                 
                 if ds_result.verdict != JudgeVerdict.UNAVAILABLE:
