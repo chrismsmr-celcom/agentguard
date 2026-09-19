@@ -37,11 +37,54 @@ class PolicyEngine:
             except Exception:
                 self._redis_client = None
 
-        self._allowed_tools = set()
+        # Whitelists d'outils : une entrée "tool_whitelist" sans "agent_id"
+        # ni "agents" est globale (s'applique à tout agent). Une entrée
+        # avec "agent_id: X" ou "agents: [X, Y]" ne s'applique qu'à ces
+        # agents-là — c'est ce qui permet à check_tool_policy() de scoper
+        # correctement par agent au lieu d'un seul whitelist plat partagé
+        # par tout le monde.
+        self._allowed_tools_global = set()
+        self._allowed_tools_by_agent: Dict[str, set] = {}
         for policy in self.policies:
             if policy.get("type") == "tool_whitelist":
-                self._allowed_tools.update(policy.get("allowed_tools", []))
+                tools = set(policy.get("allowed_tools", []))
+                scoped_agents = policy.get("agents")
+                if not scoped_agents and policy.get("agent_id"):
+                    scoped_agents = [policy["agent_id"]]
+                if scoped_agents:
+                    for agent in scoped_agents:
+                        self._allowed_tools_by_agent.setdefault(agent, set()).update(tools)
+                else:
+                    self._allowed_tools_global.update(tools)
         self._triple_judge = None
+
+    @property
+    def _allowed_tools(self) -> set:
+        """Vue à plat de toutes les whitelists (global + tous les agents).
+
+        Conservée pour compatibilité : ex. mcp/mcp_server.py l'utilise pour
+        afficher un résumé des politiques actives. Ne PAS utiliser pour une
+        décision de sécurité — check_tool_policy() utilise le scoping par
+        agent_id, plus strict, et c'est lui qui fait foi.
+        """
+        merged = set(self._allowed_tools_global)
+        for tools in self._allowed_tools_by_agent.values():
+            merged.update(tools)
+        return merged
+
+    def _effective_whitelist(self, agent_id: Optional[str]) -> set:
+        """Whitelist applicable à un agent donné.
+
+        Un agent avec sa propre whitelist scopée est régi par elle (plus
+        les entrées globales, qui s'appliquent à tous). Un agent sans
+        whitelist scopée hérite seulement des entrées globales — s'il n'y
+        en a aucune, l'ensemble est vide et check_tool_policy() n'impose
+        aucune restriction (comportement historique conservé).
+        """
+        scoped = self._allowed_tools_by_agent.get(agent_id, set()) if agent_id else set()
+        if scoped:
+            return scoped | self._allowed_tools_global
+        return set(self._allowed_tools_global)
 
     def _compile_patterns(self):
         if PolicyEngine._STRONG_PATTERNS is not None:
@@ -98,9 +141,11 @@ class PolicyEngine:
             )
         return SecurityCheck("budget_policy", True, RiskLevel.LOW, "Budget OK")
 
-    def check_tool_policy(self, tool_name: str, params: Dict[str, Any], budget_remaining: float) -> SecurityCheck:
-        if self._allowed_tools and tool_name not in self._allowed_tools:
-            return SecurityCheck("tool_policy", False, RiskLevel.CRITICAL, f"Tool '{tool_name}' not in whitelist", {}, SecurityAction.BLOCK)
+    def check_tool_policy(self, tool_name: str, params: Dict[str, Any], budget_remaining: float, agent_id: Optional[str] = None) -> SecurityCheck:
+        effective_whitelist = self._effective_whitelist(agent_id)
+        if effective_whitelist and tool_name not in effective_whitelist:
+            scope = f"agent '{agent_id}'" if agent_id else "default scope"
+            return SecurityCheck("tool_policy", False, RiskLevel.CRITICAL, f"Tool '{tool_name}' not in whitelist for {scope}", {"agent_id": agent_id}, SecurityAction.BLOCK)
         if budget_remaining < 0:
             return SecurityCheck("budget_policy", False, RiskLevel.HIGH, "Budget exceeded", {}, SecurityAction.BLOCK)
         
@@ -162,4 +207,3 @@ class PolicyEngine:
         if dangerous.search(command):
             return SecurityCheck("tool_policy", False, RiskLevel.CRITICAL, "Dangerous command pattern", {}, SecurityAction.BLOCK)
         return SecurityCheck("tool_policy", True, RiskLevel.LOW, "Command approved")
-
