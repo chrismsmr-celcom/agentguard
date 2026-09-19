@@ -1285,6 +1285,11 @@ def api_reject_approval(approval_id):
 
 @api_bp.route("/api/approvals", methods=["POST"], endpoint="api_sdk_create_approval")
 def hitl_sdk_create_approval():
+    # Sans require_auth(), g.org_id n'est jamais posé -> toutes les demandes
+    # tombaient dans l'org 'default', invisibles pour le dashboard du client.
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+
     data = request.get_json() or {}
     approval_id = data.get("approval_id") or data.get("id")
     agent_id = data.get("agent_id", "unknown")
