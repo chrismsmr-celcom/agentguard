@@ -662,7 +662,7 @@ function loadAlertRulesForModal() {
             return '<div class="alert-rule-row"><span>' +
                 (r.comparison === 'above' ? 'au-dessus de ' : 'en-dessous de ') +
                 esc(String(r.threshold)) + '</span>' +
-                '<button onclick="deleteAlertRuleUI(\\'' + r.alert_id + '\\')" title="Supprimer">×</button></div>';
+                '<button onclick="deleteAlertRuleUI(\'' + r.alert_id + '\')" title="Supprimer">×</button></div>';
         }).join('');
     }).catch(function() {
         box.innerHTML = '<p style="color:#f87171;font-size:12px">Impossible de charger les alertes.</p>';
@@ -1694,8 +1694,8 @@ if (!document.hidden) {
             '<div style="color:#aaa;font-size:12px;margin-top:4px">Raison : ' + esc(app.reason || '—') + '</div>' +
             (argsPreview ? '<div style="color:#777;font-size:11px;margin-top:4px;font-family:monospace;word-break:break-all">' + esc(argsPreview) + '</div>' : '') +
             '<div style="margin-top:10px;display:flex;gap:8px">' +
-                '<button onclick="resolveApproval(\\'' + app.id + '\\', \\'approve\\')" style="background:#10b981;color:#fff;border:0;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:600">Approuver</button>' +
-                '<button onclick="resolveApproval(\\'' + app.id + '\\', \\'reject\\')" style="background:#ef4444;color:#fff;border:0;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:600">Rejeter</button>' +
+                '<button onclick="resolveApproval(\'' + app.id + '\', \'approve\')" style="background:#10b981;color:#fff;border:0;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:600">Approuver</button>' +
+                '<button onclick="resolveApproval(\'' + app.id + '\', \'reject\')" style="background:#ef4444;color:#fff;border:0;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:600">Rejeter</button>' +
             '</div>' +
         '</div>';
     }).join('');
