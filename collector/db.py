@@ -12,7 +12,7 @@ from typing import Tuple, Optional, Any
 logger = structlog.get_logger("agentguard.db")
 
 # ═══════════════════════════════════════════════════════════════
-# POSTGRES CONNECTION POOL (Resilient to Render sleep/wake cycles)
+# POSTGRES CONNECTION POOL
 # ═══════════════════════════════════════════════════════════════
 
 _PG_POOL = None
@@ -35,11 +35,11 @@ def _get_pg_pool():
                     database_url,
                     min_size=1,
                     max_size=int(os.environ.get("AGENTGUARD_DB_POOL_MAX", "5")),
-                    timeout=15,  # Augmenté à 15s pour laisser le temps à Render de réveiller la DB
-                    max_lifetime=1800,  # Recycle les connexions toutes les 30 min (évite les connexions zombies)
-                    max_idle=300,  # Ferme les connexions inactives après 5 min
-                    reconnect_timeout=30,  # Attend jusqu'à 30s si la DB est temporairement indisponible
-                    check=ConnectionPool.check_connection,  # CRUCIAL : vérifie que la connexion est vivante avant de la donner
+                    timeout=15,
+                    max_lifetime=1800,
+                    max_idle=300,
+                    reconnect_timeout=30,
+                    check=ConnectionPool.check_connection,
                     open=True,
                 )
                 logger.info(
@@ -50,8 +50,6 @@ def _get_pg_pool():
 
 
 class _PooledConnProxy:
-    """Proxy d'une connexion psycopg provenant d'un pool."""
-
     __slots__ = ("_conn", "_pool", "_returned")
 
     def __init__(self, conn, pool):
@@ -62,16 +60,13 @@ class _PooledConnProxy:
     def close(self):
         if self._returned:
             return
-
         try:
             if not self._conn.closed:
                 try:
                     self._conn.rollback()
                 except Exception:
                     logger.warning("pg_connection_rollback_failed", exc_info=True)
-
             self._pool.putconn(self._conn)
-
         except Exception:
             logger.warning("pg_pool_putconn_failed", exc_info=True)
             try:
@@ -79,7 +74,6 @@ class _PooledConnProxy:
                     self._conn.close()
             except Exception:
                 logger.warning("pg_connection_close_failed", exc_info=True)
-
         finally:
             object.__setattr__(self, "_returned", True)
 
@@ -95,7 +89,6 @@ class _PooledConnProxy:
                 self._conn.rollback()
             except Exception:
                 logger.warning("pg_connection_context_rollback_failed", exc_info=True)
-
         self.close()
         return False
 
@@ -105,38 +98,27 @@ class _PooledConnProxy:
 # ═══════════════════════════════════════════════════════════════
 
 def _get_db_config() -> Tuple[str, str]:
-    """Get database type and URL from environment."""
     db_type = os.environ.get("AGENTGUARD_DB_TYPE", "sqlite")
     database_url = os.environ.get("DATABASE_URL", "")
     return db_type, database_url
 
 
 def _get_db_path() -> str:
-    """Get SQLite DB path dynamically."""
     return os.environ.get("AGENTGUARD_DB_PATH", "/tmp/agentguard.db")
 
 
 def is_postgres() -> bool:
-    """Check if we're using PostgreSQL."""
     db_type, _ = _get_db_config()
     return db_type == "postgres"
 
 
 def get_pg_conn():
-    """
-    Get a clean PostgreSQL connection from the pool.
-    Includes a fallback to reset the pool if Render's sleep/wake cycle corrupts it.
-    """
     global _PG_POOL
     pool = _get_pg_pool()
-    
     try:
-        # Le paramètre 'check' du pool garantit normalement une connexion vivante
         conn = pool.getconn(timeout=15)
     except Exception as e:
         logger.warning("pg_pool_getconn_failed_attempting_reset", error=str(e))
-        # Fallback nucléaire : si le pool est complètement bloqué (fréquent au réveil Render),
-        # on le ferme et on le recrée.
         try:
             if _PG_POOL:
                 _PG_POOL.close()
@@ -150,12 +132,10 @@ def get_pg_conn():
         conn.rollback()
     except Exception as e:
         logger.warning("pg_connection_rollback_failed_closing", error=str(e))
-        # La connexion est morte, on la ferme et on en demande une nouvelle
         try:
             conn.close()
         except Exception:
             pass
-        
         try:
             conn = pool.getconn(timeout=15)
             conn.rollback()
@@ -167,21 +147,18 @@ def get_pg_conn():
 
 
 def get_sqlite_conn():
-    """Get a SQLite connection with dynamic path lookup."""
     conn = sqlite3.connect(_get_db_path())
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
 def get_conn():
-    """Get a DB connection (SQLite or PostgreSQL)."""
     if is_postgres():
         return get_pg_conn()
     return get_sqlite_conn()
 
 
 def get_db():
-    """Backward compatibility alias for get_conn()."""
     return get_conn()
 
 
@@ -243,7 +220,6 @@ def _redact_string(text: str) -> str:
     text = _PHONE_RE.sub("[REDACTED_PHONE]", text)
     text = _API_KEY_RE.sub("[REDACTED_KEY]", text)
     text = _IPV4_RE.sub("[REDACTED_IP]", text)
-
     text = _AWS_KEY_RE.sub("[REDACTED_AWS_KEY]", text)
     text = _AWS_SECRET_RE.sub("[REDACTED_AWS_SECRET]", text)
     text = _GITHUB_PAT_RE.sub("[REDACTED_GITHUB_PAT]", text)
@@ -263,7 +239,6 @@ def _redact_string(text: str) -> str:
     text = _OPENAI_KEY_RE.sub("[REDACTED_OPENAI_KEY]", text)
     text = _ANTHROPIC_KEY_RE.sub("[REDACTED_ANTHROPIC_KEY]", text)
     text = _GENERIC_SECRET_RE.sub("[REDACTED_GENERIC_SECRET]", text)
-
     return text
 
 
@@ -285,15 +260,10 @@ def redact_pii(data: Any) -> Any:
 # ═══════════════════════════════════════════════════════════════
 
 def _migrate_api_keys_table():
-    """
-    Ensures the api_keys table matches the canonical schema.
-    Migrates legacy data (org_name, plan) to the new schema (name) safely.
-    """
     if is_postgres():
         conn = get_pg_conn()
         cur = conn.cursor()
         try:
-            # 1. Check if table exists
             cur.execute("SELECT 1 FROM information_schema.tables WHERE table_name = 'api_keys'")
             table_exists = cur.fetchone() is not None
 
@@ -420,15 +390,11 @@ def _migrate_api_keys_table():
 # ═══════════════════════════════════════════════════════════════
 
 def init_db():
-    """Initialize all database tables in correct dependency order."""
-    
-    # 1. Core independent tables & API Keys Migration
     if is_postgres():
         conn = get_pg_conn()
         cur = conn.cursor()
         cur.execute("SELECT pg_advisory_lock(727271)")
         try:
-            # SPANS
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS spans (
                     id SERIAL PRIMARY KEY,
@@ -478,24 +444,21 @@ def init_db():
                     conn.rollback()
 
             # Table pour les demandes d'approbation humaine (HITL)
-c.execute("""
-    CREATE TABLE IF NOT EXISTS approval_requests (
-        id TEXT PRIMARY KEY,
-        org_id TEXT DEFAULT 'default',
-        agent_id TEXT,
-        tool_name TEXT,
-        params TEXT,
-        reason TEXT,
-        status TEXT DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        resolved_at TIMESTAMP NULL,
-        resolved_by TEXT NULL
-    )
-""")
-try:
-    c.execute("CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_requests(status)")
-except sqlite3.OperationalError:
-    pass
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS approval_requests (
+                    id TEXT PRIMARY KEY,
+                    org_id TEXT DEFAULT 'default',
+                    agent_id TEXT,
+                    tool_name TEXT,
+                    params JSONB,
+                    reason TEXT,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    resolved_at TIMESTAMP NULL,
+                    resolved_by TEXT NULL
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_requests(status)")
 
             conn.commit()
         finally:
@@ -558,7 +521,7 @@ except sqlite3.OperationalError:
                 except sqlite3.OperationalError:
                     pass
 
-            # NOUVEAU : Table pour les demandes d'approbation humaine (HITL) - SQLite avec org_id
+            # Table pour les demandes d'approbation humaine (HITL)
             c.execute("""
                 CREATE TABLE IF NOT EXISTS approval_requests (
                     id TEXT PRIMARY KEY,
@@ -582,16 +545,13 @@ except sqlite3.OperationalError:
         finally:
             conn.close()
 
-    # 2. Migrate / Initialize API Keys (Source of Truth)
     _migrate_api_keys_table()
 
-    # 3. Identity Tables (Creates tenants, orgs, users, agents, identity_events)
     try:
         init_identity_tables()
     except Exception as e:
         logger.warning("identity_tables_init_failed", error=str(e))
 
-    # 4. Magic Link Tokens (Depends on 'users' table existing)
     if is_postgres():
         conn = get_pg_conn()
         cur = conn.cursor()
@@ -647,7 +607,6 @@ except sqlite3.OperationalError:
 # ═══════════════════════════════════════════════════════════════
 
 def init_identity_tables():
-    """Initialize identity tables."""
     if is_postgres():
         conn = get_pg_conn()
         cur = conn.cursor()
@@ -798,7 +757,6 @@ def init_identity_tables():
 # ═══════════════════════════════════════════════════════════════
 
 def resolve_agent_identity(api_key: str) -> Optional[dict]:
-    """Resolve an agent API key to its identity."""
     if not api_key or not api_key.startswith("ag_"):
         return None
 
@@ -850,7 +808,6 @@ def resolve_agent_identity(api_key: str) -> Optional[dict]:
 
 
 def _hash_key(key: str) -> str:
-    """Hash an API key with SHA-256."""
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
@@ -859,7 +816,6 @@ def _hash_key(key: str) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 def dict_from_row(row, cursor=None) -> dict:
-    """Convert a database row to a dict."""
     if row is None:
         return None
     if hasattr(row, "_asdict"):
