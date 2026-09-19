@@ -196,7 +196,7 @@ class AgentGuard:
                 approval_id = f"req_{hashlib.sha256(f'{time.time()}'.encode()).hexdigest()[:8]}"
                 
                 try:
-                    requests.post(
+                    resp = requests.post(
                         f"{self.collector_url}/api/approvals",
                         json={
                             "approval_id": approval_id,
@@ -208,6 +208,8 @@ class AgentGuard:
                         headers=self._headers(),
                         timeout=5
                     )
+                    if resp.status_code >= 400:
+                        logger.warning("collector_rejected_approval", status_code=resp.status_code, body=resp.text[:300])
                 except Exception as e:
                     logger.warning("failed_to_notify_collector_of_approval", error=str(e))
 
@@ -222,25 +224,25 @@ class AgentGuard:
                 self.spans.append(span); self._send_to_collector(span); self._record_trajectory_tool(tool_name, runtime_decision)
                 details = check.details or "policy violation"
 
-metadata = getattr(check, "metadata", {}) or {}
+                metadata = getattr(check, "metadata", {}) or {}
 
-reason_parts = [details]
+                reason_parts = [details]
 
-if metadata.get("taint"):
-    reason_parts.append(f"Taint: {metadata['taint']}")
+                if metadata.get("taint"):
+                    reason_parts.append(f"Taint: {metadata['taint']}")
 
-if metadata.get("secret"):
-    reason_parts.append(f"SECRET: {metadata['secret']}")
+                if metadata.get("secret"):
+                    reason_parts.append(f"SECRET: {metadata['secret']}")
 
-if metadata.get("action"):
-    reason_parts.append(f"Action: {metadata['action']}")
+                if metadata.get("action"):
+                    reason_parts.append(f"Action: {metadata['action']}")
 
-if metadata.get("reason"):
-    reason_parts.append(str(metadata["reason"]))
+                if metadata.get("reason"):
+                    reason_parts.append(str(metadata["reason"]))
 
-raise SecurityException(
-    f"🛡️ Tool blocked: {' | '.join(reason_parts)}"
-)
+                raise SecurityException(
+                    f"🛡️ Tool blocked: {' | '.join(reason_parts)}"
+                )
 
         try: 
             result = func(**params)
