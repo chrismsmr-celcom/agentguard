@@ -477,22 +477,25 @@ def init_db():
                 except Exception:
                     conn.rollback()
 
-            # NOUVEAU : Table pour les demandes d'approbation humaine (HITL) avec org_id
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS approval_requests (
-                    id TEXT PRIMARY KEY,
-                    org_id TEXT DEFAULT 'default',
-                    agent_id TEXT,
-                    tool_name TEXT,
-                    params JSONB,
-                    reason TEXT,
-                    status TEXT DEFAULT 'pending',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    resolved_at TIMESTAMP NULL,
-                    resolved_by TEXT NULL
-                )
-            """)
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_requests(status)")
+            # Table pour les demandes d'approbation humaine (HITL)
+c.execute("""
+    CREATE TABLE IF NOT EXISTS approval_requests (
+        id TEXT PRIMARY KEY,
+        org_id TEXT DEFAULT 'default',
+        agent_id TEXT,
+        tool_name TEXT,
+        params TEXT,
+        reason TEXT,
+        status TEXT DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        resolved_at TIMESTAMP NULL,
+        resolved_by TEXT NULL
+    )
+""")
+try:
+    c.execute("CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_requests(status)")
+except sqlite3.OperationalError:
+    pass
 
             conn.commit()
         finally:
