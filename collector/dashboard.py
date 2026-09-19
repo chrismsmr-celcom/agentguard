@@ -1659,6 +1659,7 @@ if (!document.hidden) {
         // session httpOnly, pas de token dans localStorage (il n'y en a
         // jamais eu — l'ancien code envoyait toujours "Bearer null").
         const data = await api('/api/approvals?status=pending');
+        var _prevCount = _pendingApprovals.length;
         _pendingApprovals = data.approvals || [];
 
         const pill = document.getElementById('approval-pill');
@@ -1667,6 +1668,10 @@ if (!document.hidden) {
         if (_pendingApprovals.length > 0) {
             pill.style.display = 'inline-block';
             count.textContent = _pendingApprovals.length;
+            if (_pendingApprovals.length > _prevCount && $('approvalModal').style.display !== 'flex') {
+                toast('Nouvelle action en attente d\'approbation');
+                openApprovalModal();
+            }
         } else {
             pill.style.display = 'none';
             closeApprovalModal();
