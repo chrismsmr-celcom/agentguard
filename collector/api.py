@@ -21,12 +21,6 @@ from collector.db import (
     sql_false,
     sql_placeholder,
 )
-from collector.approvals import (
-    get_approval,
-    list_approvals,
-    approve_approval,
-    reject_approval,
-)
 from collector.alerts import (
     create_alert_rule,
     list_alert_rules,
@@ -46,12 +40,10 @@ from decision_engine import (
 
 api_bp = Blueprint("api", __name__)
 
-# Single authoritative runtime decision engine.
 decision_engine = DecisionEngine()
 
 
 def get_decision_signer():
-    """Return the process-wide signer used for authoritative decisions."""
     signer = current_app.extensions.get("agentguard_decision_signer")
     if signer is not None:
         return signer
@@ -74,7 +66,6 @@ def get_decision_signer():
 
 
 def is_server_registered_tool(tool_name):
-    """Check tool registration from server-side policy state only."""
     tool_name = str(tool_name or "").strip()
     if not tool_name:
         return False
@@ -96,7 +87,6 @@ def is_server_registered_tool(tool_name):
 
 @api_bp.route("/logo.svg")
 def serve_logo():
-    """Serve AgentGuard logo SVG."""
     static_path = os.path.join(os.path.dirname(__file__), "static")
     try:
         return send_from_directory(static_path, "logo.svg", mimetype="image/svg+xml")
@@ -112,7 +102,6 @@ def serve_logo():
 
 @api_bp.route("/favicon.ico")
 def serve_favicon():
-    """Serve favicon (same logo SVG)."""
     static_path = os.path.join(os.path.dirname(__file__), "static")
     try:
         return send_from_directory(static_path, "logo.svg", mimetype="image/x-icon")
@@ -126,7 +115,6 @@ def serve_favicon():
 
 @api_bp.route("/span", methods=["POST"])
 def receive_span():
-    """Ingestion de span (LLM call ou tool call)."""
     span_rate_limit = current_app.config["SPAN_RATE_LIMIT"]
 
     data = request.get_json(silent=True)
@@ -1156,12 +1144,11 @@ def decide():
 
 
 # ═══════════════════════════════════════════════════════════════
-# HUMAN-IN-THE-LOOP — APPROVALS (sophisticated, via collector.approvals)
+# HUMAN-IN-THE-LOOP — APPROVALS (Simple, unified schema)
 # ═══════════════════════════════════════════════════════════════
 
 @api_bp.route("/api/approvals", methods=["GET"], endpoint="api_list_approvals")
 def api_list_approvals():
-    """Liste les demandes d'approbation en attente."""
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
@@ -1213,39 +1200,15 @@ def api_list_approvals():
                     "created_at": created_at
                 })
             return jsonify({"approvals": approvals, "count": len(approvals)}), 200
-            
         finally:
             conn.close()
-            
     except Exception as e:
         logger.error("approval_list_failed", error=str(e), org_id=org_id)
         return jsonify({"error": f"Database error: {str(e)}"}), 500
 
 
-
-@api_bp.route("/api/approvals/<approval_id>", methods=["GET"], endpoint="api_get_approval")
-def api_get_approval(approval_id):
-    """Get one approval request."""
-    if not require_auth():
-        return jsonify({"error": "Unauthorized"}), 401
-
-    org_id = getattr(g, "org_id", None)
-    if not org_id:
-        return jsonify({"error": "Organization context required"}), 400
-
-    try:
-        approval = get_approval(approval_id, org_id=org_id)
-        if approval is None:
-            return jsonify({"error": "Approval not found"}), 404
-        return jsonify(approval), 200
-    except Exception as e:
-        logger.error("approval_get_failed", error=str(e), approval_id=approval_id, org_id=org_id)
-        return jsonify({"error": "Failed to retrieve approval"}), 500
-
-
 @api_bp.route("/api/approvals/<approval_id>/approve", methods=["POST"], endpoint="api_approve_approval")
 def api_approve_approval(approval_id):
-    """Approuve une demande d'approbation."""
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
@@ -1274,20 +1237,16 @@ def api_approve_approval(approval_id):
             if cur.rowcount == 0:
                 return jsonify({"error": "Approval not found or already resolved"}), 404
             
-            return jsonify({"status": "approved", "approval_id": approval_id}), 200
-            
+            return jsonify({"status": "approved", "id": approval_id}), 200
         finally:
             conn.close()
-            
     except Exception as e:
         logger.error("approval_approve_failed", error=str(e), approval_id=approval_id, org_id=org_id)
         return jsonify({"error": f"Database error: {str(e)}"}), 500
 
 
-
 @api_bp.route("/api/approvals/<approval_id>/reject", methods=["POST"], endpoint="api_reject_approval")
 def api_reject_approval(approval_id):
-    """Rejette une demande d'approbation."""
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
@@ -1316,15 +1275,52 @@ def api_reject_approval(approval_id):
             if cur.rowcount == 0:
                 return jsonify({"error": "Approval not found or already resolved"}), 404
             
-            return jsonify({"status": "rejected", "approval_id": approval_id}), 200
-            
+            return jsonify({"status": "rejected", "id": approval_id}), 200
         finally:
             conn.close()
-            
     except Exception as e:
         logger.error("approval_reject_failed", error=str(e), approval_id=approval_id, org_id=org_id)
         return jsonify({"error": f"Database error: {str(e)}"}), 500
 
+
+@api_bp.route("/api/approvals", methods=["POST"], endpoint="api_sdk_create_approval")
+def hitl_sdk_create_approval():
+    data = request.get_json() or {}
+    approval_id = data.get("approval_id") or data.get("id")
+    agent_id = data.get("agent_id", "unknown")
+    tool_name = data.get("tool_name")
+    params = data.get("params", {})
+    reason = data.get("reason", "Approval required by policy")
+
+    if not approval_id:
+        return jsonify({"error": "approval_id is required"}), 400
+
+    org_id = getattr(g, "org_id", None) or "default"
+
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        try:
+            if is_postgres():
+                cur.execute("""
+                    INSERT INTO approval_requests (id, org_id, agent_id, tool_name, params, reason, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, 'pending')
+                    ON CONFLICT (id) DO NOTHING
+                """, (approval_id, org_id, agent_id, tool_name, json.dumps(params), reason))
+            else:
+                cur.execute("""
+                    INSERT INTO approval_requests (id, org_id, agent_id, tool_name, params, reason, status)
+                    VALUES (?, ?, ?, ?, ?, ?, 'pending')
+                """, (approval_id, org_id, agent_id, tool_name, json.dumps(params), reason))
+            conn.commit()
+        finally:
+            conn.close()
+
+        logger.warning("approval_request_created", approval_id=approval_id, tool=tool_name, org_id=org_id)
+        return jsonify({"status": "success", "id": approval_id}), 201
+    except Exception as e:
+        logger.error("approval_request_failed", error=str(e))
+        return jsonify({"error": str(e)}), 500
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1368,54 +1364,6 @@ def health_check():
 @api_bp.route("/readiness", methods=["GET"])
 def readiness_check():
     return jsonify({"ready": True, "timestamp": datetime.utcnow().isoformat()}), 200
-
-
-# ═══════════════════════════════════════════════════════════════
-# APPROVAL INGESTION (SDK → Backend)
-# ═══════════════════════════════════════════════════════════════
-# Cette route est appelée par le SDK AgentGuard quand une action
-# nécessite une approbation humaine. Elle crée une entrée dans
-# la table approval_requests pour que le dashboard puisse l'afficher.
-
-@api_bp.route("/api/approvals", methods=["POST"], endpoint="api_sdk_create_approval")
-def hitl_sdk_create_approval():
-    """Reçoit une demande d'approbation depuis le SDK AgentGuard."""
-    data = request.get_json() or {}
-    approval_id = data.get("approval_id") or data.get("id")
-    agent_id = data.get("agent_id", "unknown")
-    tool_name = data.get("tool_name")
-    params = data.get("params", {})
-    reason = data.get("reason", "Approval required by policy")
-
-    if not approval_id:
-        return jsonify({"error": "approval_id is required"}), 400
-
-    org_id = getattr(g, "org_id", None) or "default"
-
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        try:
-            if is_postgres():
-                cur.execute("""
-                    INSERT INTO approval_requests (id, org_id, agent_id, tool_name, params, reason, status)
-                    VALUES (%s, %s, %s, %s, %s, %s, 'pending')
-                    ON CONFLICT (id) DO NOTHING
-                """, (approval_id, org_id, agent_id, tool_name, json.dumps(params), reason))
-            else:
-                cur.execute("""
-                    INSERT INTO approval_requests (id, org_id, agent_id, tool_name, params, reason, status)
-                    VALUES (?, ?, ?, ?, ?, ?, 'pending')
-                """, (approval_id, org_id, agent_id, tool_name, json.dumps(params), reason))
-            conn.commit()
-        finally:
-            conn.close()
-
-        logger.warning("approval_request_created", approval_id=approval_id, tool=tool_name, org_id=org_id)
-        return jsonify({"status": "success", "approval_id": approval_id}), 201
-    except Exception as e:
-        logger.error("approval_request_failed", error=str(e))
-        return jsonify({"error": str(e)}), 500
 
 
 # ═══════════════════════════════════════════════════════════════
