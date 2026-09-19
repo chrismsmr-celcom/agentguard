@@ -1688,14 +1688,14 @@ if (!document.hidden) {
     }
     list.innerHTML = _pendingApprovals.map(function(app) {
         var argsPreview = '';
-        try { argsPreview = JSON.stringify(app.arguments).substring(0, 160); } catch (e) { argsPreview = ''; }
+        try { argsPreview = JSON.stringify(app.params).substring(0, 160); } catch (e) { argsPreview = ''; }
         return '<div style="border:1px solid #333;border-radius:8px;padding:12px;margin-bottom:10px;background:#151515">' +
             '<div><strong>' + esc(app.tool_name || '') + '</strong> — agent <em>' + esc(app.agent_id || '') + '</em></div>' +
             '<div style="color:#aaa;font-size:12px;margin-top:4px">Raison : ' + esc(app.reason || '—') + '</div>' +
             (argsPreview ? '<div style="color:#777;font-size:11px;margin-top:4px;font-family:monospace;word-break:break-all">' + esc(argsPreview) + '</div>' : '') +
             '<div style="margin-top:10px;display:flex;gap:8px">' +
-                '<button onclick="resolveApproval(\\'' + app.approval_id + '\\', \\'approve\\')" style="background:#10b981;color:#fff;border:0;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:600">Approuver</button>' +
-                '<button onclick="resolveApproval(\\'' + app.approval_id + '\\', \\'reject\\')" style="background:#ef4444;color:#fff;border:0;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:600">Rejeter</button>' +
+                '<button onclick="resolveApproval(\\'' + app.id + '\\', \\'approve\\')" style="background:#10b981;color:#fff;border:0;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:600">Approuver</button>' +
+                '<button onclick="resolveApproval(\\'' + app.id + '\\', \\'reject\\')" style="background:#ef4444;color:#fff;border:0;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:600">Rejeter</button>' +
             '</div>' +
         '</div>';
     }).join('');
