@@ -1144,7 +1144,7 @@ def decide():
 
 
 # ═══════════════════════════════════════════════════════════════
-# HUMAN-IN-THE-LOOP — APPROVALS (Simple, unified schema)
+# HITL — File d'attente d'approbations (Version blindée)
 # ═══════════════════════════════════════════════════════════════
 
 @api_bp.route("/api/approvals", methods=["GET"], endpoint="api_list_approvals")
@@ -1154,54 +1154,81 @@ def api_list_approvals():
 
     org_id = getattr(g, "org_id", None) or "default"
     status = request.args.get("status", "pending")
-    limit = request.args.get("limit", 50)
-
+    
     try:
-        limit = int(limit)
+        limit = max(1, min(int(request.args.get("limit", 50)), 200))
     except (TypeError, ValueError):
         limit = 50
+
+    # Construction explicite de la requête pour éviter tout bug de remplacement de paramètres
+    if is_postgres():
+        where = "org_id = %s"
+        params = [org_id]
+        if status in ("pending", "approved", "rejected"):
+            where += " AND status = %s"
+            params.append(status)
+        elif status == "history":
+            where += " AND status <> 'pending'"
+        elif status != "all":
+            return jsonify({"error": "Invalid status"}), 400
+        
+        order = "created_at ASC" if status == "pending" else "COALESCE(resolved_at, created_at) DESC"
+        sql = f"SELECT id, agent_id, tool_name, params, reason, created_at, status, resolved_at, resolved_by FROM approval_requests WHERE {where} ORDER BY {order} LIMIT %s"
+        params.append(limit)
+        
+        count_sql = "SELECT status, COUNT(*) FROM approval_requests WHERE org_id = %s GROUP BY status"
+        count_params = (org_id,)
+    else:
+        where = "org_id = ?"
+        params = [org_id]
+        if status in ("pending", "approved", "rejected"):
+            where += " AND status = ?"
+            params.append(status)
+        elif status == "history":
+            where += " AND status <> 'pending'"
+        elif status != "all":
+            return jsonify({"error": "Invalid status"}), 400
+            
+        order = "created_at ASC" if status == "pending" else "COALESCE(resolved_at, created_at) DESC"
+        sql = f"SELECT id, agent_id, tool_name, params, reason, created_at, status, resolved_at, resolved_by FROM approval_requests WHERE {where} ORDER BY {order} LIMIT ?"
+        params.append(limit)
+        
+        count_sql = "SELECT status, COUNT(*) FROM approval_requests WHERE org_id = ? GROUP BY status"
+        count_params = (org_id,)
 
     try:
         conn = get_db()
         cur = conn.cursor()
         try:
-            if is_postgres():
-                cur.execute("""
-                    SELECT id, agent_id, tool_name, params, reason, created_at
-                    FROM approval_requests
-                    WHERE org_id = %s AND status = %s
-                    ORDER BY created_at DESC
-                    LIMIT %s
-                """, (org_id, status, limit))
-            else:
-                cur.execute("""
-                    SELECT id, agent_id, tool_name, params, reason, created_at
-                    FROM approval_requests
-                    WHERE org_id = ? AND status = ?
-                    ORDER BY created_at DESC
-                    LIMIT ?
-                """, (org_id, status, limit))
-
+            cur.execute(sql, tuple(params))
             rows = cur.fetchall()
-            approvals = []
-            for row in rows:
-                created_at = row[5]
-                if hasattr(created_at, 'isoformat'):
-                    created_at = created_at.isoformat()
-                else:
-                    created_at = str(created_at)
-
-                approvals.append({
-                    "id": row[0],
-                    "agent_id": row[1],
-                    "tool_name": row[2],
-                    "params": row[3],
-                    "reason": row[4],
-                    "created_at": created_at
-                })
-            return jsonify({"approvals": approvals, "count": len(approvals)}), 200
+            
+            cur.execute(count_sql, count_params)
+            count_rows = cur.fetchall()
         finally:
             conn.close()
+            
+        counts = {"pending": 0, "approved": 0, "rejected": 0}
+        for st, n in count_rows:
+            if st in counts:
+                counts[st] = int(n)
+                
+        approvals = []
+        for r in rows:
+            approvals.append({
+                "id": r[0],
+                "agent_id": r[1],
+                "tool_name": r[2],
+                "params": _as_json(r[3], {}),
+                "reason": r[4],
+                "created_at": _iso_utc(r[5]),
+                "status": r[6],
+                "resolved_at": _iso_utc(r[7]),
+                "resolved_by": r[8],
+            })
+            
+        return jsonify({"approvals": approvals, "count": len(approvals), "counts": counts}), 200
+        
     except Exception as e:
         logger.error("approval_list_failed", error=str(e), org_id=org_id)
         return jsonify({"error": f"Database error: {str(e)}"}), 500
@@ -1209,12 +1236,12 @@ def api_list_approvals():
 
 @api_bp.route("/api/approvals/<approval_id>/approve", methods=["POST"], endpoint="api_approve_approval")
 def api_approve_approval(approval_id):
-    if not require_auth():
-        return jsonify({"error": "Unauthorized"}), 401
-
-    org_id = getattr(g, "org_id", None) or "default"
-    decided_by = getattr(g, "user_id", None) or getattr(g, "email", None) or f"org:{org_id}"
-
+    if not require_human_auth():
+        return jsonify({"error": "Human session required"}), 401
+        
+    org_id = g.org_id
+    decided_by = getattr(g, "human_email", None) or f"org:{org_id}"
+    
     try:
         conn = get_db()
         cur = conn.cursor()
@@ -1231,28 +1258,25 @@ def api_approve_approval(approval_id):
                     SET status = 'approved', resolved_at = CURRENT_TIMESTAMP, resolved_by = ?
                     WHERE id = ? AND org_id = ? AND status = 'pending'
                 """, (decided_by, approval_id, org_id))
-            
             conn.commit()
-            
             if cur.rowcount == 0:
                 return jsonify({"error": "Approval not found or already resolved"}), 404
-            
             return jsonify({"status": "approved", "id": approval_id}), 200
         finally:
             conn.close()
     except Exception as e:
-        logger.error("approval_approve_failed", error=str(e), approval_id=approval_id, org_id=org_id)
+        logger.error("approval_approve_failed", error=str(e))
         return jsonify({"error": f"Database error: {str(e)}"}), 500
 
 
 @api_bp.route("/api/approvals/<approval_id>/reject", methods=["POST"], endpoint="api_reject_approval")
 def api_reject_approval(approval_id):
-    if not require_auth():
-        return jsonify({"error": "Unauthorized"}), 401
-
-    org_id = getattr(g, "org_id", None) or "default"
-    decided_by = getattr(g, "user_id", None) or getattr(g, "email", None) or f"org:{org_id}"
-
+    if not require_human_auth():
+        return jsonify({"error": "Human session required"}), 401
+        
+    org_id = g.org_id
+    decided_by = getattr(g, "human_email", None) or f"org:{org_id}"
+    
     try:
         conn = get_db()
         cur = conn.cursor()
@@ -1269,30 +1293,25 @@ def api_reject_approval(approval_id):
                     SET status = 'rejected', resolved_at = CURRENT_TIMESTAMP, resolved_by = ?
                     WHERE id = ? AND org_id = ? AND status = 'pending'
                 """, (decided_by, approval_id, org_id))
-            
             conn.commit()
-            
             if cur.rowcount == 0:
                 return jsonify({"error": "Approval not found or already resolved"}), 404
-            
             return jsonify({"status": "rejected", "id": approval_id}), 200
         finally:
             conn.close()
     except Exception as e:
-        logger.error("approval_reject_failed", error=str(e), approval_id=approval_id, org_id=org_id)
+        logger.error("approval_reject_failed", error=str(e))
         return jsonify({"error": f"Database error: {str(e)}"}), 500
 
 
 @api_bp.route("/api/approvals", methods=["POST"], endpoint="api_sdk_create_approval")
-def hitl_sdk_create_approval():
-    # Sans require_auth(), g.org_id n'est jamais posé -> toutes les demandes
-    # tombaient dans l'org 'default', invisibles pour le dashboard du client.
+def api_sdk_create_approval():
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     approval_id = data.get("approval_id") or data.get("id")
-    agent_id = data.get("agent_id", "unknown")
+    agent_id = data.get("agent_id") or "unknown"
     tool_name = data.get("tool_name")
     params = data.get("params", {})
     reason = data.get("reason", "Approval required by policy")
@@ -1311,12 +1330,12 @@ def hitl_sdk_create_approval():
                     INSERT INTO approval_requests (id, org_id, agent_id, tool_name, params, reason, status)
                     VALUES (%s, %s, %s, %s, %s, %s, 'pending')
                     ON CONFLICT (id) DO NOTHING
-                """, (approval_id, org_id, agent_id, tool_name, json.dumps(params), reason))
+                """, (str(approval_id)[:128], org_id, str(agent_id)[:64], tool_name, json.dumps(params), reason))
             else:
                 cur.execute("""
                     INSERT INTO approval_requests (id, org_id, agent_id, tool_name, params, reason, status)
                     VALUES (?, ?, ?, ?, ?, ?, 'pending')
-                """, (approval_id, org_id, agent_id, tool_name, json.dumps(params), reason))
+                """, (str(approval_id)[:128], org_id, str(agent_id)[:64], tool_name, json.dumps(params), reason))
             conn.commit()
         finally:
             conn.close()
@@ -1325,7 +1344,7 @@ def hitl_sdk_create_approval():
         return jsonify({"status": "success", "id": approval_id}), 201
     except Exception as e:
         logger.error("approval_request_failed", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
 
 
 # ═══════════════════════════════════════════════════════════════
