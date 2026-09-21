@@ -4,58 +4,73 @@ DASHBOARD_HTML = r'''
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>AgentGuard — AI Observability</title>
+<title>Cerbere — Runtime security for AI agents</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0d0f17;--bg2:#10121a;--card:#151722;--card2:#1a1d2a;--border:#262a3a;--border2:#303448;--text:#e6e8f2;--muted:#9298ab;--dim:#5d6375;--purple:#8b5cf6;--purple2:#a78bfa;--green:#4cc38a;--red:#e0525f;--red2:#ff5d73;--blue:#4c8dff;--cyan:#38bdf8;--orange:#fb923c;--teal:#3ecfb2;--yellow:#f5b84b;--val:#6ee7b7;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
-*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif}
+:root{--bg:#0d0c0c;--bg2:#121110;--card:#171512;--card2:#1e1a17;--border:#2b2622;--border2:#3a342d;--text:#ece6db;--muted:#9a9084;--dim:#6f665c;--purple:#da7751;--purple2:#e89570;--green:#5fb98a;--red:#d9564e;--red2:#ef6b62;--blue:#7d9bb5;--cyan:#7dbbd1;--orange:#e0a94a;--teal:#6fb5a3;--yellow:#e0a94a;--val:#cfe3c0;--mono:'JetBrains Mono',ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 a{color:var(--purple2);text-decoration:none}
 button{font:inherit;cursor:pointer}
-.topbar{height:48px;display:flex;align-items:center;gap:18px;padding:0 16px;background:var(--bg);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50}
-.logo-box{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;padding:4px}
+.topbar{height:62px;display:flex;align-items:center;gap:28px;padding:0 26px;background:rgba(13,12,12,.84);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50}
+.brand{display:flex;align-items:center;gap:12px}
+.logo-box{width:36px;height:36px;border-radius:10px;background:#0d0c0c;border:1px solid var(--border2);padding:3px;overflow:hidden}
 .logo-box img{width:100%;height:100%;object-fit:contain}
-.logo-card{padding:0;overflow:hidden;display:flex;align-items:center;justify-content:center}
-.logo-card .logo-box{width:100%;height:100%;border-radius:0;padding:0}
-.prod{font-weight:700;font-size:14px}
-.prod small{color:var(--muted);font-weight:400;margin-left:6px;font-size:12px}
+.prod{font-family:'Fraunces',Georgia,serif;font-weight:600;font-size:21px;letter-spacing:-.02em;line-height:1}
+.prod small{font-family:'Inter',sans-serif;font-size:11.5px;font-weight:400;color:var(--dim);margin-left:10px;letter-spacing:0}
 .tabs{display:flex;gap:2px;height:100%}
-.tabs button{background:none;border:0;color:var(--muted);padding:0 14px;height:100%;font-size:13px;border-bottom:2px solid transparent}
+.tabs button{background:none;border:0;color:var(--muted);padding:0 15px;height:100%;font-size:13px;font-weight:500;border-bottom:2px solid transparent;transition:color .15s}
 .tabs button:hover{color:var(--text)}
-.tabs button.active{color:var(--purple2);border-bottom-color:var(--purple)}
+.tabs button.active{color:var(--text);border-bottom-color:var(--purple)}
 .tabs button[disabled]{opacity:.45;cursor:default}
 .tb-right{margin-left:auto;display:flex;align-items:center;gap:10px}
-.btn{background:var(--card2);border:1px solid var(--border2);color:var(--text);border-radius:6px;padding:6px 12px;font-size:12px}
-.btn:hover{border-color:#454a63}
-.help{width:22px;height:22px;border:1px solid var(--border2);border-radius:50%;display:grid;place-items:center;color:var(--muted);font-size:11px}
-.toolbar{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--bg2)}
-.filter-pill{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--muted);max-width:70%;overflow:hidden;white-space:nowrap}
-.filter-pill b{color:var(--text);font-weight:400}
-.filter-pill .x{color:var(--dim);cursor:pointer;margin-left:4px}
-.toolbar .right{margin-left:auto;display:flex;gap:8px;align-items:center}
-.pill{background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--muted)}
-.body{display:flex;min-height:calc(100vh - 100px)}
-.fside{width:230px;flex-shrink:0;border-right:1px solid var(--border);padding:12px 10px;background:var(--bg);overflow-y:auto}
+.live{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);margin-right:6px}
+.live i{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(95,185,138,.18);animation:livePulse 2.6s ease-in-out infinite}
+@keyframes livePulse{50%{box-shadow:0 0 0 6px rgba(95,185,138,.05)}}
+.tb-btn{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 14px;border-radius:10px;background:var(--card);border:1px solid var(--border2);color:var(--text);font-size:12.5px;font-weight:500;transition:border-color .15s,background .15s}
+.tb-btn svg{width:16px;height:16px;flex:0 0 16px}
+.tb-btn:hover{border-color:#5a4b3f;background:var(--card2)}
+.tb-btn.primary{background:var(--purple);border-color:var(--purple);color:#1c100a;font-weight:600}
+.tb-btn.primary:hover{background:var(--purple2);border-color:var(--purple2)}
+.tb-btn.wide{width:100%;justify-content:center;height:40px}
+.tb-btn:focus-visible,.ap-btn:focus-visible,.ag-btn:focus-visible,.tb-icon:focus-visible{outline:2px solid var(--purple2);outline-offset:2px}
+.tb-badge{display:none;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--red2);color:#fff;font-size:11px;font-weight:700;align-items:center;justify-content:center}
+.tb-count{min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:rgba(95,185,138,.14);color:var(--green);font-size:11px;font-weight:600;display:inline-flex;align-items:center;justify-content:center}
+.tb-count.zero{background:var(--card2);color:var(--dim)}
+.tb-btn.has-pending{border-color:rgba(239,107,98,.6);animation:pendingPulse 2.4s ease-in-out infinite}
+@keyframes pendingPulse{0%,100%{box-shadow:0 0 0 0 rgba(239,107,98,0)}50%{box-shadow:0 0 0 6px rgba(239,107,98,.14)}}
+.tb-icon{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:transparent;border:1px solid var(--border2);color:var(--muted)}
+.tb-icon:hover{color:var(--text);border-color:#5a4b3f}
+.tb-icon svg{width:16px;height:16px}
+.help{width:36px;height:36px;border-radius:10px;font-size:13px;background:transparent;color:var(--muted);border:1px solid var(--border2)}
+.help:hover{color:var(--text);border-color:#5a4b3f}
+.toolbar{padding:12px 26px;background:transparent;border-bottom:1px solid var(--border)}
+.filter-pill,.pill{border-radius:10px;background:var(--card);border-color:var(--border2)}
+.btn{border-radius:10px;background:var(--card);border-color:var(--border2);padding:7px 14px;font-weight:500}
+.btn:hover{border-color:#5a4b3f}
+.body{display:flex;min-height:calc(100vh - 120px)}
+.fside{width:230px;flex-shrink:0;border-right:1px solid var(--border);padding:16px 12px;background:transparent;overflow-y:auto}
 .fgroup{margin-bottom:6px}
 .fgroup>div{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;padding:5px 6px;cursor:pointer;user-select:none}
 .fgroup>div:hover{color:var(--text)}
-.fitems{padding:2px 0 4px 8px}
-.fitem{display:flex;align-items:center;gap:8px;padding:4px 6px;font-size:12px;color:var(--text)}
+.fitems{padding:2px 0 4px 8px;display:flex;flex-direction:column;gap:2px}
+.fitem{display:flex;align-items:center;gap:8px;padding:4px 6px;font-size:12px;color:var(--text);white-space:nowrap}
 .fitem input{accent-color:var(--purple);width:13px;height:13px}
-.main{flex:1;min-width:0;padding:18px 22px 60px;max-width:1760px}
+.main{flex:1;min-width:0;padding:26px 30px 80px;max-width:1760px}
 .view{display:none}.view.active{display:block}
-.sec{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin:26px 0 12px}
-.sec:first-child{margin-top:4px}
-.sec .ico{color:var(--purple2)}
+.sec{font-family:'Fraunces',Georgia,serif;font-size:21px;font-weight:500;letter-spacing:-.015em;margin:38px 0 16px}
+.sec:first-child{margin-top:2px}
+.sec .ico{color:var(--purple)}
 .sec .info{color:var(--dim);font-size:11px;border:1px solid var(--border2);border-radius:50%;width:15px;height:15px;display:inline-grid;place-items:center}
-.grid{display:grid;gap:12px}
+.grid{display:grid;gap:14px}
 .g2{grid-template-columns:1.35fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}.g5{grid-template-columns:repeat(5,1fr)}
-.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;position:relative}
-.card .menu{position:absolute;top:12px;right:12px;color:var(--dim);cursor:pointer;font-size:14px;letter-spacing:2px}
-.card .alert-btn{position:absolute;top:12px;right:34px;color:var(--muted);font-size:12px;background:none;border:0}
-.clabel{font-size:12px;color:var(--muted);margin-bottom:6px}
-.hero{font-size:54px;font-weight:600;letter-spacing:-1px;line-height:1.05;margin:8px 0 4px}
+.card{background:linear-gradient(180deg,#1a1714,#151311);border:1px solid var(--border);border-radius:16px;padding:20px 22px;box-shadow:0 1px 0 rgba(255,255,255,.025) inset,0 14px 34px -22px rgba(0,0,0,.85);transition:border-color .2s;position:relative}
+.card:hover{border-color:var(--border2)}
+.clabel{font-size:12px;font-weight:500;color:var(--muted);margin-bottom:10px}
+.hero{font-family:'Fraunces',Georgia,serif;font-weight:500;letter-spacing:-.025em}
 .hero.mid{font-size:40px}.hero.sm{font-size:30px}
 .hero .unit{font-size:.45em;font-weight:600;color:var(--text)}
-.trend{font-size:13px;margin-top:4px}
+.trend{font-size:12.5px;font-weight:500;margin-top:4px}
 .trend.up{color:var(--green)}.trend.down{color:var(--red2)}
 .chart{height:210px;position:relative}.chart svg{width:100%;height:100%;display:block}
 .chart.tall{height:250px}
@@ -63,13 +78,13 @@ button{font:inherit;cursor:pointer}
 .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:11px;color:var(--muted);margin-top:10px}
 .legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
 .stat-tabs{display:inline-flex;gap:4px;margin-bottom:12px}
-.stat-tabs button{background:var(--card);border:1px solid var(--border2);color:var(--muted);border-radius:5px;padding:4px 12px;font-size:12px}
-.stat-tabs button.active{background:var(--card2);color:var(--text);border-color:#454a63}
+.stat-tabs button{background:var(--card);border:1px solid var(--border2);color:var(--muted);border-radius:8px;padding:4px 12px;font-size:12px;font-weight:500}
+.stat-tabs button.active{background:rgba(218,119,81,.14);color:var(--purple2);border-color:rgba(218,119,81,.4)}
 table{width:100%;border-collapse:collapse}
-th{text-align:left;color:var(--muted);font-weight:400;font-size:11.5px;padding:6px 10px;border-bottom:1px solid var(--border)}
+th{font-size:11.5px;font-weight:500;color:var(--dim);padding:9px 12px;border-bottom:1px solid var(--border);text-align:left}
 th .sort{color:var(--dim)}
-td{border-bottom:1px solid var(--border);padding:7px 10px;font-size:12px;color:var(--text);vertical-align:top}
-tr:hover td{background:#191c29}
+td{padding:9px 12px;border-bottom:1px solid rgba(255,255,255,.05);font-size:12px;color:var(--text);vertical-align:top}
+tr:hover td{background:rgba(218,119,81,.05)}
 .mono{font-family:var(--mono);font-size:11px}
 .dim{color:var(--dim)}
 .tr-head{display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12.5px}
@@ -82,7 +97,7 @@ tr:hover td{background:#191c29}
 .span-row.sel{outline:1px solid var(--purple)}
 .span-row .tw{width:46%;flex-shrink:0;display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden}
 .span-row .dot{width:10px;height:10px;border-radius:50%;background:var(--blue);flex-shrink:0}
-.span-row .dot.client{background:#7aa7ff}
+.span-row .dot.client{background:#a9c1d6}
 .span-row .track{flex:1;position:relative;height:100%}
 .span-row .bar{position:absolute;top:9px;height:8px;border-radius:2px;background:var(--blue)}
 .span-row .bar.blocked{background:var(--red2)}
@@ -94,31 +109,133 @@ tr:hover td{background:#191c29}
 .attr-row:last-child{border-bottom:0}
 .attr-row .k{width:44%;flex-shrink:0;color:var(--muted)}
 .attr-row .v{font-family:var(--mono);color:var(--val);word-break:break-word}
-.attr-row .v.pink{color:#f472b6}.attr-row .v.blue{color:#7aa7ff}
+.attr-row .v.pink{color:#d98a9a}.attr-row .v.blue{color:#a9c1d6}
 .exc-row td{cursor:pointer}
-.codeblock{background:#0a0c12;border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-family:var(--mono);font-size:11px;color:#aeb6c8;white-space:pre-wrap;word-break:break-word;margin:8px 0}
-.qblock{display:flex;background:#0a0c12;border:1px solid var(--border);border-radius:8px;padding:10px 0;font-family:var(--mono);font-size:11.5px;color:#aeb6c8;position:relative}
+.codeblock{background:#0b0a09;border:1px solid var(--border);border-radius:12px;padding:10px 12px;font-family:var(--mono);font-size:11px;color:#aeb6c8;white-space:pre-wrap;word-break:break-word;margin:8px 0}
+.qblock{display:flex;background:#0b0a09;border:1px solid var(--border);border-radius:12px;padding:10px 0;font-family:var(--mono);font-size:11.5px;color:#aeb6c8;position:relative}
 .qblock .ln{color:var(--dim);text-align:right;padding:0 12px;border-right:1px solid var(--border);user-select:none}
 .qblock .code{padding:0 14px;white-space:pre}
 .qblock .copy{position:absolute;top:8px;right:10px;color:var(--dim);cursor:pointer}
 .pilltag{display:inline-block;background:var(--card2);border:1px solid var(--border2);border-radius:5px;padding:2px 8px;font-size:10.5px;color:var(--muted);font-family:var(--mono)}
-.badge{display:inline-block;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:600}
-.badge.safe{color:var(--green);background:#4cc38a14;border:1px solid #4cc38a33}
-.badge.blocked{color:var(--red2);background:#ff5d7314;border:1px solid #ff5d7333}
+.badge{display:inline-block;border-radius:999px;padding:3px 9px;font-size:10px;font-weight:600}
+.badge.safe{color:var(--green);background:rgba(95,185,138,.14);border:1px solid rgba(95,185,138,.33)}
+.badge.blocked{color:var(--red2);background:rgba(239,107,98,.14);border:1px solid rgba(239,107,98,.33)}
 .subtabs{display:flex;gap:18px;border-bottom:1px solid var(--border);margin-bottom:10px;font-size:12.5px}
 .subtabs span{padding:6px 2px;color:var(--muted);cursor:pointer}
 .subtabs span.active{color:var(--text);border-bottom:2px solid var(--purple)}
 .subtabs .n{background:var(--yellow);color:#111;border-radius:8px;padding:0 6px;font-size:10px;margin-left:5px}
-.searchbox{background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font:inherit;font-size:12px;width:100%}
-.toast{position:fixed;right:20px;bottom:20px;background:var(--card2);border:1px solid var(--border2);padding:10px 14px;border-radius:8px;font-size:12px;z-index:100;opacity:0;transition:.2s}
-.toast.show{opacity:1}
+.searchbox{background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:7px 10px;color:var(--text);font:inherit;font-size:12px;width:100%}
+.toast{position:fixed;right:20px;bottom:20px;background:#211d19;border:1px solid var(--border2);padding:12px 16px;border-radius:12px;font-size:12.5px;z-index:100;opacity:0;transition:opacity .2s,transform .2s;box-shadow:0 18px 40px -12px rgba(0,0,0,.7);transform:translateY(8px)}
+.toast.show{opacity:1;transform:none}
+button.menu,button.info,button.help,button.alert-btn{font:inherit}
+.card{overflow:visible}
+.popover{position:fixed;z-index:1100;background:var(--card2);border:1px solid var(--border2);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.4);min-width:160px;padding:6px;display:none}
+.popover.open{display:block}
+.popover button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--text);padding:7px 10px;border-radius:5px;font-size:12px;cursor:pointer}
+.popover button:hover{background:var(--card)}
+.popover.info-pop{max-width:260px;color:var(--muted);font-size:12px;line-height:1.5;padding:10px 12px;cursor:default}
+.alert-flag{display:inline-block;margin-left:8px;font-size:11px;color:var(--red2);font-weight:600;vertical-align:middle}
+.alert-rule-row{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:6px 10px;margin-bottom:6px;font-size:12px}
+.alert-rule-row button{background:none;border:0;color:var(--red2);cursor:pointer;font-size:14px;line-height:1}
 
-/* ── Professional icon and agent connection system ─────────────────── */
-.ui-icon{width:14px;height:14px;display:inline-block;vertical-align:-2px;flex:0 0 14px;color:currentColor}
-.ui-icon svg{display:block;width:100%;height:100%}
-.logo-fallback{display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:10px;font-weight:800;letter-spacing:-.04em;color:var(--text);background:var(--card2);border:1px solid var(--border2);border-radius:7px}
-.brand-mark{width:40px;height:40px;display:grid;place-items:center;flex:0 0 40px;border-radius:10px;background:var(--card2);border:1px solid var(--border2);font:800 10px/1 var(--mono);letter-spacing:.02em;color:var(--text);overflow:hidden}.brand-mark img{width:23px;height:23px;display:block;object-fit:contain}.brand-mark .brand-fallback{display:none}.brand-mark img[data-fallback]+.brand-fallback{display:none}
-.brand-mark.python{color:#8ab4ff}.brand-mark.mcp{color:#b7a2ff}.brand-mark.http{color:#7dd3fc}.brand-mark.composio{color:#f0abfc}.brand-mark.openai{color:#d1d5db}.brand-mark.anthropic{color:#f5d0a9}.brand-mark.langgraph{color:#86efac}.brand-mark.crewai{color:#fda4af}
+/* ── modals (help / alerts / keys) ─────────────────────────────────── */
+.modal-wrap{position:fixed;inset:0;z-index:1000;background:rgba(6,5,5,.7);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);justify-content:center;align-items:center;padding:20px;display:none}
+.modal-card{width:min(480px,100%);background:var(--bg2);border:1px solid var(--border2);border-radius:18px;padding:26px;box-shadow:0 30px 90px rgba(0,0,0,.6);animation:connectIn .16s ease-out}
+.modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.modal-head h3{margin:0;font-family:'Fraunces',Georgia,serif;font-size:22px;font-weight:500;letter-spacing:-.015em}
+.modal-sub{color:var(--muted);font-size:12.5px;line-height:1.55;margin:8px 0 0}
+.modal-list{color:var(--muted);font-size:13px;line-height:1.7;padding-left:18px;margin:16px 0 0}
+.modal-list b{color:var(--text);font-weight:600}
+.modal-links{display:flex;gap:16px;margin-top:18px;font-size:13px}
+.field{width:100%;height:38px;padding:0 12px;background:var(--card);color:var(--text);border:1px solid var(--border2);border-radius:10px;font:inherit}
+.field:focus{outline:none;border-color:var(--purple)}
+.key-list{margin:18px 0;max-height:220px;overflow-y:auto;display:grid;gap:8px}
+.key-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 14px;background:var(--card);border:1px solid var(--border);border-radius:12px}
+.key-row b{font-weight:600}.key-row code{display:block;margin-top:3px;font:11.5px var(--mono);color:var(--dim)}
+.key-state{font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;background:rgba(95,185,138,.14);color:var(--green)}
+.key-state.off{background:rgba(217,86,78,.14);color:var(--red2)}
+.newkey{margin-top:16px;padding:14px;background:rgba(224,169,74,.07);border:1px solid rgba(224,169,74,.4);border-radius:12px}
+.newkey p{margin:0 0 10px;color:var(--yellow);font-size:12.5px}
+.newkey-row{display:flex;gap:8px}.newkey-row input{flex:1;height:36px;padding:0 10px;background:#0b0a09;border:1px solid var(--border2);border-radius:9px;color:var(--val);font:12px var(--mono)}
+.modal-close-row{margin-top:16px}
+.row2{display:flex;gap:8px;align-items:center;margin-top:12px}.row2 select{flex:0 0 auto}.row2 input{flex:1}
+
+/* ── drawers (approval queue / agents) ─────────────────────────────── */
+.drawer-wrap{position:fixed;inset:0;z-index:95;background:rgba(6,5,5,.62);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:opacity .2s}
+.drawer-wrap.open{opacity:1;pointer-events:auto}
+.drawer{position:absolute;top:0;right:0;bottom:0;width:min(560px,100vw);background:var(--bg2);border-left:1px solid var(--border2);box-shadow:-30px 0 90px rgba(0,0,0,.55);display:flex;flex-direction:column;transform:translateX(28px);transition:transform .24s cubic-bezier(.2,.8,.2,1)}
+.drawer.wide{width:min(720px,100vw)}
+.drawer-wrap.open .drawer{transform:none}
+.drawer-head{display:flex;align-items:flex-start;gap:14px;padding:24px 26px 18px;border-bottom:1px solid var(--border)}
+.drawer-title{font-family:'Fraunces',Georgia,serif;font-size:26px;font-weight:500;letter-spacing:-.02em;line-height:1.15}
+.drawer-sub{color:var(--muted);font-size:12.5px;line-height:1.55;margin-top:6px;max-width:46ch}
+.drawer-head .grow{flex:1;min-width:0}
+.drawer-tabs{display:flex;gap:6px;padding:14px 26px 0;border-bottom:1px solid var(--border)}
+.drawer-tabs button{background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);padding:8px 4px;margin-right:16px;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:8px}
+.drawer-tabs button.active{color:var(--text);border-bottom-color:var(--purple)}
+.drawer-tabs .n{font-size:11px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--card2);color:var(--muted)}
+.drawer-tabs button.active .n{background:rgba(218,119,81,.18);color:var(--purple2)}
+.drawer-body{flex:1;overflow-y:auto;padding:18px 26px 32px}
+.d-empty{text-align:center;padding:64px 20px;color:var(--muted)}
+.d-empty svg{width:44px;height:44px;color:var(--purple);opacity:.9;margin-bottom:14px}
+.d-empty h4{margin:0 0 6px;font-family:'Fraunces',Georgia,serif;font-size:20px;font-weight:500;color:var(--text)}
+.d-empty p{margin:0 auto 18px;max-width:34ch;font-size:12.5px;line-height:1.6}
+
+.ap-card{background:var(--card);border:1px solid var(--border2);border-radius:16px;padding:18px;margin-bottom:14px;transition:opacity .25s,transform .25s}
+.ap-card.leaving{opacity:0;transform:translateX(24px)}
+.ap-top{display:flex;align-items:center;gap:12px}
+.ap-avatar{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:rgba(218,119,81,.16);color:var(--purple2);font-weight:700;font-size:14px;flex:0 0 34px}
+.ap-who{display:flex;flex-direction:column;min-width:0;flex:1}.ap-who b{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ap-who span{color:var(--dim);font-size:12px}
+.ap-age{font-size:11.5px;color:var(--muted);background:var(--card2);padding:4px 10px;border-radius:999px;white-space:nowrap}
+.ap-age.late{color:var(--yellow);background:rgba(224,169,74,.12)}
+.ap-tool{margin:16px 0 4px;display:flex;flex-direction:column;gap:6px}
+.ap-tool span{font-size:11.5px;color:var(--dim)}
+.ap-tool code{font:600 15px var(--mono);color:var(--text);background:#0e0d0b;border:1px solid var(--border);border-radius:10px;padding:10px 12px;word-break:break-all}
+.ap-reason{display:flex;gap:9px;align-items:flex-start;margin-top:12px;color:var(--muted);font-size:12.5px;line-height:1.55}
+.ap-reason .ui-icon{color:var(--purple);margin-top:2px;width:16px;height:16px;flex:0 0 16px}
+.ap-params{margin-top:12px}.ap-params summary{cursor:pointer;color:var(--muted);font-size:12px;user-select:none}.ap-params summary:hover{color:var(--text)}
+.ap-params pre{margin:8px 0 0;background:#0b0a09;border:1px solid var(--border);border-radius:10px;padding:12px;font:11.5px/1.55 var(--mono);color:#c9c0b3;max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+.ap-actions{display:flex;gap:10px;margin-top:18px}
+.ap-btn{flex:1;height:40px;border-radius:11px;font-size:13px;font-weight:600;border:1px solid transparent;transition:filter .15s,background .15s}
+.ap-btn.approve{background:var(--green);color:#08170f}.ap-btn.approve:hover{filter:brightness(1.08)}
+.ap-btn.reject{background:transparent;color:var(--red2);border-color:rgba(239,107,98,.5)}.ap-btn.reject:hover{background:rgba(239,107,98,.1)}
+.ap-btn[disabled]{opacity:.5;cursor:default}
+.ap-hist{display:grid;grid-template-columns:auto 1fr auto;gap:4px 14px;align-items:center;padding:14px 0;border-bottom:1px solid var(--border)}
+.ap-hist:last-child{border-bottom:0}
+.ap-hist .tool{font:600 13px var(--mono)}.ap-hist .meta{grid-column:2;color:var(--dim);font-size:12px}
+.ap-hist .when{color:var(--muted);font-size:12px;text-align:right}
+.st-chip{font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px}
+.st-chip.approved{background:rgba(95,185,138,.14);color:var(--green)}.st-chip.rejected{background:rgba(239,107,98,.14);color:var(--red2)}
+
+.ag-sum{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+.ag-chip{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:var(--card);border:1px solid var(--border);font-size:12px;color:var(--muted)}
+.ag-chip b{color:var(--text);font-weight:600}
+.ag-dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:0 0 8px}
+.ag-dot.connected{background:var(--green);box-shadow:0 0 0 3px rgba(95,185,138,.18)}
+.ag-dot.idle{background:var(--yellow)}.ag-dot.disconnected{background:var(--red2)}
+.ag-row{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px 18px;margin-bottom:12px}
+.ag-row.disc{border-color:rgba(239,107,98,.35);background:linear-gradient(180deg,rgba(239,107,98,.06),var(--card))}
+.ag-main{display:flex;align-items:center;gap:14px}
+.ag-id{flex:1;min-width:0}.ag-id b{font-size:14.5px;font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ag-id span{color:var(--dim);font-size:12px}
+.ag-state{font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--card2);color:var(--muted);white-space:nowrap}
+.ag-state.connected{background:rgba(95,185,138,.14);color:var(--green)}.ag-state.idle{background:rgba(224,169,74,.14);color:var(--yellow)}.ag-state.disconnected{background:rgba(239,107,98,.14);color:var(--red2)}
+.ag-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0 0}
+.ag-stat{background:#0f0d0c;border:1px solid var(--border);border-radius:11px;padding:9px 11px}
+.ag-stat b{display:block;font:600 16px 'Fraunces',Georgia,serif;letter-spacing:-.01em}.ag-stat span{font-size:11px;color:var(--dim)}
+.ag-stat.warn b{color:var(--yellow)}.ag-stat.bad b{color:var(--red2)}
+.ag-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px}
+.ag-note{font-size:12px;color:var(--muted);line-height:1.5}
+.ag-btn{height:36px;padding:0 16px;border-radius:10px;font-size:12.5px;font-weight:600;border:1px solid var(--border2);background:transparent;color:var(--text);white-space:nowrap;transition:background .15s,border-color .15s}
+.ag-btn.disconnect{color:var(--red2);border-color:rgba(239,107,98,.45)}.ag-btn.disconnect:hover{background:rgba(239,107,98,.1)}
+.ag-btn.disconnect.armed{background:var(--red2);border-color:var(--red2);color:#fff}
+.ag-btn.reconnect{background:var(--purple);border-color:var(--purple);color:#1c100a}.ag-btn.reconnect:hover{background:var(--purple2)}
+.ag-btn[disabled]{opacity:.5;cursor:default}
+
+@media(max-width:760px){.topbar{gap:12px;padding:0 12px;overflow-x:auto}.tb-btn span.lbl{display:none}.ag-stats{grid-template-columns:repeat(2,1fr)}.live,.prod small{display:none}}
+@media(prefers-reduced-motion:reduce){.tb-btn.has-pending,.live i{animation:none}.drawer,.drawer-wrap,.ap-card{transition:none}}
+
+/* ── finitions ─────────────────────────────────────────────────────── */
 .connect-modal{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(4,6,12,.74);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 .connect-modal.open{display:flex}
 .connect-panel{width:min(960px,100%);max-height:min(820px,calc(100vh - 48px));overflow:auto;background:var(--bg2);border:1px solid var(--border2);border-radius:14px;box-shadow:0 24px 80px rgba(0,0,0,.48);animation:connectIn .16s ease-out}
@@ -142,57 +259,54 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
 @media(max-width:760px){.connect-modal{padding:12px}.connect-panel{max-height:calc(100vh - 24px)}.connect-grid{grid-template-columns:1fr}.connect-body{padding:14px}}
 @media(max-width:1200px){.g5{grid-template-columns:repeat(3,1fr)}.g4,.g3{grid-template-columns:repeat(2,1fr)}.tr-body{grid-template-columns:1fr}.fside{display:none}}
 @media(max-width:760px){.g5,.g4,.g3,.g2{grid-template-columns:1fr}.tabs{overflow-x:auto}}
-button.menu,button.info,button.help,button.alert-btn{font:inherit}
-.card{overflow:visible}
-.popover{position:fixed;z-index:1100;background:var(--card2);border:1px solid var(--border2);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.4);min-width:160px;padding:6px;display:none}
-.popover.open{display:block}
-.popover button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--text);padding:7px 10px;border-radius:5px;font-size:12px;cursor:pointer}
-.popover button:hover{background:var(--card)}
-.popover.info-pop{max-width:260px;color:var(--muted);font-size:12px;line-height:1.5;padding:10px 12px;cursor:default}
-.alert-flag{display:inline-block;margin-left:8px;font-size:11px;color:var(--red2);font-weight:600;vertical-align:middle}
-.alert-rule-row{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#151515;border:1px solid #333;border-radius:6px;padding:6px 10px;margin-bottom:6px;font-size:12px;color:#ccc}
-.alert-rule-row button{background:none;border:0;color:#ef4444;cursor:pointer;font-size:14px;line-height:1}
 </style>
 </head>
 <body>
 <header class="topbar">
-  <div class="logo-box"><img src="/static/logo.svg" alt="AgentGuard" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="logo-fallback" aria-hidden="true">AG</span></div>
-  <span class="prod">AgentGuard <small>AI Observability</small></span>
-  <nav class="tabs" id="topTabs">
-    <button data-view="overview">Overview</button>
-    <button data-view="health" class="active">Service Health (Preview)</button>
-    <button data-view="tracing">Explorer (Preview)</button>
-    <button data-view="audit">Compliance Audit</button>
-    <button type="button" onclick="openConnectAgentModal()">AI Agents</button>
-    <button onclick="openApiKeyModal()" style="display: inline-flex; align-items: center; padding: 8px 16px; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; font-size: 14px; transition: background 0.2s;">
-  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px;">
-    <path d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z" />
-  </svg>
-  Gérer mes Clés API
-</button>
-  </nav>
-  <div class="tb-right">
-   <button class="btn" onclick="openConnectModal()">+ Connection</button>
-    <button class="help" type="button" onclick="openHelpModal()">?</button>
+  <div class="brand">
+    <div class="logo-box"><img src="/static/logo.svg" alt="Cerbere" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="logo-fallback" aria-hidden="true">C</span></div>
+    <span class="prod">Cerbere<small>Runtime security for AI agents</small></span>
   </div>
+<nav class="tabs" id="topTabs">
+<button data-view="overview">Overview</button>
+    <button data-view="health" class="active">Health</button>
+    <button data-view="tracing">Explorer</button>
+    <button data-view="audit">Compliance</button>
+</nav>
+<div class="tb-right">
+    <span class="live" title="Auto-refreshing"><i></i>Live</span>
+    <button class="tb-btn" id="btnApprovals" type="button" onclick="openApprovalsPanel()" aria-label="Open the approval queue">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 6v5c0 4.2 2.9 8 7 10 4.1-2 7-5.8 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+      <span class="lbl">Approvals</span><span class="tb-badge" id="approvalsBadge">0</span>
+    </button>
+    <button class="tb-btn" id="btnAgents" type="button" onclick="openAgentsPanel()" aria-label="Open connected agents">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="7" width="14" height="11" rx="3"/><path d="M12 7V4M9 12.5h.01M15 12.5h.01M9.5 15.5h5"/></svg>
+      <span class="lbl">Agents</span><span class="tb-count zero" id="agentsBadge">0</span>
+    </button>
+    <button class="tb-btn primary" type="button" onclick="openConnectAgentModal()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      <span class="lbl">Connect agent</span>
+    </button>
+    <button class="tb-icon" type="button" onclick="openApiKeyModal()" title="API keys" aria-label="API keys">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="m11 12 8-8m-3 3 3 3"/></svg>
+    </button>
+    <button class="help" type="button" onclick="openHelpModal()" aria-label="Help">?</button>
+</div>
 </header>
-
-<div id="helpModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;" onclick="if(event.target===this)closeHelpModal()">
-  <div style="background: #1a1a1a; color: white; padding: 24px; border-radius: 12px; width: 480px; max-width: 90%; border: 1px solid #333;">
-    <div style="display:flex;align-items:center;justify-content:space-between">
-      <h3 style="margin: 0;">Aide rapide</h3>
-      <button onclick="closeHelpModal()" style="background:none;border:0;color:#aaa;font-size:20px;cursor:pointer;line-height:1">×</button>
-    </div>
-    <ul style="color:#ccc;font-size:13px;line-height:1.7;padding-left:18px;margin-top:14px">
-      <li><b>Overview / Service Health</b> — santé et coût de vos agents sur la période affichée.</li>
-      <li><b>Explorer</b> — inspection détaillée d'une trace (spans, checks de sécurité, blocages).</li>
-      <li><b>Compliance Audit</b> — journal d'audit inaltérable de toutes les décisions.</li>
-      <li><b>+ New alert</b> — définir un seuil sur une métrique (coût, tokens) ; un dépassement est signalé visuellement sur la carte concernée.</li>
-      <li><b>⋮ sur une carte</b> — copier les données, exporter en CSV, ou masquer la carte.</li>
+<div id="helpModal" class="modal-wrap" style="display:none" onclick="if(event.target===this)closeHelpModal()">
+  <div class="modal-card">
+    <div class="modal-head"><h3>Quick help</h3><button class="connect-close" type="button" aria-label="Close" onclick="closeHelpModal()">×</button></div>
+    <ul class="modal-list">
+      <li><b>Overview / Health</b> — health, latency and cost of your agents over the selected period.</li>
+      <li><b>Explorer</b> — inspect a trace: spans, security checks, blocked actions.</li>
+      <li><b>Compliance</b> — tamper-evident audit log of every decision.</li>
+      <li><b>Approvals</b> — actions held by policy, waiting for a human decision.</li>
+      <li><b>Agents</b> — every connected agent. Disconnect and reconnect without touching code.</li>
+      <li><b>+ New alert</b> — set a threshold on a metric; crossing it is flagged on the card.</li>
     </ul>
-    <div style="margin-top:14px;display:flex;gap:10px">
-      <a href="https://github.com/chrismsmr-celcom/agentguard" target="_blank" rel="noopener" style="color:#a78bfa;font-size:13px">Documentation (README)</a>
-      <a href="https://github.com/chrismsmr-celcom/agentguard/blob/main/README_MCP.md" target="_blank" rel="noopener" style="color:#a78bfa;font-size:13px">Configuration MCP</a>
+    <div class="modal-links">
+      <a href="https://github.com/chrismsmr-celcom/agentguard" target="_blank" rel="noopener">Documentation</a>
+      <a href="https://github.com/chrismsmr-celcom/agentguard/blob/main/README_MCP.md" target="_blank" rel="noopener">MCP setup</a>
     </div>
   </div>
 </div>
@@ -200,31 +314,25 @@ button.menu,button.info,button.help,button.alert-btn{font:inherit}
 <div id="cardMenuPopover" class="popover"></div>
 <div id="infoPopover" class="popover info-pop"></div>
 
-<div id="alertModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;" onclick="if(event.target===this)closeAlertModal()">
-  <div style="background: #1a1a1a; color: white; padding: 24px; border-radius: 12px; width: 440px; max-width: 92%; border: 1px solid #333;">
-    <div style="display:flex;align-items:center;justify-content:space-between">
-      <h3 style="margin: 0;" id="alertModalTitle">Nouvelle alerte</h3>
-      <button onclick="closeAlertModal()" style="background:none;border:0;color:#aaa;font-size:20px;cursor:pointer;line-height:1">×</button>
-    </div>
-    <p style="color:#aaa;font-size:13px" id="alertModalSubtitle"></p>
-
-    <div id="alertRulesExisting" style="margin: 10px 0;"></div>
-
-    <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
-      <select id="alertComparison" style="flex:0 0 auto;padding:8px;background:#111;color:#eee;border:1px solid #444;border-radius:6px">
-        <option value="above">au-dessus de</option>
-        <option value="below">en-dessous de</option>
+<div id="alertModal" class="modal-wrap" style="display:none" onclick="if(event.target===this)closeAlertModal()">
+  <div class="modal-card">
+    <div class="modal-head"><h3 id="alertModalTitle">New alert</h3><button class="connect-close" type="button" aria-label="Close" onclick="closeAlertModal()">×</button></div>
+    <p class="modal-sub" id="alertModalSubtitle"></p>
+    <div id="alertRulesExisting" style="margin:14px 0 0"></div>
+    <div class="row2">
+      <select id="alertComparison" class="field" style="width:auto">
+        <option value="above">above</option>
+        <option value="below">below</option>
       </select>
-      <input id="alertThreshold" type="number" step="any" placeholder="Seuil (ex: 100)" style="flex:1;padding:8px;background:#111;color:#eee;border:1px solid #444;border-radius:6px">
+      <input id="alertThreshold" class="field" type="number" step="any" placeholder="Threshold, e.g. 100">
     </div>
-    <button onclick="submitAlertRule()" style="width:100%;margin-top:12px;padding:10px;background:#8b5cf6;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold">
-      + Créer l'alerte
-    </button>
+    <button type="button" class="tb-btn primary wide" style="margin-top:14px" onclick="submitAlertRule()">Create alert</button>
   </div>
 </div>
+
 <div class="toolbar">
-  <div class="filter-pill"><span class="ui-icon" data-icon="filter"></span><span>Service in (<b>agentguard-collector</b>)</span><span class="x" title="clear">✕</span></div>
-  <div class="right">
+<div class="filter-pill"><span class="ui-icon" data-icon="filter"></span><span>Service in (<b>agentguard-collector</b>)</span><span class="x" title="clear">✕</span></div>
+<div class="right">
     <span class="pill">Last 14 days ▾</span>
     <button class="btn" onclick="refreshAll()"><span class="ui-icon" data-icon="refresh"></span> Refresh</button>
     <form method="post" action="/logout" style="margin:0"><button class="btn" type="submit">Sign out</button></form>
@@ -233,24 +341,10 @@ button.menu,button.info,button.help,button.alert-btn{font:inherit}
 <div class="body">
 <aside class="fside" id="fside"></aside>
 <main class="main">
-<button id="approval-pill" type="button" onclick="openApprovalModal()" style="display: none; background: #fef3c7; color:#7c4a03; border: 1px solid #f59e0b; padding: 8px 14px; margin-bottom: 1rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px;">
-    ⚠️ <span id="approval-count">0</span> action(s) en attente d'approbation — cliquer pour traiter
-</button>
-
-<div id="approvalModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;" onclick="if(event.target===this)closeApprovalModal()">
-  <div style="background: #1a1a1a; color: white; padding: 24px; border-radius: 12px; width: 560px; max-width: 92%; max-height: 80vh; overflow-y: auto; border: 1px solid #333;">
-    <div style="display:flex;align-items:center;justify-content:space-between">
-      <h3 style="margin: 0;">Approbations en attente</h3>
-      <button onclick="closeApprovalModal()" style="background:none;border:0;color:#aaa;font-size:20px;cursor:pointer;line-height:1">×</button>
-    </div>
-    <p style="color: #aaa; font-size: 13px;">Ces actions ont été bloquées par la politique de sécurité et attendent une décision humaine.</p>
-    <div id="approvalModalList" style="margin-top: 14px;"></div>
-  </div>
-</div>
 <section id="view-overview" class="view">
-  <div class="sec">Service Health &amp; Performance</div>
+  <div class="sec">Service health &amp; performance</div>
   <div class="grid" style="grid-template-columns:170px 1fr 1fr 1fr;gap:12px">
-    <div class="card logo-card" style="background:#000;border:0;border-radius:18px"><div class="logo-box"><img src="/static/logo.svg" alt="AgentGuard" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'" style="width:100%;height:100%;object-fit:cover;border-radius:18px"><span class="logo-fallback" aria-hidden="true">AG</span></div></div>
+    <div class="card logo-card" style="background:#000;border:0;border-radius:18px"><div class="logo-box"><img src="/static/logo.svg" alt="Cerbere" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'" style="width:100%;height:100%;object-fit:cover;border-radius:18px"><span class="logo-fallback" aria-hidden="true">AG</span></div></div>
     <div class="card"><div class="clabel">Open Problems</div><div class="hero mid" id="ovProblems" style="color:var(--red2)">0</div></div>
     <div class="card"><div class="clabel"># of Total Requests</div><div class="hero mid" id="ovRequests">0</div><div class="trend" id="ovRequestsT"></div></div>
     <div class="card"><div class="clabel">Cost</div><div class="hero mid" id="ovCost">$0</div><div class="trend" id="ovCostT"></div></div>
@@ -259,7 +353,7 @@ button.menu,button.info,button.help,button.alert-btn{font:inherit}
     <div class="card"><div class="clabel">Service Health</div><div id="ovDonut" style="height:170px"></div></div>
     <div class="card"><div class="clabel">AVG Request Duration</div><div class="hero mid" id="ovAvg">—</div><div class="trend" id="ovAvgT"></div></div>
     <div class="card"><div class="clabel">P99 Request Duration</div><div class="hero mid" id="ovP99">—</div><div class="trend" id="ovP99T"></div></div>
-    <div class="card"><div class="clabel">AgentGuard AI Forecast</div><div class="chart" id="ovForecast" style="height:170px"></div></div>
+    <div class="card"><div class="clabel">Cerbere AI Forecast</div><div class="chart" id="ovForecast" style="height:170px"></div></div>
   </div>
   <div class="sec">Service Quality &amp; Guardrails</div>
   <div class="grid g5" id="gqBig"></div>
@@ -275,7 +369,7 @@ button.menu,button.info,button.help,button.alert-btn{font:inherit}
   <div class="stat-tabs" id="latTabs"><button class="active" data-s="avg">AVG</button><button data-s="p50">p50</button><button data-s="p90">p90</button><button data-s="p95">p95</button></div>
   <div class="grid g2">
     <div class="card"><button class="menu" type="button" onclick="openCardMenu(event,this)">⋮</button><div class="clabel">Time to response</div><div class="hero" style="text-align:center" id="ttrHero">—</div><div class="chart" id="ttrChart"></div></div>
-    <div class="card"><button class="menu" type="button" onclick="openCardMenu(event,this)">⋮</button><div class="clabel">Response time per model</div><div id="rtModel" style="height:290px"></div></div>
+    <div class="card"><button class="menu" type="button" onclick="openCardMenu(event,this)"></button><div class="clabel">Response time per model</div><div id="rtModel" style="height:290px"></div></div>
   </div>
   <div class="sec"><span class="ico">◈</span>Cost <button class="info" type="button" onclick="showInfoPopover(event,'cost')">i</button></div>
   <div class="grid g3">
@@ -294,7 +388,7 @@ button.menu,button.info,button.help,button.alert-btn{font:inherit}
 
 <section id="view-tracing" class="view">
   <div class="tr-head">
-    <span>⇄</span><span class="name">AgentGuard.workflow</span>
+    <span>⇄</span><span class="name">Cerbere workflow</span>
     <select id="traceSelect" class="pill" style="background:var(--card);color:var(--text);border:1px solid var(--border2)"></select>
     <span id="trDate" class="dim"></span>
     <span><span class="ui-icon" data-icon="latency"></span> Duration: <b id="trDur">—</b></span>
@@ -332,7 +426,7 @@ button.menu,button.info,button.help,button.alert-btn{font:inherit}
 | summarize count() by: { gen_ai.model }
 | filter gen_ai.model != ""</div><span class="copy" onclick="toast('Query copied')">⧉</span></div>
       <div class="card" style="margin-top:12px;padding:6px 0">
-        <table><thead><tr><th>llm model <span class="sort">⇅</span></th><th style="text-align:right">events <span class="sort">⇅</span></th></tr></thead><tbody id="auModels"></tbody></table>
+        <table><thead><tr><th>llm model <span class="sort"></span></th><th style="text-align:right">events <span class="sort">⇅</span></th></tr></thead><tbody id="auModels"></tbody></table>
       </div>
     </div>
     <div><div class="sec" style="margin-top:0">Trend</div><div class="card"><div class="chart tall" id="auTrend" style="height:330px"></div></div></div>
@@ -357,7 +451,7 @@ button.menu,button.info,button.help,button.alert-btn{font:inherit}
     </div>
     <div class="connect-body">
       <div id="connectChooser" class="connect-view active">
-        <div class="connect-section">AgentGuard integrations</div>
+        <div class="connect-section">Cerbere integrations</div>
         <div class="connect-grid">
           <button class="connect-card" type="button" onclick="showConnectDetail('python')"><span class="brand-mark python"><img src="https://cdn.jsdelivr.net/gh/glincker/thesvg@main/public/icons/python/default.svg" alt="Python" style="width:23px;height:23px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><span class="brand-fallback">PY</span></span><span><span class="name">Python SDK</span><span class="desc">Native runtime instrumentation for LLM calls and tool execution.</span></span></button>
           <button class="connect-card" type="button" onclick="showConnectDetail('mcp')"><span class="brand-mark mcp"><img src="https://cdn.jsdelivr.net/gh/glincker/thesvg@main/public/icons/model-context-protocol/default.svg" alt="MCP" style="width:23px;height:23px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><span class="brand-fallback">MCP</span></span><span><span class="name">MCP</span><span class="desc">Security boundary for MCP clients, servers and tool calls.</span></span></button>
@@ -375,7 +469,7 @@ button.menu,button.info,button.help,button.alert-btn{font:inherit}
           <button class="connect-card" type="button" onclick="showConnectDetail('crewai')"><span class="brand-mark crewai"><img src="https://cdn.jsdelivr.net/gh/glincker/thesvg@main/public/icons/crewai/default.svg" alt="CrewAI" style="width:23px;height:23px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><span class="brand-fallback">CA</span></span><span><span class="name">CrewAI</span><span class="desc">Guard CrewAI tools and agent execution paths.</span></span></button>
         </div>
         <div class="connect-note"><b>Security:</b> keep <span class="mono">AGENTGUARD_API_KEY</span> in the agent environment or secret manager. Never expose it in browser code. The admin secret remains server-side and is not used by this onboarding flow.</div>
-        <div class="connect-agents"><div class="connect-section" style="margin-top:0">Recently observed agents</div><div id="connectAgentList"><div class="empty" style="padding:18px 8px">No agent telemetry observed yet.</div></div></div>
+        <div class="connect-agents"><div class="connect-section" style="margin-top:0">Already connected?</div><button type="button" class="tb-btn" onclick="closeConnectAgentModal();openAgentsPanel()">Manage connected agents</button></div>
       </div>
       <div id="connectPython" class="connect-view connect-detail"></div>
       <div id="connectMcp" class="connect-view connect-detail"></div>
@@ -389,30 +483,55 @@ button.menu,button.info,button.help,button.alert-btn{font:inherit}
   </div>
 </div>
 
-<div id="apiKeyModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;">
-  <div style="background: #1a1a1a; color: white; padding: 24px; border-radius: 12px; width: 500px; max-width: 90%; border: 1px solid #333;">
-    <h3 style="margin-top: 0;">Gestion des Clés API</h3>
-    <p style="color: #aaa; font-size: 14px;">Ces clés permettent à vos agents Python de communiquer avec Cerbere.</p>
-    
-    <div id="apiKeyList" style="margin: 20px 0; max-height: 200px; overflow-y: auto;"></div>
-    
-    <button onclick="generateNewKey()" id="btnGenerate" style="width: 100%; padding: 10px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">
-      + Générer une nouvelle clé
-    </button>
-
-    <!-- Zone d'affichage de la clé nouvellement créée -->
-    <div id="newKeyDisplay" style="display: none; margin-top: 20px; padding: 15px; background: #2d2d2d; border-radius: 8px; border: 1px solid #f59e0b;">
-      <p style="color: #f59e0b; font-size: 13px; margin: 0 0 10px 0;">⚠️ Copiez cette clé maintenant. Elle ne sera plus jamais affichée.</p>
-      <div style="display: flex; gap: 10px;">
-        <input type="text" id="newKeyValue" readonly style="flex: 1; padding: 8px; background: #111; color: #10b981; border: 1px solid #444; border-radius: 4px; font-family: monospace;">
-        <button onclick="copyKey()" style="padding: 8px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;">Copier</button>
-      </div>
+<div id="apiKeyModal" class="modal-wrap" style="display:none" onclick="if(event.target===this)closeApiKeyModal()">
+  <div class="modal-card" style="width:min(520px,100%)">
+    <div class="modal-head"><h3>API keys</h3><button class="connect-close" type="button" aria-label="Close" onclick="closeApiKeyModal()">×</button></div>
+    <p class="modal-sub">Keys let your agents send events to Cerbere. Store them in your secret manager: a key is shown only once, when you create it.</p>
+    <div id="apiKeyList" class="key-list"></div>
+    <button type="button" id="btnGenerate" class="tb-btn primary wide" onclick="generateNewKey()">+ Generate a new key</button>
+    <div id="newKeyDisplay" class="newkey" style="display:none">
+      <p>Copy this key now. It will not be shown again.</p>
+      <div class="newkey-row"><input type="text" id="newKeyValue" readonly><button type="button" class="tb-btn" onclick="copyKey()">Copy</button></div>
     </div>
-
-    <button onclick="closeApiKeyModal()" style="margin-top: 20px; width: 100%; padding: 10px; background: transparent; color: #aaa; border: 1px solid #444; border-radius: 6px; cursor: pointer;">Fermer</button>
   </div>
 </div>
+
+<div id="approvalsPanel" class="drawer-wrap" onclick="if(event.target===this)closeApprovalsPanel()">
+  <aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="apTitle">
+    <div class="drawer-head">
+      <div class="grow">
+        <div class="drawer-title" id="apTitle">Approval queue</div>
+        <div class="drawer-sub">Actions your agents attempted that policy held back. Nothing runs until a human decides.</div>
+      </div>
+      <button class="connect-close" type="button" aria-label="Close" onclick="closeApprovalsPanel()">×</button>
+    </div>
+    <div class="drawer-tabs">
+      <button type="button" class="active" data-ap="pending" onclick="setApprovalsTab('pending')">Pending <span class="n" id="apTabPending">0</span></button>
+      <button type="button" data-ap="history" onclick="setApprovalsTab('history')">History <span class="n" id="apTabHistory">0</span></button>
+    </div>
+    <div class="drawer-body" id="approvalsList"></div>
+  </aside>
+</div>
+
+<div id="agentsPanel" class="drawer-wrap" onclick="if(event.target===this)closeAgentsPanel()">
+  <aside class="drawer wide" role="dialog" aria-modal="true" aria-labelledby="agTitle">
+    <div class="drawer-head">
+      <div class="grow">
+        <div class="drawer-title" id="agTitle">Agents</div>
+        <div class="drawer-sub">Every agent that has reported to Cerbere. Disconnecting one refuses its requests immediately, with no code change. Reconnect it here when it is safe.</div>
+      </div>
+      <button class="tb-btn primary" type="button" onclick="closeAgentsPanel();openConnectAgentModal()">+ Connect agent</button>
+      <button class="connect-close" type="button" aria-label="Close" onclick="closeAgentsPanel()">×</button>
+    </div>
+    <div class="drawer-body">
+      <div class="ag-sum" id="agentsSummary"></div>
+      <div id="agentsList"></div>
+    </div>
+  </aside>
+</div>
+
 <div id="toast" class="toast"></div>
+
 
 <script>
 var state = { modelFilter: new Set(), selTrace: null, selSpan: 0, latStat: 'avg' };
