@@ -49,6 +49,12 @@ class AuditEventType(str, Enum):
     LOGIN_FAILED = "login_failed"
     API_KEY_CREATED = "api_key_created"
     API_KEY_REVOKED = "api_key_revoked"
+
+    # Décisions humaines (HITL) et contrôle des agents
+    APPROVAL_GRANTED = "approval_granted"
+    APPROVAL_REJECTED = "approval_rejected"
+    AGENT_DISCONNECTED = "agent_disconnected"
+    AGENT_RECONNECTED = "agent_reconnected"
     
     # Système
     POLICY_LOADED = "policy_loaded"
@@ -595,3 +601,4 @@ class ImmutableAuditLog:
             if len(results) >= limit:
                 break
         return results
+
