@@ -9,68 +9,55 @@ DASHBOARD_HTML = r'''
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#0d0c0c;--bg2:#121110;--card:#171512;--card2:#1e1a17;--border:#2b2622;--border2:#3a342d;--text:#ece6db;--muted:#9a9084;--dim:#6f665c;--purple:#da7751;--purple2:#e89570;--green:#5fb98a;--red:#d9564e;--red2:#ef6b62;--blue:#7d9bb5;--cyan:#7dbbd1;--orange:#e0a94a;--teal:#6fb5a3;--yellow:#e0a94a;--val:#cfe3c0;--mono:'JetBrains Mono',ui-monospace,"SF Mono",Menlo,Consolas,monospace}
-*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif}
 a{color:var(--purple2);text-decoration:none}
 button{font:inherit;cursor:pointer}
-.topbar{height:62px;display:flex;align-items:center;gap:28px;padding:0 26px;background:rgba(13,12,12,.84);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50}
-.brand{display:flex;align-items:center;gap:12px}
-.logo-box{width:36px;height:36px;border-radius:10px;background:#0d0c0c;border:1px solid var(--border2);padding:3px;overflow:hidden}
+.topbar{height:48px;display:flex;align-items:center;gap:18px;padding:0 16px;background:var(--bg);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50}
+.logo-box{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;padding:4px}
 .logo-box img{width:100%;height:100%;object-fit:contain}
-.prod{font-family:'Fraunces',Georgia,serif;font-weight:600;font-size:21px;letter-spacing:-.02em;line-height:1}
-.prod small{font-family:'Inter',sans-serif;font-size:11.5px;font-weight:400;color:var(--dim);margin-left:10px;letter-spacing:0}
+.logo-card{padding:0;overflow:hidden;display:flex;align-items:center;justify-content:center}
+.logo-card .logo-box{width:100%;height:100%;border-radius:0;padding:0}
+.prod{font-weight:700;font-size:14px}
+.prod small{color:var(--muted);font-weight:400;margin-left:6px;font-size:12px}
 .tabs{display:flex;gap:2px;height:100%}
-.tabs button{background:none;border:0;color:var(--muted);padding:0 15px;height:100%;font-size:13px;font-weight:500;border-bottom:2px solid transparent;transition:color .15s}
+.tabs button{background:none;border:0;color:var(--muted);padding:0 14px;height:100%;font-size:13px;border-bottom:2px solid transparent}
 .tabs button:hover{color:var(--text)}
-.tabs button.active{color:var(--text);border-bottom-color:var(--purple)}
+.tabs button.active{color:var(--purple2);border-bottom-color:var(--purple)}
 .tabs button[disabled]{opacity:.45;cursor:default}
 .tb-right{margin-left:auto;display:flex;align-items:center;gap:10px}
-.live{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);margin-right:6px}
-.live i{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(95,185,138,.18);animation:livePulse 2.6s ease-in-out infinite}
-@keyframes livePulse{50%{box-shadow:0 0 0 6px rgba(95,185,138,.05)}}
-.tb-btn{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 14px;border-radius:10px;background:var(--card);border:1px solid var(--border2);color:var(--text);font-size:12.5px;font-weight:500;transition:border-color .15s,background .15s}
-.tb-btn svg{width:16px;height:16px;flex:0 0 16px}
-.tb-btn:hover{border-color:#5a4b3f;background:var(--card2)}
-.tb-btn.primary{background:var(--purple);border-color:var(--purple);color:#1c100a;font-weight:600}
-.tb-btn.primary:hover{background:var(--purple2);border-color:var(--purple2)}
-.tb-btn.wide{width:100%;justify-content:center;height:40px}
-.tb-btn:focus-visible,.ap-btn:focus-visible,.ag-btn:focus-visible,.tb-icon:focus-visible{outline:2px solid var(--purple2);outline-offset:2px}
-.tb-badge{display:none;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--red2);color:#fff;font-size:11px;font-weight:700;align-items:center;justify-content:center}
-.tb-count{min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:rgba(95,185,138,.14);color:var(--green);font-size:11px;font-weight:600;display:inline-flex;align-items:center;justify-content:center}
-.tb-count.zero{background:var(--card2);color:var(--dim)}
-.tb-btn.has-pending{border-color:rgba(239,107,98,.6);animation:pendingPulse 2.4s ease-in-out infinite}
-@keyframes pendingPulse{0%,100%{box-shadow:0 0 0 0 rgba(239,107,98,0)}50%{box-shadow:0 0 0 6px rgba(239,107,98,.14)}}
-.tb-icon{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:transparent;border:1px solid var(--border2);color:var(--muted)}
-.tb-icon:hover{color:var(--text);border-color:#5a4b3f}
-.tb-icon svg{width:16px;height:16px}
-.help{width:36px;height:36px;border-radius:10px;font-size:13px;background:transparent;color:var(--muted);border:1px solid var(--border2)}
-.help:hover{color:var(--text);border-color:#5a4b3f}
-.toolbar{padding:12px 26px;background:transparent;border-bottom:1px solid var(--border)}
-.filter-pill,.pill{border-radius:10px;background:var(--card);border-color:var(--border2)}
-.btn{border-radius:10px;background:var(--card);border-color:var(--border2);padding:7px 14px;font-weight:500}
-.btn:hover{border-color:#5a4b3f}
-.body{display:flex;min-height:calc(100vh - 120px)}
-.fside{width:230px;flex-shrink:0;border-right:1px solid var(--border);padding:16px 12px;background:transparent;overflow-y:auto}
+.btn{background:var(--card2);border:1px solid var(--border2);color:var(--text);border-radius:6px;padding:6px 12px;font-size:12px}
+.btn:hover{border-color:#454a63}
+.help{width:22px;height:22px;border:1px solid var(--border2);border-radius:50%;display:grid;place-items:center;color:var(--muted);font-size:11px}
+.toolbar{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--bg2)}
+.filter-pill{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--muted);max-width:70%;overflow:hidden;white-space:nowrap}
+.filter-pill b{color:var(--text);font-weight:400}
+.filter-pill .x{color:var(--dim);cursor:pointer;margin-left:4px}
+.toolbar .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+.pill{background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--muted)}
+.body{display:flex;min-height:calc(100vh - 100px)}
+.fside{width:230px;flex-shrink:0;border-right:1px solid var(--border);padding:12px 10px;background:var(--bg);overflow-y:auto}
 .fgroup{margin-bottom:6px}
 .fgroup>div{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;padding:5px 6px;cursor:pointer;user-select:none}
 .fgroup>div:hover{color:var(--text)}
-.fitems{padding:2px 0 4px 8px;display:flex;flex-direction:column;gap:2px}
-.fitem{display:flex;align-items:center;gap:8px;padding:4px 6px;font-size:12px;color:var(--text);white-space:nowrap}
+.fitems{padding:2px 0 4px 8px}
+.fitem{display:flex;align-items:center;gap:8px;padding:4px 6px;font-size:12px;color:var(--text)}
 .fitem input{accent-color:var(--purple);width:13px;height:13px}
-.main{flex:1;min-width:0;padding:26px 30px 80px;max-width:1760px}
+.main{flex:1;min-width:0;padding:18px 22px 60px;max-width:1760px}
 .view{display:none}.view.active{display:block}
-.sec{font-family:'Fraunces',Georgia,serif;font-size:21px;font-weight:500;letter-spacing:-.015em;margin:38px 0 16px}
-.sec:first-child{margin-top:2px}
-.sec .ico{color:var(--purple)}
+.sec{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin:26px 0 12px}
+.sec:first-child{margin-top:4px}
+.sec .ico{color:var(--purple2)}
 .sec .info{color:var(--dim);font-size:11px;border:1px solid var(--border2);border-radius:50%;width:15px;height:15px;display:inline-grid;place-items:center}
-.grid{display:grid;gap:14px}
+.grid{display:grid;gap:12px}
 .g2{grid-template-columns:1.35fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}.g5{grid-template-columns:repeat(5,1fr)}
-.card{background:linear-gradient(180deg,#1a1714,#151311);border:1px solid var(--border);border-radius:16px;padding:20px 22px;box-shadow:0 1px 0 rgba(255,255,255,.025) inset,0 14px 34px -22px rgba(0,0,0,.85);transition:border-color .2s;position:relative}
-.card:hover{border-color:var(--border2)}
-.clabel{font-size:12px;font-weight:500;color:var(--muted);margin-bottom:10px}
-.hero{font-family:'Fraunces',Georgia,serif;font-weight:500;letter-spacing:-.025em}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;position:relative}
+.card .menu{position:absolute;top:12px;right:12px;color:var(--dim);cursor:pointer;font-size:14px;letter-spacing:2px}
+.card .alert-btn{position:absolute;top:12px;right:34px;color:var(--muted);font-size:12px;background:none;border:0}
+.clabel{font-size:12px;color:var(--muted);margin-bottom:6px}
+.hero{font-size:54px;font-weight:600;letter-spacing:-1px;line-height:1.05;margin:8px 0 4px}
 .hero.mid{font-size:40px}.hero.sm{font-size:30px}
 .hero .unit{font-size:.45em;font-weight:600;color:var(--text)}
-.trend{font-size:12.5px;font-weight:500;margin-top:4px}
+.trend{font-size:13px;margin-top:4px}
 .trend.up{color:var(--green)}.trend.down{color:var(--red2)}
 .chart{height:210px;position:relative}.chart svg{width:100%;height:100%;display:block}
 .chart.tall{height:250px}
@@ -78,13 +65,13 @@ button{font:inherit;cursor:pointer}
 .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:11px;color:var(--muted);margin-top:10px}
 .legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
 .stat-tabs{display:inline-flex;gap:4px;margin-bottom:12px}
-.stat-tabs button{background:var(--card);border:1px solid var(--border2);color:var(--muted);border-radius:8px;padding:4px 12px;font-size:12px;font-weight:500}
-.stat-tabs button.active{background:rgba(218,119,81,.14);color:var(--purple2);border-color:rgba(218,119,81,.4)}
+.stat-tabs button{background:var(--card);border:1px solid var(--border2);color:var(--muted);border-radius:5px;padding:4px 12px;font-size:12px}
+.stat-tabs button.active{background:var(--card2);color:var(--text);border-color:#454a63}
 table{width:100%;border-collapse:collapse}
-th{font-size:11.5px;font-weight:500;color:var(--dim);padding:9px 12px;border-bottom:1px solid var(--border);text-align:left}
+th{text-align:left;color:var(--muted);font-weight:400;font-size:11.5px;padding:6px 10px;border-bottom:1px solid var(--border)}
 th .sort{color:var(--dim)}
-td{padding:9px 12px;border-bottom:1px solid rgba(255,255,255,.05);font-size:12px;color:var(--text);vertical-align:top}
-tr:hover td{background:rgba(218,119,81,.05)}
+td{border-bottom:1px solid var(--border);padding:7px 10px;font-size:12px;color:var(--text);vertical-align:top}
+tr:hover td{background:#191c29}
 .mono{font-family:var(--mono);font-size:11px}
 .dim{color:var(--dim)}
 .tr-head{display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12.5px}
@@ -111,22 +98,52 @@ tr:hover td{background:rgba(218,119,81,.05)}
 .attr-row .v{font-family:var(--mono);color:var(--val);word-break:break-word}
 .attr-row .v.pink{color:#d98a9a}.attr-row .v.blue{color:#a9c1d6}
 .exc-row td{cursor:pointer}
-.codeblock{background:#0b0a09;border:1px solid var(--border);border-radius:12px;padding:10px 12px;font-family:var(--mono);font-size:11px;color:#aeb6c8;white-space:pre-wrap;word-break:break-word;margin:8px 0}
-.qblock{display:flex;background:#0b0a09;border:1px solid var(--border);border-radius:12px;padding:10px 0;font-family:var(--mono);font-size:11.5px;color:#aeb6c8;position:relative}
+.codeblock{background:#0a0c12;border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-family:var(--mono);font-size:11px;color:#aeb6c8;white-space:pre-wrap;word-break:break-word;margin:8px 0}
+.qblock{display:flex;background:#0a0c12;border:1px solid var(--border);border-radius:8px;padding:10px 0;font-family:var(--mono);font-size:11.5px;color:#aeb6c8;position:relative}
 .qblock .ln{color:var(--dim);text-align:right;padding:0 12px;border-right:1px solid var(--border);user-select:none}
 .qblock .code{padding:0 14px;white-space:pre}
 .qblock .copy{position:absolute;top:8px;right:10px;color:var(--dim);cursor:pointer}
 .pilltag{display:inline-block;background:var(--card2);border:1px solid var(--border2);border-radius:5px;padding:2px 8px;font-size:10.5px;color:var(--muted);font-family:var(--mono)}
-.badge{display:inline-block;border-radius:999px;padding:3px 9px;font-size:10px;font-weight:600}
-.badge.safe{color:var(--green);background:rgba(95,185,138,.14);border:1px solid rgba(95,185,138,.33)}
-.badge.blocked{color:var(--red2);background:rgba(239,107,98,.14);border:1px solid rgba(239,107,98,.33)}
+.badge{display:inline-block;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:600}
+.badge.safe{color:var(--green);background:#4cc38a14;border:1px solid #4cc38a33}
+.badge.blocked{color:var(--red2);background:#ff5d7314;border:1px solid #ff5d7333}
 .subtabs{display:flex;gap:18px;border-bottom:1px solid var(--border);margin-bottom:10px;font-size:12.5px}
 .subtabs span{padding:6px 2px;color:var(--muted);cursor:pointer}
 .subtabs span.active{color:var(--text);border-bottom:2px solid var(--purple)}
 .subtabs .n{background:var(--yellow);color:#111;border-radius:8px;padding:0 6px;font-size:10px;margin-left:5px}
-.searchbox{background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:7px 10px;color:var(--text);font:inherit;font-size:12px;width:100%}
-.toast{position:fixed;right:20px;bottom:20px;background:#211d19;border:1px solid var(--border2);padding:12px 16px;border-radius:12px;font-size:12.5px;z-index:100;opacity:0;transition:opacity .2s,transform .2s;box-shadow:0 18px 40px -12px rgba(0,0,0,.7);transform:translateY(8px)}
-.toast.show{opacity:1;transform:none}
+.searchbox{background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font:inherit;font-size:12px;width:100%}
+.toast{position:fixed;right:20px;bottom:20px;background:var(--card2);border:1px solid var(--border2);padding:10px 14px;border-radius:8px;font-size:12px;z-index:100;opacity:0;transition:.2s}
+.toast.show{opacity:1}
+
+/* ── Professional icon and agent connection system ─────────────────── */
+.ui-icon{width:14px;height:14px;display:inline-block;vertical-align:-2px;flex:0 0 14px;color:currentColor}
+.ui-icon svg{display:block;width:100%;height:100%}
+.logo-fallback{display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:10px;font-weight:800;letter-spacing:-.04em;color:var(--text);background:var(--card2);border:1px solid var(--border2);border-radius:7px}
+.brand-mark{width:40px;height:40px;display:grid;place-items:center;flex:0 0 40px;border-radius:10px;background:var(--card2);border:1px solid var(--border2);font:800 10px/1 var(--mono);letter-spacing:.02em;color:var(--text);overflow:hidden}.brand-mark img{width:23px;height:23px;display:block;object-fit:contain}.brand-mark .brand-fallback{display:none}.brand-mark img[data-fallback]+.brand-fallback{display:none}
+.brand-mark.python{color:#8ab4ff}.brand-mark.mcp{color:#b7a2ff}.brand-mark.http{color:#7dd3fc}.brand-mark.composio{color:#f0abfc}.brand-mark.openai{color:#d1d5db}.brand-mark.anthropic{color:#f5d0a9}.brand-mark.langgraph{color:#86efac}.brand-mark.crewai{color:#fda4af}
+.connect-modal{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(4,6,12,.74);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.connect-modal.open{display:flex}
+.connect-panel{width:min(960px,100%);max-height:min(820px,calc(100vh - 48px));overflow:auto;background:var(--bg2);border:1px solid var(--border2);border-radius:14px;box-shadow:0 24px 80px rgba(0,0,0,.48);animation:connectIn .16s ease-out}
+@keyframes connectIn{from{opacity:0;transform:translateY(8px) scale(.99)}to{opacity:1;transform:none}}
+.connect-head{display:flex;align-items:center;gap:12px;padding:18px 20px;border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(16,18,26,.97);backdrop-filter:blur(10px);z-index:2}
+.connect-head .title{font-size:15px;font-weight:650}.connect-head .subtitle{font-size:11px;color:var(--muted);margin-top:2px}
+.connect-close{margin-left:auto;width:32px;height:32px;border:1px solid var(--border2);border-radius:7px;background:var(--card);color:var(--muted);font-size:20px;line-height:1;display:grid;place-items:center}
+.connect-close:hover{color:var(--text);border-color:#454a63}
+.connect-body{padding:20px}.connect-view{display:none}.connect-view.active{display:block}
+.connect-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.connect-card{display:flex;gap:13px;align-items:flex-start;text-align:left;width:100%;padding:15px;background:var(--card);border:1px solid var(--border);border-radius:10px;color:var(--text);transition:.15s ease;position:relative}
+button.connect-card{cursor:pointer}button.connect-card:hover{transform:translateY(-1px);border-color:#454a63;background:var(--card2)}
+.connect-card .name{font-weight:600;font-size:13px}.connect-card .desc{display:block;font-size:11px;color:var(--muted);margin-top:3px;line-height:1.45}
+.connect-section{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:20px 0 9px}.connect-section:first-child{margin-top:0}
+.connect-note{padding:10px 12px;border:1px solid var(--border);background:var(--card);border-radius:8px;color:var(--muted);font-size:11px;margin-top:14px}
+.connect-detail{display:none}.connect-detail.active{display:block}.connect-detail h3{margin:0 0 5px;font-size:16px}.connect-detail p{color:var(--muted);font-size:12px;margin:0 0 14px}
+.connect-back{border:0;background:none;color:var(--muted);padding:0;margin-bottom:16px;font-size:12px;display:inline-flex;align-items:center;gap:5px}.connect-back:hover{color:var(--text)}
+.connect-code-wrap{position:relative;margin:10px 0 16px}.connect-code{background:#0a0c12;border:1px solid var(--border);border-radius:8px;padding:14px 62px 14px 14px;font-family:var(--mono);font-size:11px;color:#aeb6c8;white-space:pre-wrap;word-break:break-word;line-height:1.55;overflow:auto}
+.connect-copy{position:absolute;right:9px;top:9px;border:1px solid var(--border2);background:var(--card2);color:var(--muted);border-radius:5px;padding:4px 8px;font-size:10px}.connect-copy:hover{color:var(--text);border-color:#454a63}
+.connect-agents{margin-top:20px;border-top:1px solid var(--border);padding-top:14px}.connect-agent-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)}.connect-agent-row:last-child{border-bottom:0}.connect-agent-dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:0 0 8px}.connect-agent-dot.connected{background:var(--green)}.connect-agent-dot.idle{background:var(--yellow)}.connect-agent-name{font-family:var(--mono);font-size:11px}.connect-agent-status{margin-left:auto;font-size:10px;color:var(--muted)}
+@media(max-width:760px){.connect-modal{padding:12px}.connect-panel{max-height:calc(100vh - 24px)}.connect-grid{grid-template-columns:1fr}.connect-body{padding:14px}}
+@media(max-width:1200px){.g5{grid-template-columns:repeat(3,1fr)}.g4,.g3{grid-template-columns:repeat(2,1fr)}.tr-body{grid-template-columns:1fr}.fside{display:none}}
+@media(max-width:760px){.g5,.g4,.g3,.g2{grid-template-columns:1fr}.tabs{overflow-x:auto}}
 button.menu,button.info,button.help,button.alert-btn{font:inherit}
 .card{overflow:visible}
 .popover{position:fixed;z-index:1100;background:var(--card2);border:1px solid var(--border2);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.4);min-width:160px;padding:6px;display:none}
@@ -135,11 +152,79 @@ button.menu,button.info,button.help,button.alert-btn{font:inherit}
 .popover button:hover{background:var(--card)}
 .popover.info-pop{max-width:260px;color:var(--muted);font-size:12px;line-height:1.5;padding:10px 12px;cursor:default}
 .alert-flag{display:inline-block;margin-left:8px;font-size:11px;color:var(--red2);font-weight:600;vertical-align:middle}
-.alert-rule-row{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:6px 10px;margin-bottom:6px;font-size:12px}
-.alert-rule-row button{background:none;border:0;color:var(--red2);cursor:pointer;font-size:14px;line-height:1}
+.alert-rule-row{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#151515;border:1px solid #333;border-radius:6px;padding:6px 10px;margin-bottom:6px;font-size:12px;color:#ccc}
+.alert-rule-row button{background:none;border:0;color:#ef4444;cursor:pointer;font-size:14px;line-height:1}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CERBERE THEME LAYER — dark warm surfaces, single ember accent
+   ═══════════════════════════════════════════════════════════════════════ */
+html,body{font-family:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:13.5px;line-height:1.5;-webkit-font-smoothing:antialiased;letter-spacing:-.003em}
+body{background:var(--bg);background-image:radial-gradient(900px 460px at 90% -140px,rgba(218,119,81,.11),transparent 70%),radial-gradient(760px 420px at -10% 38%,rgba(218,119,81,.045),transparent 70%);background-attachment:fixed}
+::selection{background:rgba(218,119,81,.35)}
+*{scrollbar-width:thin;scrollbar-color:#3a342d transparent}
+a{color:var(--purple2)}
+
+/* ── top bar ───────────────────────────────────────────────────────── */
+.topbar{height:62px;gap:28px;padding:0 26px;background:rgba(13,12,12,.84);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-bottom:1px solid var(--border)}
+.brand{display:flex;align-items:center;gap:12px}
+.logo-box{width:36px;height:36px;border-radius:10px;background:#0d0c0c;border:1px solid var(--border2);padding:3px;overflow:hidden}
+.prod{font-family:'Fraunces',Georgia,serif;font-weight:600;font-size:21px;letter-spacing:-.02em;line-height:1}
+.prod small{font-family:'Inter',sans-serif;font-size:11.5px;font-weight:400;color:var(--dim);margin-left:10px;letter-spacing:0}
+.tabs button{font-size:13px;font-weight:500;padding:0 15px;color:var(--muted);transition:color .15s}
+.tabs button.active{color:var(--text);border-bottom-color:var(--purple)}
+.tb-right{gap:10px}
+.live{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);margin-right:6px}
+.live i{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(95,185,138,.18);animation:livePulse 2.6s ease-in-out infinite}
+@keyframes livePulse{50%{box-shadow:0 0 0 6px rgba(95,185,138,.05)}}
+.tb-btn{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 14px;border-radius:10px;background:var(--card);border:1px solid var(--border2);color:var(--text);font-size:12.5px;font-weight:500;transition:border-color .15s,background .15s}
+.tb-btn svg{width:16px;height:16px;flex:0 0 16px}
+.tb-btn:hover{border-color:#5a4b3f;background:var(--card2)}
+.tb-btn.primary{background:var(--purple);border-color:var(--purple);color:#1c100a;font-weight:600}
+.tb-btn.primary:hover{background:var(--purple2);border-color:var(--purple2)}
+.tb-btn.wide{width:100%;justify-content:center;height:40px}
+.tb-btn:focus-visible,.ap-btn:focus-visible,.ag-btn:focus-visible,.tb-icon:focus-visible{outline:2px solid var(--purple2);outline-offset:2px}
+.tb-badge{display:none;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--red2);color:#fff;font-size:11px;font-weight:700;align-items:center;justify-content:center}
+.tb-count{min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:rgba(95,185,138,.14);color:var(--green);font-size:11px;font-weight:600;display:inline-flex;align-items:center;justify-content:center}
+.tb-count.zero{background:var(--card2);color:var(--dim)}
+.tb-btn.has-pending{border-color:rgba(239,107,98,.6);animation:pendingPulse 2.4s ease-in-out infinite}
+@keyframes pendingPulse{0%,100%{box-shadow:0 0 0 0 rgba(239,107,98,0)}50%{box-shadow:0 0 0 6px rgba(239,107,98,.14)}}
+.tb-icon{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:transparent;border:1px solid var(--border2);color:var(--muted)}
+.tb-icon:hover{color:var(--text);border-color:#5a4b3f}
+.tb-icon svg{width:16px;height:16px}
+.help{width:36px;height:36px;border-radius:10px;font-size:13px}
+
+/* ── toolbar / filters ─────────────────────────────────────────────── */
+.toolbar{padding:12px 26px;background:transparent;border-bottom:1px solid var(--border)}
+.filter-pill,.pill{border-radius:10px;background:var(--card);border-color:var(--border2)}
+.btn{border-radius:10px;background:var(--card);border-color:var(--border2);padding:7px 14px;font-weight:500}
+.btn:hover{border-color:#5a4b3f}
+.fside{background:transparent;border-right:1px solid var(--border);padding:16px 12px}
+.fitem input{accent-color:var(--purple)}
+
+/* ── content ───────────────────────────────────────────────────────── */
+.main{padding:26px 30px 80px}
+.sec{font-family:'Fraunces',Georgia,serif;font-size:21px;font-weight:500;letter-spacing:-.015em;margin:38px 0 16px}
+.sec:first-child{margin-top:2px}
+.sec .ico{color:var(--purple)}
+.grid{gap:14px}
+.card{background:linear-gradient(180deg,#1a1714,#151311);border:1px solid var(--border);border-radius:16px;padding:20px 22px;box-shadow:0 1px 0 rgba(255,255,255,.025) inset,0 14px 34px -22px rgba(0,0,0,.85);transition:border-color .2s}
+.card:hover{border-color:var(--border2)}
+.clabel{font-size:12px;font-weight:500;color:var(--muted);margin-bottom:10px}
+.hero{font-family:'Fraunces',Georgia,serif;font-weight:500;letter-spacing:-.025em}
+.trend{font-size:12.5px;font-weight:500}
+.stat-tabs button,.subtabs span{border-radius:8px}
+.stat-tabs button.active{background:rgba(218,119,81,.14);color:var(--purple2);border-color:rgba(218,119,81,.4)}
+th{font-size:11.5px;font-weight:500;color:var(--dim);padding:9px 12px}
+td{padding:9px 12px;border-bottom-color:rgba(255,255,255,.05)}
+tr:hover td{background:rgba(218,119,81,.05)}
+.badge{border-radius:999px;padding:3px 9px}
+.searchbox{border-radius:10px}
+.codeblock,.qblock{border-radius:12px;background:#0b0a09}
+.toast{border-radius:12px;padding:12px 16px;background:#211d19;border-color:var(--border2);box-shadow:0 18px 40px -12px rgba(0,0,0,.7);font-size:12.5px;transform:translateY(8px);transition:opacity .2s,transform .2s}
+.toast.show{transform:none}
 
 /* ── modals (help / alerts / keys) ─────────────────────────────────── */
-.modal-wrap{position:fixed;inset:0;z-index:1000;background:rgba(6,5,5,.7);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);justify-content:center;align-items:center;padding:20px;display:none}
+.modal-wrap{position:fixed;inset:0;z-index:1000;background:rgba(6,5,5,.7);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);justify-content:center;align-items:center;padding:20px}
 .modal-card{width:min(480px,100%);background:var(--bg2);border:1px solid var(--border2);border-radius:18px;padding:26px;box-shadow:0 30px 90px rgba(0,0,0,.6);animation:connectIn .16s ease-out}
 .modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .modal-head h3{margin:0;font-family:'Fraunces',Georgia,serif;font-size:22px;font-weight:500;letter-spacing:-.015em}
@@ -158,6 +243,8 @@ button.menu,button.info,button.help,button.alert-btn{font:inherit}
 .newkey p{margin:0 0 10px;color:var(--yellow);font-size:12.5px}
 .newkey-row{display:flex;gap:8px}.newkey-row input{flex:1;height:36px;padding:0 10px;background:#0b0a09;border:1px solid var(--border2);border-radius:9px;color:var(--val);font:12px var(--mono)}
 .modal-close-row{margin-top:16px}
+.alert-rule-row{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:10px}
+.alert-rule-row button{color:var(--red2)}
 .row2{display:flex;gap:8px;align-items:center;margin-top:12px}.row2 select{flex:0 0 auto}.row2 input{flex:1}
 
 /* ── drawers (approval queue / agents) ─────────────────────────────── */
@@ -231,34 +318,20 @@ button.menu,button.info,button.help,button.alert-btn{font:inherit}
 .ag-btn.disconnect.armed{background:var(--red2);border-color:var(--red2);color:#fff}
 .ag-btn.reconnect{background:var(--purple);border-color:var(--purple);color:#1c100a}.ag-btn.reconnect:hover{background:var(--purple2)}
 .ag-btn[disabled]{opacity:.5;cursor:default}
-
 @media(max-width:760px){.topbar{gap:12px;padding:0 12px;overflow-x:auto}.tb-btn span.lbl{display:none}.ag-stats{grid-template-columns:repeat(2,1fr)}.live,.prod small{display:none}}
 @media(prefers-reduced-motion:reduce){.tb-btn.has-pending,.live i{animation:none}.drawer,.drawer-wrap,.ap-card{transition:none}}
 
 /* ── finitions ─────────────────────────────────────────────────────── */
-.connect-modal{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(4,6,12,.74);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
-.connect-modal.open{display:flex}
-.connect-panel{width:min(960px,100%);max-height:min(820px,calc(100vh - 48px));overflow:auto;background:var(--bg2);border:1px solid var(--border2);border-radius:14px;box-shadow:0 24px 80px rgba(0,0,0,.48);animation:connectIn .16s ease-out}
-@keyframes connectIn{from{opacity:0;transform:translateY(8px) scale(.99)}to{opacity:1;transform:none}}
-.connect-head{display:flex;align-items:center;gap:12px;padding:18px 20px;border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(16,18,26,.97);backdrop-filter:blur(10px);z-index:2}
-.connect-head .title{font-size:15px;font-weight:650}.connect-head .subtitle{font-size:11px;color:var(--muted);margin-top:2px}
-.connect-close{margin-left:auto;width:32px;height:32px;border:1px solid var(--border2);border-radius:7px;background:var(--card);color:var(--muted);font-size:20px;line-height:1;display:grid;place-items:center}
-.connect-close:hover{color:var(--text);border-color:#454a63}
-.connect-body{padding:20px}.connect-view{display:none}.connect-view.active{display:block}
-.connect-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-.connect-card{display:flex;gap:13px;align-items:flex-start;text-align:left;width:100%;padding:15px;background:var(--card);border:1px solid var(--border);border-radius:10px;color:var(--text);transition:.15s ease;position:relative}
-button.connect-card{cursor:pointer}button.connect-card:hover{transform:translateY(-1px);border-color:#454a63;background:var(--card2)}
-.connect-card .name{font-weight:600;font-size:13px}.connect-card .desc{display:block;font-size:11px;color:var(--muted);margin-top:3px;line-height:1.45}
-.connect-section{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:20px 0 9px}.connect-section:first-child{margin-top:0}
-.connect-note{padding:10px 12px;border:1px solid var(--border);background:var(--card);border-radius:8px;color:var(--muted);font-size:11px;margin-top:14px}
-.connect-detail{display:none}.connect-detail.active{display:block}.connect-detail h3{margin:0 0 5px;font-size:16px}.connect-detail p{color:var(--muted);font-size:12px;margin:0 0 14px}
-.connect-back{border:0;background:none;color:var(--muted);padding:0;margin-bottom:16px;font-size:12px;display:inline-flex;align-items:center;gap:5px}.connect-back:hover{color:var(--text)}
-.connect-code-wrap{position:relative;margin:10px 0 16px}.connect-code{background:#0a0c12;border:1px solid var(--border);border-radius:8px;padding:14px 62px 14px 14px;font-family:var(--mono);font-size:11px;color:#aeb6c8;white-space:pre-wrap;word-break:break-word;line-height:1.55;overflow:auto}
-.connect-copy{position:absolute;right:9px;top:9px;border:1px solid var(--border2);background:var(--card2);color:var(--muted);border-radius:5px;padding:4px 8px;font-size:10px}.connect-copy:hover{color:var(--text);border-color:#454a63}
-.connect-agents{margin-top:20px;border-top:1px solid var(--border);padding-top:14px}.connect-agent-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)}.connect-agent-row:last-child{border-bottom:0}.connect-agent-dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:0 0 8px}.connect-agent-dot.connected{background:var(--green)}.connect-agent-dot.idle{background:var(--yellow)}.connect-agent-name{font-family:var(--mono);font-size:11px}.connect-agent-status{margin-left:auto;font-size:10px;color:var(--muted)}
-@media(max-width:760px){.connect-modal{padding:12px}.connect-panel{max-height:calc(100vh - 24px)}.connect-grid{grid-template-columns:1fr}.connect-body{padding:14px}}
-@media(max-width:1200px){.g5{grid-template-columns:repeat(3,1fr)}.g4,.g3{grid-template-columns:repeat(2,1fr)}.tr-body{grid-template-columns:1fr}.fside{display:none}}
-@media(max-width:760px){.g5,.g4,.g3,.g2{grid-template-columns:1fr}.tabs{overflow-x:auto}}
+.help{background:transparent;color:var(--muted);border:1px solid var(--border2);font-weight:600}
+.help:hover{color:var(--text);border-color:#5a4b3f}
+button.menu{width:28px;height:28px;display:grid;place-items:center;border-radius:8px;background:transparent;border:1px solid transparent;color:var(--dim);letter-spacing:0;top:14px;right:14px;padding:0}
+button.menu:hover{background:var(--card2);color:var(--text)}
+.card .alert-btn{right:52px;top:19px;color:var(--dim);font-size:11.5px;padding:0}
+.card .alert-btn:hover{color:var(--purple2)}
+button.info{background:none;color:var(--dim);border:1px solid var(--border2)}
+.fitems{display:flex;flex-direction:column;gap:2px}.fitem{white-space:nowrap}
+#gqBig .card{text-align:left}
+.fgroup>.fitems{display:flex;flex-direction:column;align-items:stretch;gap:2px;cursor:default}
 </style>
 </head>
 <body>
@@ -267,13 +340,13 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
     <div class="logo-box"><img src="/static/logo.svg" alt="Cerbere" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="logo-fallback" aria-hidden="true">C</span></div>
     <span class="prod">Cerbere<small>Runtime security for AI agents</small></span>
   </div>
-<nav class="tabs" id="topTabs">
-<button data-view="overview">Overview</button>
+  <nav class="tabs" id="topTabs">
+    <button data-view="overview">Overview</button>
     <button data-view="health" class="active">Health</button>
     <button data-view="tracing">Explorer</button>
     <button data-view="audit">Compliance</button>
-</nav>
-<div class="tb-right">
+  </nav>
+  <div class="tb-right">
     <span class="live" title="Auto-refreshing"><i></i>Live</span>
     <button class="tb-btn" id="btnApprovals" type="button" onclick="openApprovalsPanel()" aria-label="Open the approval queue">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 6v5c0 4.2 2.9 8 7 10 4.1-2 7-5.8 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></svg>
@@ -291,8 +364,9 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="m11 12 8-8m-3 3 3 3"/></svg>
     </button>
     <button class="help" type="button" onclick="openHelpModal()" aria-label="Help">?</button>
-</div>
+  </div>
 </header>
+
 <div id="helpModal" class="modal-wrap" style="display:none" onclick="if(event.target===this)closeHelpModal()">
   <div class="modal-card">
     <div class="modal-head"><h3>Quick help</h3><button class="connect-close" type="button" aria-label="Close" onclick="closeHelpModal()">×</button></div>
@@ -331,8 +405,8 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
 </div>
 
 <div class="toolbar">
-<div class="filter-pill"><span class="ui-icon" data-icon="filter"></span><span>Service in (<b>agentguard-collector</b>)</span><span class="x" title="clear">✕</span></div>
-<div class="right">
+  <div class="filter-pill"><span class="ui-icon" data-icon="filter"></span><span>Service in (<b>agentguard-collector</b>)</span><span class="x" title="clear">✕</span></div>
+  <div class="right">
     <span class="pill">Last 14 days ▾</span>
     <button class="btn" onclick="refreshAll()"><span class="ui-icon" data-icon="refresh"></span> Refresh</button>
     <form method="post" action="/logout" style="margin:0"><button class="btn" type="submit">Sign out</button></form>
@@ -369,7 +443,7 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
   <div class="stat-tabs" id="latTabs"><button class="active" data-s="avg">AVG</button><button data-s="p50">p50</button><button data-s="p90">p90</button><button data-s="p95">p95</button></div>
   <div class="grid g2">
     <div class="card"><button class="menu" type="button" onclick="openCardMenu(event,this)">⋮</button><div class="clabel">Time to response</div><div class="hero" style="text-align:center" id="ttrHero">—</div><div class="chart" id="ttrChart"></div></div>
-    <div class="card"><button class="menu" type="button" onclick="openCardMenu(event,this)"></button><div class="clabel">Response time per model</div><div id="rtModel" style="height:290px"></div></div>
+    <div class="card"><button class="menu" type="button" onclick="openCardMenu(event,this)">⋮</button><div class="clabel">Response time per model</div><div id="rtModel" style="height:290px"></div></div>
   </div>
   <div class="sec"><span class="ico">◈</span>Cost <button class="info" type="button" onclick="showInfoPopover(event,'cost')">i</button></div>
   <div class="grid g3">
@@ -426,7 +500,7 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
 | summarize count() by: { gen_ai.model }
 | filter gen_ai.model != ""</div><span class="copy" onclick="toast('Query copied')">⧉</span></div>
       <div class="card" style="margin-top:12px;padding:6px 0">
-        <table><thead><tr><th>llm model <span class="sort"></span></th><th style="text-align:right">events <span class="sort">⇅</span></th></tr></thead><tbody id="auModels"></tbody></table>
+        <table><thead><tr><th>llm model <span class="sort">⇅</span></th><th style="text-align:right">events <span class="sort">⇅</span></th></tr></thead><tbody id="auModels"></tbody></table>
       </div>
     </div>
     <div><div class="sec" style="margin-top:0">Trend</div><div class="card"><div class="chart tall" id="auTrend" style="height:330px"></div></div></div>
@@ -676,7 +750,7 @@ function openCardMenu(evt, btn) {
     }
     closeAllPopovers();
     _cardMenuTarget = card;
-    pop.innerHTML =
+   pop.innerHTML =
         '<button onclick="exportCardData(\'json\')">Copier en JSON</button>' +
         '<button onclick="exportCardData(\'csv\')">Exporter en CSV</button>' +
         '<button onclick="hideCard()">Masquer cette carte</button>';
@@ -1492,7 +1566,10 @@ document.addEventListener('keydown', function(e) {
         }
     }
 });
-
+/*
+ * Alias utilisé par le bouton "+ Connection".
+ * Cela évite d'avoir deux systèmes différents pour la même action.
+ */
 function openConnectModal() {
     openConnectAgentModal();
 }
@@ -1505,6 +1582,9 @@ function closeConnectAgentModal() {
     document.body.style.overflow = '';
 }
 
+/*
+ * Alias éventuel pour les boutons Close/X.
+ */
 function closeConnectModal() {
     closeConnectAgentModal();
 }
@@ -1658,6 +1738,10 @@ function refreshAll() {
 }
 
 refreshAll();
+// ✅ FIX perf : ne pas taper le backend en continu quand l'onglet n'est
+// pas regarde (l'ancien setInterval tournait 24/7 des qu'un onglet
+// restait ouvert, meme en arriere-plan, ce qui pouvait saturer un
+// service Render free-tier mono-worker).
 var _refreshTimer = null;
 
 function startRefreshLoop() {
@@ -1684,104 +1768,103 @@ document.addEventListener('visibilitychange', function() {
 if (!document.hidden) {
     startRefreshLoop();
 }
-
-/* ═════════════ API keys ═════════════ */
-async function openApiKeyModal() {
+  /* ═════════════ API keys ═════════════ */
+  async function openApiKeyModal() {
     $('apiKeyModal').style.display = 'flex';
     $('newKeyDisplay').style.display = 'none';
     await loadKeys();
-}
-function closeApiKeyModal() { $('apiKeyModal').style.display = 'none'; }
+  }
+  function closeApiKeyModal() { $('apiKeyModal').style.display = 'none'; }
 
-async function loadKeys() {
+  async function loadKeys() {
     var box = $('apiKeyList');
     box.innerHTML = '<div class="empty" style="padding:18px">Loading…</div>';
     try {
-        var data = await api('/api/keys');
-        if (data.keys && data.keys.length) {
-            box.innerHTML = data.keys.map(function(k) {
-                return '<div class="key-row"><div><b>' + esc(k.name) + '</b><code>' + esc(k.key_preview) + '</code></div>' +
-                       '<span class="key-state' + (k.active ? '' : ' off') + '">' + (k.active ? 'Active' : 'Revoked') + '</span></div>';
-            }).join('');
-        } else {
-            box.innerHTML = '<div class="empty" style="padding:18px">No key yet. Generate one to connect your first agent.</div>';
-        }
+      var data = await api('/api/keys');
+      if (data.keys && data.keys.length) {
+        box.innerHTML = data.keys.map(function(k) {
+          return '<div class="key-row"><div><b>' + esc(k.name) + '</b><code>' + esc(k.key_preview) + '</code></div>' +
+                 '<span class="key-state' + (k.active ? '' : ' off') + '">' + (k.active ? 'Active' : 'Revoked') + '</span></div>';
+        }).join('');
+      } else {
+        box.innerHTML = '<div class="empty" style="padding:18px">No key yet. Generate one to connect your first agent.</div>';
+      }
     } catch (e) {
-        box.innerHTML = '<div class="empty" style="padding:18px;color:var(--red2)">Could not load keys.</div>';
+      box.innerHTML = '<div class="empty" style="padding:18px;color:var(--red2)">Could not load keys.</div>';
     }
-}
+  }
 
-async function generateNewKey() {
+  async function generateNewKey() {
     var btn = $('btnGenerate');
     btn.disabled = true; btn.textContent = 'Generating…';
     try {
-        var data = await apiSend('/api/keys', 'POST', { name: 'Agent key ' + new Date().toLocaleDateString('en-US') });
-        if (data.key) {
-            $('newKeyValue').value = data.key;
-            $('newKeyDisplay').style.display = 'block';
-            await loadKeys();
-        } else {
-            toast('Could not generate a key');
-        }
+      var data = await apiSend('/api/keys', 'POST', { name: 'Agent key ' + new Date().toLocaleDateString('en-US') });
+      if (data.key) {
+        $('newKeyValue').value = data.key;
+        $('newKeyDisplay').style.display = 'block';
+        await loadKeys();
+      } else {
+        toast('Could not generate a key');
+      }
     } catch (e) {
-        toast('Could not generate a key: ' + e.message);
+      toast('Could not generate a key: ' + e.message);
     } finally {
-        btn.disabled = false; btn.textContent = '+ Generate a new key';
+      btn.disabled = false; btn.textContent = '+ Generate a new key';
     }
-}
+  }
 
-function copyKey() {
+  function copyKey() {
     var input = $('newKeyValue');
     input.select();
     try { document.execCommand('copy'); } catch (e) {}
     if (navigator.clipboard) navigator.clipboard.writeText(input.value).catch(function() {});
     toast('Key copied to clipboard');
-}
+  }
 
-/* ═════════════ Shared helpers ═════════════ */
-function _openDrawer(id) { $(id).classList.add('open'); document.body.style.overflow = 'hidden'; }
-function _closeDrawer(id) {
+  /* ═════════════ Shared helpers ═════════════ */
+  function _openDrawer(id) { $(id).classList.add('open'); document.body.style.overflow = 'hidden'; }
+  function _closeDrawer(id) {
     $(id).classList.remove('open');
     if (!document.querySelector('.drawer-wrap.open')) document.body.style.overflow = '';
-}
-document.addEventListener('keydown', function(e) {
+  }
+  document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') { closeApprovalsPanel(); closeAgentsPanel(); }
-});
+  });
 
-function _secondsSince(iso) {
+  function _secondsSince(iso) {
     var t = Date.parse(iso);
     return isNaN(t) ? null : Math.max(0, Math.round((Date.now() - t) / 1000));
-}
-function _dur(iso) {
+  }
+  function _dur(iso) {
     var s = _secondsSince(iso);
     if (s === null) return '—';
     if (s < 45) return 'seconds';
     if (s < 3600) return Math.round(s / 60) + ' min';
     if (s < 86400) return Math.round(s / 3600) + ' h';
     return Math.round(s / 86400) + ' d';
-}
-function _ago(iso) {
+  }
+  function _ago(iso) {
     var d = _dur(iso);
     if (d === '—') return '—';
     return d === 'seconds' ? 'just now' : d + ' ago';
-}
+  }
 
-/* ═════════════ Approval queue ═════════════ */
-var _ap = { tab: 'pending', pending: [], history: [], counts: { pending: 0, approved: 0, rejected: 0 }, seen: {}, booted: false };
+  /* ═════════════ Approval queue ═════════════ */
+  var _ap = { tab: 'pending', pending: [], history: [], counts: { pending: 0, approved: 0, rejected: 0 }, seen: {}, booted: false };
 
-function openApprovalsPanel() { _openDrawer('approvalsPanel'); loadApprovals(); renderIcons($('approvalsPanel')); }
-function closeApprovalsPanel() { _closeDrawer('approvalsPanel'); }
+  function openApprovalsPanel() { _openDrawer('approvalsPanel'); loadApprovals(); renderIcons($('approvalsPanel')); }
+  function closeApprovalsPanel() { _closeDrawer('approvalsPanel'); }
 
-function setApprovalsTab(tab) {
+  function setApprovalsTab(tab) {
     _ap.tab = tab;
     document.querySelectorAll('#approvalsPanel .drawer-tabs button').forEach(function(b) {
-        b.classList.toggle('active', b.dataset.ap === tab);
+      b.classList.toggle('active', b.dataset.ap === tab);
     });
     renderApprovals();
     loadApprovals();
-}
+  }
 
-function _syncApprovalsBadge() {
+  function _syncApprovalsBadge() {
     var c = _ap.counts || {};
     var n = c.pending || 0;
     var badge = $('approvalsBadge');
@@ -1790,53 +1873,54 @@ function _syncApprovalsBadge() {
     $('btnApprovals').classList.toggle('has-pending', n > 0);
     $('apTabPending').textContent = n;
     $('apTabHistory').textContent = (c.approved || 0) + (c.rejected || 0);
-}
+  }
 
-async function loadApprovals() {
+  async function loadApprovals() {
     try {
-        var status = _ap.tab === 'pending' ? 'pending' : 'history';
-        var data = await api('/api/approvals?status=' + status + '&limit=100');
-        _ap.counts = data.counts || _ap.counts;
-        if (_ap.tab === 'pending') {
-            _ap.pending = data.approvals || [];
-            _ap.pending.forEach(function(a) { _ap.seen[a.id] = true; });
-        } else {
-            _ap.history = data.approvals || [];
-        }
-        _syncApprovalsBadge();
-        renderApprovals();
+      var status = _ap.tab === 'pending' ? 'pending' : 'history';
+      var data = await api('/api/approvals?status=' + status + '&limit=100');
+      _ap.counts = data.counts || _ap.counts;
+      if (_ap.tab === 'pending') {
+        _ap.pending = data.approvals || [];
+        _ap.pending.forEach(function(a) { _ap.seen[a.id] = true; });
+      } else {
+        _ap.history = data.approvals || [];
+      }
+      _syncApprovalsBadge();
+      renderApprovals();
     } catch (e) {
-        $('approvalsList').innerHTML = '<div class="d-empty"><h4>Could not load the queue</h4><p>' + esc(e.message) + '. It will retry automatically.</p></div>';
+      $('approvalsList').innerHTML = '<div class="d-empty"><h4>Could not load the queue</h4><p>' + esc(e.message) + '. It will retry automatically.</p></div>';
     }
-}
+  }
 
-async function checkApprovals() {
+  // Background poll: badge + a slide-in of the queue when a NEW action needs a decision.
+  async function checkApprovals() {
     if (document.hidden) return;
     try {
-        var data = await api('/api/approvals?status=pending&limit=100');
-        var list = data.approvals || [];
-        _ap.counts = data.counts || _ap.counts;
-        var fresh = list.filter(function(a) { return !_ap.seen[a.id]; });
-        list.forEach(function(a) { _ap.seen[a.id] = true; });
-        var open = $('approvalsPanel').classList.contains('open');
-        if (_ap.tab === 'pending') _ap.pending = list;
-        _syncApprovalsBadge();
-        if (open && _ap.tab === 'pending') renderApprovals();
-        if (fresh.length && _ap.booted && !open) {
-            toast(fresh.length === 1 ? 'New action waiting for approval' : fresh.length + ' new actions waiting for approval');
-            openApprovalsPanel();
-        }
-        _ap.booted = true;
+      var data = await api('/api/approvals?status=pending&limit=100');
+      var list = data.approvals || [];
+      _ap.counts = data.counts || _ap.counts;
+      var fresh = list.filter(function(a) { return !_ap.seen[a.id]; });
+      list.forEach(function(a) { _ap.seen[a.id] = true; });
+      var open = $('approvalsPanel').classList.contains('open');
+      if (_ap.tab === 'pending') _ap.pending = list;
+      _syncApprovalsBadge();
+      if (open && _ap.tab === 'pending') renderApprovals();
+      if (fresh.length && _ap.booted && !open) {
+        toast(fresh.length === 1 ? 'New action waiting for approval' : fresh.length + ' new actions waiting for approval');
+        openApprovalsPanel();
+      }
+      _ap.booted = true;
     } catch (e) {
-        console.error('Failed to fetch approvals', e);
+      console.error('Failed to fetch approvals', e);
     }
-}
+  }
 
-function _apEmpty(title, text, icon) {
+  function _apEmpty(title, text, icon) {
     return '<div class="d-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' + icon + '</svg><h4>' + title + '</h4><p>' + text + '</p></div>';
-}
+  }
 
-function _apPendingCard(a) {
+  function _apPendingCard(a) {
     var params = '';
     try { params = JSON.stringify(a.params || {}, null, 2); } catch (e) {}
     var late = (_secondsSince(a.created_at) || 0) > 900;
@@ -1851,144 +1935,145 @@ function _apPendingCard(a) {
         '<button type="button" class="ap-btn approve" data-id="' + esc(a.id) + '" onclick="resolveApproval(this.dataset.id,\'approve\')">Approve</button>' +
         '<button type="button" class="ap-btn reject" data-id="' + esc(a.id) + '" onclick="resolveApproval(this.dataset.id,\'reject\')">Reject</button>' +
       '</div></div>';
-}
+  }
 
-function _apHistoryRow(a) {
+  function _apHistoryRow(a) {
     var approved = a.status === 'approved';
     return '<div class="ap-hist"><span class="st-chip ' + (approved ? 'approved' : 'rejected') + '">' + (approved ? 'Approved' : 'Rejected') + '</span>' +
       '<span class="tool">' + esc(a.tool_name || '—') + '</span><span class="when">' + esc(_ago(a.resolved_at)) + '</span>' +
       '<span class="meta">' + esc(a.agent_id || 'unknown agent') + ' · decided by ' + esc(a.resolved_by || 'a reviewer') + '</span></div>';
-}
+  }
 
-function renderApprovals() {
+  function renderApprovals() {
     var box = $('approvalsList');
     if (_ap.tab === 'pending') {
-        box.innerHTML = _ap.pending.length ? _ap.pending.map(_apPendingCard).join('') :
-            _apEmpty('All clear', 'No action is waiting for a decision. When an agent attempts something risky, it lands here first.',
-                     '<path d="M12 3 5 6v5c0 4.2 2.9 8 7 10 4.1-2 7-5.8 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>');
+      box.innerHTML = _ap.pending.length ? _ap.pending.map(_apPendingCard).join('') :
+        _apEmpty('All clear', 'No action is waiting for a decision. When an agent attempts something risky, it lands here first.',
+                 '<path d="M12 3 5 6v5c0 4.2 2.9 8 7 10 4.1-2 7-5.8 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>');
     } else {
-        box.innerHTML = _ap.history.length ? _ap.history.map(_apHistoryRow).join('') :
-            _apEmpty('No decisions yet', 'Every approval and rejection is recorded here with who decided and when.',
-                     '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/>');
+      box.innerHTML = _ap.history.length ? _ap.history.map(_apHistoryRow).join('') :
+        _apEmpty('No decisions yet', 'Every approval and rejection is recorded here with who decided and when.',
+                 '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/>');
     }
     renderIcons(box);
-}
+  }
 
-async function resolveApproval(approvalId, action) {
+  async function resolveApproval(approvalId, action) {
     var card = document.querySelector('.ap-card[data-card="' + (window.CSS && CSS.escape ? CSS.escape(approvalId) : approvalId) + '"]');
     if (card) card.querySelectorAll('.ap-btn').forEach(function(b) { b.disabled = true; });
     try {
-        await apiSend('/api/approvals/' + encodeURIComponent(approvalId) + '/' + action, 'POST', {});
-        toast(action === 'approve' ? 'Approved. The agent may proceed.' : 'Rejected. The action stays blocked.');
-        if (card) { card.classList.add('leaving'); await new Promise(function(r) { setTimeout(r, 240); }); }
-        await loadApprovals();
+      await apiSend('/api/approvals/' + encodeURIComponent(approvalId) + '/' + action, 'POST', {});
+      toast(action === 'approve' ? 'Approved. The agent may proceed.' : 'Rejected. The action stays blocked.');
+      if (card) { card.classList.add('leaving'); await new Promise(function(r) { setTimeout(r, 240); }); }
+      await loadApprovals();
     } catch (e) {
-        if (card) card.querySelectorAll('.ap-btn').forEach(function(b) { b.disabled = false; });
-        toast(/Human session/.test(e.message) ? 'Please sign in again to decide.' : 'Could not save the decision: ' + e.message);
+      if (card) card.querySelectorAll('.ap-btn').forEach(function(b) { b.disabled = false; });
+      toast(/Human session/.test(e.message) ? 'Please sign in again to decide.' : 'Could not save the decision: ' + e.message);
     }
-}
+  }
 
-/* ═════════════ Connected agents ═════════════ */
-var _ag = { list: [], counts: {}, armed: {}, timer: null };
-var _AG_LABEL = { connected: 'Connected', idle: 'Idle', offline: 'Offline', disconnected: 'Disconnected' };
+  /* ═════════════ Connected agents ═════════════ */
+  var _ag = { list: [], counts: {}, armed: {}, timer: null };
+  var _AG_LABEL = { connected: 'Connected', idle: 'Idle', offline: 'Offline', disconnected: 'Disconnected' };
 
-function openAgentsPanel() {
+  function openAgentsPanel() {
     _openDrawer('agentsPanel');
     loadAgents();
     if (_ag.timer) clearInterval(_ag.timer);
-    _ag.timer = setInterval(loadAgents, 5000);
-}
-function closeAgentsPanel() {
+    _ag.timer = setInterval(loadAgents, 5000);   // live status while the panel is open
+  }
+  function closeAgentsPanel() {
     _closeDrawer('agentsPanel');
     if (_ag.timer) { clearInterval(_ag.timer); _ag.timer = null; }
-}
+  }
 
-function _syncAgentsBadge() {
+  function _syncAgentsBadge() {
     var c = _ag.counts || {};
     var live = (c.connected || 0) + (c.idle || 0);
     var b = $('agentsBadge');
     b.textContent = live;
     b.classList.toggle('zero', !live);
-}
+  }
 
-async function loadAgents() {
+  async function loadAgents() {
     try {
-        var data = await api('/api/agents');
-        _ag.list = data.agents || [];
-        _ag.counts = data.counts || {};
-        _syncAgentsBadge();
-        if ($('agentsPanel').classList.contains('open')) renderAgents();
+      var data = await api('/api/agents');
+      _ag.list = data.agents || [];
+      _ag.counts = data.counts || {};
+      _syncAgentsBadge();
+      if ($('agentsPanel').classList.contains('open')) renderAgents();
     } catch (e) {
-        if ($('agentsPanel').classList.contains('open')) {
-            $('agentsList').innerHTML = '<div class="d-empty"><h4>Could not load agents</h4><p>' + esc(e.message) + '. It will retry automatically.</p></div>';
-        }
+      if ($('agentsPanel').classList.contains('open')) {
+        $('agentsList').innerHTML = '<div class="d-empty"><h4>Could not load agents</h4><p>' + esc(e.message) + '. It will retry automatically.</p></div>';
+      }
     }
-}
+  }
 
-function _agSub(a) {
+  function _agSub(a) {
     var parts = [];
     if (a.name && a.name !== a.agent_id) parts.push(a.agent_id);
     if (a.sdk_version) parts.push('SDK ' + a.sdk_version);
     return parts.join(' · ') || 'Agent';
-}
+  }
 
-function _agRow(a) {
+  function _agRow(a) {
     var disc = a.state === 'disconnected';
     var armed = !!_ag.armed[a.agent_id];
     var action = disc
-        ? '<button type="button" class="ag-btn reconnect" data-agent="' + esc(a.agent_id) + '" onclick="toggleAgent(this.dataset.agent,\'reconnect\')">Reconnect</button>'
-        : '<button type="button" class="ag-btn disconnect' + (armed ? ' armed' : '') + '" data-agent="' + esc(a.agent_id) + '" onclick="toggleAgent(this.dataset.agent,\'disconnect\')">' + (armed ? 'Click again to confirm' : 'Disconnect') + '</button>';
+      ? '<button type="button" class="ag-btn reconnect" data-agent="' + esc(a.agent_id) + '" onclick="toggleAgent(this.dataset.agent,\'reconnect\')">Reconnect</button>'
+      : '<button type="button" class="ag-btn disconnect' + (armed ? ' armed' : '') + '" data-agent="' + esc(a.agent_id) + '" onclick="toggleAgent(this.dataset.agent,\'disconnect\')">' + (armed ? 'Click again to confirm' : 'Disconnect') + '</button>';
     var note = disc
-        ? 'Disconnected by ' + esc(a.disconnected_by || 'a reviewer') + ' ' + esc(_ago(a.disconnected_at)) + '. Its requests are refused until you reconnect it.'
-        : 'Last activity ' + esc(_ago(a.last_seen_at)) + ' · first seen ' + esc(_ago(a.first_seen_at));
+      ? 'Disconnected by ' + esc(a.disconnected_by || 'a reviewer') + ' ' + esc(_ago(a.disconnected_at)) + '. Its requests are refused until you reconnect it.'
+      : 'Last activity ' + esc(_ago(a.last_seen_at)) + ' · first seen ' + esc(_ago(a.first_seen_at));
     return '<div class="ag-row' + (disc ? ' disc' : '') + '">' +
-        '<div class="ag-main"><span class="ag-dot ' + esc(a.state) + '"></span>' +
+      '<div class="ag-main"><span class="ag-dot ' + esc(a.state) + '"></span>' +
         '<div class="ag-id"><b>' + esc(a.name || a.agent_id) + '</b><span>' + esc(_agSub(a)) + '</span></div>' +
         '<span class="ag-state ' + esc(a.state) + '">' + esc(_AG_LABEL[a.state] || a.state) + '</span></div>' +
-        '<div class="ag-stats">' +
+      '<div class="ag-stats">' +
         '<div class="ag-stat"><b>' + fmt(a.calls) + '</b><span>events</span></div>' +
         '<div class="ag-stat' + (a.blocked ? ' bad' : '') + '"><b>' + fmt(a.blocked) + '</b><span>blocked</span></div>' +
         '<div class="ag-stat' + (a.pending_approvals ? ' warn' : '') + '"><b>' + fmt(a.pending_approvals) + '</b><span>awaiting approval</span></div>' +
         '<div class="ag-stat"><b>$' + Number(a.cost_usd || 0).toFixed(2) + '</b><span>spend</span></div></div>' +
-        '<div class="ag-foot"><div class="ag-note">' + note + '</div>' + action + '</div></div>';
-}
+      '<div class="ag-foot"><div class="ag-note">' + note + '</div>' + action + '</div></div>';
+  }
 
-function renderAgents() {
+  function renderAgents() {
     var c = _ag.counts || {};
     $('agentsSummary').innerHTML = ['connected', 'idle', 'offline', 'disconnected'].map(function(s) {
-        return '<span class="ag-chip"><i class="ag-dot ' + s + '"></i><b>' + (c[s] || 0) + '</b> ' + _AG_LABEL[s].toLowerCase() + '</span>';
+      return '<span class="ag-chip"><i class="ag-dot ' + s + '"></i><b>' + (c[s] || 0) + '</b> ' + _AG_LABEL[s].toLowerCase() + '</span>';
     }).join('');
     if (!_ag.list.length) {
-        $('agentsList').innerHTML = '<div class="d-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="7" width="14" height="11" rx="3"/><path d="M12 7V4M9 12.5h.01M15 12.5h.01M9.5 15.5h5"/></svg>' +
-            '<h4>No agent yet</h4><p>Agents appear here the first time they report to Cerbere. Connect your first one in a couple of minutes.</p>' +
-            '<button type="button" class="tb-btn primary" onclick="closeAgentsPanel();openConnectAgentModal()">+ Connect agent</button></div>';
-        return;
+      $('agentsList').innerHTML = '<div class="d-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="7" width="14" height="11" rx="3"/><path d="M12 7V4M9 12.5h.01M15 12.5h.01M9.5 15.5h5"/></svg>' +
+        '<h4>No agent yet</h4><p>Agents appear here the first time they report to Cerbere. Connect your first one in a couple of minutes.</p>' +
+        '<button type="button" class="tb-btn primary" onclick="closeAgentsPanel();openConnectAgentModal()">+ Connect agent</button></div>';
+      return;
     }
     $('agentsList').innerHTML = _ag.list.map(_agRow).join('');
-}
+  }
 
-async function toggleAgent(agentId, action) {
-    if (action === 'disconnect' && !_ag.armed[agentId]) {
-        _ag.armed[agentId] = true;
-        renderAgents();
-        setTimeout(function() { delete _ag.armed[agentId]; renderAgents(); }, 4000);
-        return;
+  async function toggleAgent(agentId, action) {
+    if (action === 'disconnect' && !_ag.armed[agentId]) {        // two-step confirmation, no native popup
+      _ag.armed[agentId] = true;
+      renderAgents();
+      setTimeout(function() { delete _ag.armed[agentId]; renderAgents(); }, 4000);
+      return;
     }
     delete _ag.armed[agentId];
     try {
-        await apiSend('/api/agents/' + encodeURIComponent(agentId) + '/' + action, 'POST', {});
-        toast(action === 'disconnect' ? agentId + ' disconnected. Its requests are now refused.' : agentId + ' reconnected.');
-        await loadAgents();
+      await apiSend('/api/agents/' + encodeURIComponent(agentId) + '/' + action, 'POST', {});
+      toast(action === 'disconnect' ? agentId + ' disconnected. Its requests are now refused.' : agentId + ' reconnected.');
+      await loadAgents();
     } catch (e) {
-        toast(/Human session/.test(e.message) ? 'Please sign in again to manage agents.' : 'Could not update the agent: ' + e.message);
-        renderAgents();
+      toast(/Human session/.test(e.message) ? 'Please sign in again to manage agents.' : 'Could not update the agent: ' + e.message);
+      renderAgents();
     }
-}
+  }
 
-setInterval(checkApprovals, 10000);
-setInterval(function() { if (!document.hidden && !$('agentsPanel').classList.contains('open')) loadAgents(); }, 15000);
-checkApprovals();
-loadAgents();
+  setInterval(checkApprovals, 10000);
+  setInterval(function() { if (!document.hidden && !$('agentsPanel').classList.contains('open')) loadAgents(); }, 15000);
+  checkApprovals();
+  loadAgents();
+
 </script>
 </body>
 </html>
