@@ -1760,6 +1760,42 @@ def require_auth():
     return False
 
 
+def require_human_auth():
+    """
+    Session HUMAINE uniquement (cookie du dashboard) - les clés API sont refusées.
+
+    À utiliser pour toute décision qu'un agent ne doit JAMAIS pouvoir prendre
+    lui-même : approuver/rejeter une action, déconnecter un agent. Avec
+    require_auth(), un agent détenant sa clé API pouvait appeler
+    POST /api/approvals/<id>/approve et s'auto-approuver.
+    """
+    auth_cookie = current_app.config.get("AUTH_COOKIE", MAGIC_LINK_COOKIE)
+    cookie_value = request.cookies.get(auth_cookie, "")
+
+    user = _resolve_human_session(cookie_value)
+    if user:
+        g.authenticated_user = user
+        g.org_id = user[1]
+        g.human_email = user[3]
+        try:
+            resolve_full_identity()
+        except Exception as exc:
+            logger.debug("human_identity_resolution_failed", error=str(exc))
+        return True
+
+    org_id = _session_org_id(cookie_value)
+    if org_id:
+        g.org_id = org_id
+        g.human_email = None
+        try:
+            resolve_full_identity()
+        except Exception as exc:
+            logger.debug("legacy_identity_resolution_failed", error=str(exc))
+        return True
+
+    return False
+
+
 # ═══════════════════════════════════════════════════════════════
 # AUDIT HELPERS
 # ═══════════════════════════════════════════════════════════════
@@ -3987,3 +4023,4 @@ def revoke_api_key(key_id):
     except Exception as e:
         logger.error("revoke_api_key_crashed", error=str(e), exc_info=True)
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
