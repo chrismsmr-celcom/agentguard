@@ -8,11 +8,14 @@ import logging
 from functools import wraps
 from typing import Optional, Dict, Any, List, Callable, Tuple
 
-from .models import SecurityCheck, RiskLevel, SecurityAction, SecurityException, ApprovalRequiredException, GuardSpan, SpanPayload, RuntimeRiskDecision, TrajectoryEvent
+from .models import SecurityCheck, RiskLevel, SecurityAction, SecurityException, ApprovalRequiredException, AgentDisconnectedException, GuardSpan, SpanPayload, RuntimeRiskDecision, TrajectoryEvent
 from .policy import PolicyEngine
 from .runtime import TrajectoryAnalyzer, RuntimeRiskEngine
 
 logger = structlog.get_logger("agentguard.sdk")
+
+SDK_VERSION = "0.4.1"
+
 
 class AgentGuard:
     def __init__(self, collector_url: str = "http://localhost:8080", api_key: Optional[str] = None, policies: Optional[List[Dict[str, Any]]] = None, max_budget: float = 10.0, block_on_high: bool = True, debug: bool = False, use_ml: Optional[bool] = None, use_llm_judge: Optional[bool] = None, redis_url: Optional[str] = None, fail_open: bool = False, agent_id: Optional[str] = None):
@@ -28,6 +31,12 @@ class AgentGuard:
         self.collector_timeout = max(0.5, float(os.getenv("AGENTGUARD_COLLECTOR_TIMEOUT", "5.0")))
         self.policy_engine = PolicyEngine(policies or [], redis_url)
         self._verifier = None
+
+        # Kill switch : l'agent peut être déconnecté depuis le dashboard, sans toucher au code.
+        self._conn_state = "connected"
+        self._conn_checked_at = 0.0
+        self._status_ttl = max(1.0, float(os.getenv("AGENTGUARD_STATUS_TTL", "5")))
+        self._status_check = bool(self.api_key) and os.getenv("AGENTGUARD_STATUS_CHECK", "true").lower() == "true"
         
         self._runtime_enabled = os.getenv("AGENTGUARD_RUNTIME_RISK_ENABLED", "true").lower() == "true"
         self._runtime_fail_closed = os.getenv("AGENTGUARD_RUNTIME_FAIL_CLOSED", "true").lower() == "true"
@@ -37,14 +46,40 @@ class AgentGuard:
         logger.info("agentguard_initialized", agent_id=self.agent_id, runtime_risk=self._runtime_enabled)
 
     def _headers(self):
-        h = {"Content-Type": "application/json"}
+        h = {"Content-Type": "application/json", "X-Agent-Id": str(self.agent_id), "X-Agent-Sdk": SDK_VERSION}
         if self.api_key: h["X-API-Key"] = self.api_key
         return h
+
+    def _ensure_connected(self):
+        """Bloque l'agent s'il a été déconnecté depuis le dashboard.
+
+        Vérifie l'état auprès du collecteur au plus toutes les AGENTGUARD_STATUS_TTL secondes.
+        Un collecteur injoignable ne bloque pas l'agent (les autres protections restent actives)."""
+        if not self._status_check:
+            return
+        now = time.time()
+        if now - self._conn_checked_at >= self._status_ttl:
+            self._conn_checked_at = now
+            try:
+                r = requests.get(f"{self.collector_url}/api/agent/status", headers=self._headers(),
+                                 timeout=min(2.0, self.collector_timeout))
+                if r.status_code == 200:
+                    self._conn_state = r.json().get("status", "connected")
+                elif r.status_code == 403 and "agent_disconnected" in r.text:
+                    self._conn_state = "disconnected"
+            except Exception as exc:
+                self._conn_checked_at = now + 25  # collecteur injoignable : on réessaie plus tard
+                logger.debug("agent_status_check_failed", error=str(exc))
+        if self._conn_state == "disconnected":
+            raise AgentDisconnectedException(
+                f"Agent '{self.agent_id}' was disconnected from the Cerbere dashboard. Reconnect it there to resume.")
 
     def _send_to_collector(self, span: GuardSpan):
         try:
             payload = SpanPayload(trace_id=span.trace_id, span_id=span.span_id, span_type=span.span_type, timestamp=span.timestamp, latency_ms=span.latency_ms, input_data=span.input_data, output_data=span.output_data, security_checks=[c.to_model() for c in span.security_checks], blocked=span.blocked, block_reason=span.block_reason, cost_usd=span.cost_usd, input_tokens=span.input_tokens, output_tokens=span.output_tokens).model_dump()
             resp = requests.post(f"{self.collector_url}/span", json=payload, headers=self._headers(), timeout=self.collector_timeout)
+            if resp.status_code == 403 and "agent_disconnected" in resp.text:
+                self._conn_state = "disconnected"
             if resp.status_code >= 400:
                 logger.warning("collector_rejected_span", status_code=resp.status_code, body=resp.text[:300], collector_url=self.collector_url)
         except Exception as e: 
@@ -107,6 +142,7 @@ class AgentGuard:
     def guard_llm_call(self, func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs):
+            self._ensure_connected()
             span_id = hashlib.sha256(f"{time.time_ns()}".encode()).hexdigest()[:16]
             start = time.time()
             input_text = self._extract_input(args, kwargs)
@@ -166,6 +202,7 @@ class AgentGuard:
         raise TypeError("Usage invalide de guard_tool_call. Utilisez @guard.guard_tool_call ou @guard.guard_tool_call('nom')")
 
     def _execute_guarded_tool(self, tool_name: str, params: Dict[str, Any], func: Callable):
+        self._ensure_connected()
         span_id = hashlib.sha256(f"{time.time_ns()}".encode()).hexdigest()[:16]
         start = time.time()
         budget_remaining = self.max_budget - self.total_spent
@@ -262,3 +299,4 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     logger.info("Starting CerbereAG MCP Server (v1.x) on stdio...")
     from mcp.server.fastmcp import FastMCP
+
