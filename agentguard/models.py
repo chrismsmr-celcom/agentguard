@@ -121,6 +121,10 @@ class SecurityException(Exception):
     """Exception levée lorsqu'une opération est bloquée par AgentGuard."""
     pass
 
+class AgentDisconnectedException(SecurityException):
+    """Levée quand l'agent a été déconnecté depuis le dashboard Cerbere (kill switch)."""
+    pass
+
 class ApprovalRequiredException(Exception):
     """
     Exception levée lorsqu'une opération nécessite une approbation humaine (Human-in-the-Loop).
@@ -131,3 +135,4 @@ class ApprovalRequiredException(Exception):
         super().__init__(message)
         self.approval_id = approval_id
         self.details = details
+
