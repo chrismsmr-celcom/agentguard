@@ -389,6 +389,33 @@ def _migrate_api_keys_table():
 # DB INITIALIZATION
 # ═══════════════════════════════════════════════════════════════
 
+def _repair_legacy_approval_table(cur, conn, postgres):
+    """`approval_requests` doit avoir la colonne `id` (schéma des routes /api/approvals).
+
+    Si la table existe avec un autre schéma (ex. `approval_id`, laissé par l'ancien module
+    approvals.py), CREATE TABLE IF NOT EXISTS ne la corrige pas et /api/approvals renvoie
+    « column "id" does not exist » (HTTP 500). On la RENOMME (données conservées) pour que
+    la bonne table soit recréée juste après."""
+    import time as _time
+    if postgres:
+        cur.execute("SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'approval_requests' AND table_schema = current_schema()")
+        cols = {r[0] for r in cur.fetchall()}
+    else:
+        cur.execute("PRAGMA table_info(approval_requests)")
+        cols = {r[1] for r in cur.fetchall()}
+    if not cols or "id" in cols:
+        return
+    legacy = "approval_requests_legacy_" + _time.strftime("%Y%m%d%H%M%S")
+    cur.execute(f"ALTER TABLE approval_requests RENAME TO {legacy}")
+    if postgres:
+        cur.execute(f"ALTER INDEX IF EXISTS approval_requests_pkey RENAME TO {legacy}_pkey")
+    for idx in ("idx_approval_status", "idx_approval_org"):
+        cur.execute(f"DROP INDEX IF EXISTS {idx}")
+    conn.commit()
+    logger.warning("approval_requests_legacy_schema_renamed", legacy_table=legacy, columns=sorted(cols))
+
+
 def init_db():
     if is_postgres():
         conn = get_pg_conn()
@@ -437,11 +464,14 @@ def init_db():
                 ("model", "TEXT"),
                 ("input_tokens", "BIGINT DEFAULT 0"),
                 ("output_tokens", "BIGINT DEFAULT 0"),
+                ("agent_id", "TEXT"),
             ]:
                 try:
                     cur.execute(f"ALTER TABLE spans ADD COLUMN IF NOT EXISTS {col} {dtype}")
                 except Exception:
                     conn.rollback()
+
+            _repair_legacy_approval_table(cur, conn, True)
 
             # Table pour les demandes d'approbation humaine (HITL)
             cur.execute("""
@@ -459,6 +489,43 @@ def init_db():
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_requests(status)")
+            conn.commit()
+
+            # MIGRATION : `CREATE TABLE IF NOT EXISTS` ne modifie jamais une table
+            # existante. La table créée le 18/09 n'avait pas `org_id` -> toutes les
+            # requêtes filtrées par org échouaient en HTTP 500 en production.
+            for col, dtype in [
+                ("org_id", "TEXT DEFAULT 'default'"),
+                ("agent_id", "TEXT"),
+                ("tool_name", "TEXT"),
+                ("params", "JSONB"),
+                ("reason", "TEXT"),
+                ("status", "TEXT DEFAULT 'pending'"),
+                ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+                ("resolved_at", "TIMESTAMP"),
+                ("resolved_by", "TEXT"),
+            ]:
+                cur.execute(f"ALTER TABLE approval_requests ADD COLUMN IF NOT EXISTS {col} {dtype}")
+            cur.execute("UPDATE approval_requests SET org_id = 'default' WHERE org_id IS NULL")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_approval_org ON approval_requests(org_id, status)")
+            conn.commit()
+
+            # Registre des agents connectés (kill switch depuis le dashboard)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS connected_agents (
+                    org_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    name TEXT,
+                    status TEXT NOT NULL DEFAULT 'connected',
+                    sdk_version TEXT,
+                    first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    disconnected_at TIMESTAMP NULL,
+                    disconnected_by TEXT NULL,
+                    PRIMARY KEY (org_id, agent_id)
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_spans_agent ON spans(org_id, agent_id)")
 
             conn.commit()
         finally:
@@ -515,11 +582,14 @@ def init_db():
                 ("model", "TEXT"),
                 ("input_tokens", "INTEGER DEFAULT 0"),
                 ("output_tokens", "INTEGER DEFAULT 0"),
+                ("agent_id", "TEXT"),
             ]:
                 try:
                     c.execute(f"ALTER TABLE spans ADD COLUMN {col} {dtype}")
                 except sqlite3.OperationalError:
                     pass
+
+            _repair_legacy_approval_table(c, conn, False)
 
             # Table pour les demandes d'approbation humaine (HITL)
             c.execute("""
@@ -538,6 +608,43 @@ def init_db():
             """)
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_requests(status)")
+            except sqlite3.OperationalError:
+                pass
+
+            # MIGRATION (voir bloc PostgreSQL) : ajouter les colonnes manquantes
+            existing = {row[1] for row in c.execute("PRAGMA table_info(approval_requests)").fetchall()}
+            for col, dtype in [
+                ("org_id", "TEXT DEFAULT 'default'"),
+                ("agent_id", "TEXT"),
+                ("tool_name", "TEXT"),
+                ("params", "TEXT"),
+                ("reason", "TEXT"),
+                ("status", "TEXT DEFAULT 'pending'"),
+                ("created_at", "TIMESTAMP"),
+                ("resolved_at", "TIMESTAMP"),
+                ("resolved_by", "TEXT"),
+            ]:
+                if col not in existing:
+                    c.execute(f"ALTER TABLE approval_requests ADD COLUMN {col} {dtype}")
+            c.execute("UPDATE approval_requests SET org_id = 'default' WHERE org_id IS NULL")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_approval_org ON approval_requests(org_id, status)")
+
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS connected_agents (
+                    org_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    name TEXT,
+                    status TEXT NOT NULL DEFAULT 'connected',
+                    sdk_version TEXT,
+                    first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    disconnected_at TIMESTAMP NULL,
+                    disconnected_by TEXT NULL,
+                    PRIMARY KEY (org_id, agent_id)
+                )
+            """)
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_spans_agent ON spans(org_id, agent_id)")
             except sqlite3.OperationalError:
                 pass
 
@@ -869,3 +976,4 @@ __all__ = [
     "sql_false",
     "sql_placeholder",
 ]
+
