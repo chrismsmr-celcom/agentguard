@@ -532,7 +532,6 @@ button.connect-card{cursor:pointer}button.connect-card:hover{transform:translate
 
 <div id="toast" class="toast"></div>
 
-
 <script>
 var state = { modelFilter: new Set(), selTrace: null, selSpan: 0, latStat: 'avg' };
 
@@ -574,14 +573,14 @@ var money = function(n) {
     return '$' + Number(n || 0).toFixed(4);
 };
 
-var P = ['#a78bfa', '#fb923c', '#4cc38a', '#e0525f', '#38bdf8', '#f5b84b', '#8b5cf6', '#4ade80', '#22d3ee', '#f472b6', '#facc15', '#94a3b8', '#6ee7b7', '#fda4af', '#c084fc'];
+var P = ['#da7751', '#fb923c', '#4cc38a', '#e0525f', '#7dbbd1', '#f5b84b', '#c4623f', '#4ade80', '#22d3ee', '#d98a9a', '#facc15', '#94a3b8', '#6ee7b7', '#fda4af', '#e6b17e'];
 
 var CHECKS = [
-    ['prompt_injection', '#a78bfa'],
+    ['prompt_injection', '#da7751'],
     ['pii_detection', '#fb923c'],
     ['tool_policy', '#3ecfb2'],
     ['dangerous_params', '#e0525f'],
-    ['budget_policy', '#4c8dff']
+    ['budget_policy', '#7d9bb5']
 ];
 
 function toast(m) {
@@ -677,7 +676,7 @@ function openCardMenu(evt, btn) {
     }
     closeAllPopovers();
     _cardMenuTarget = card;
-   pop.innerHTML =
+    pop.innerHTML =
         '<button onclick="exportCardData(\'json\')">Copier en JSON</button>' +
         '<button onclick="exportCardData(\'csv\')">Exporter en CSV</button>' +
         '<button onclick="hideCard()">Masquer cette carte</button>';
@@ -758,8 +757,8 @@ var _alertModalMetric = null;
 
 function openAlertModal(metric, label) {
     _alertModalMetric = metric;
-    $('alertModalTitle').textContent = 'Nouvelle alerte — ' + label;
-    $('alertModalSubtitle').textContent = "Soyez averti visuellement sur cette carte quand la métrique franchit un seuil.";
+    $('alertModalTitle').textContent = 'New alert — ' + label;
+    $('alertModalSubtitle').textContent = "Get flagged on this card when the metric crosses a threshold.";
     $('alertThreshold').value = '';
     $('alertModal').style.display = 'flex';
     loadAlertRulesForModal();
@@ -769,47 +768,47 @@ function closeAlertModal() { $('alertModal').style.display = 'none'; }
 
 function loadAlertRulesForModal() {
     var box = $('alertRulesExisting');
-    box.innerHTML = '<p style="color:#777;font-size:12px">Chargement…</p>';
+    box.innerHTML = '<p style="color:#777;font-size:12px">Loading…</p>';
     api('/api/alert-rules').then(function(data) {
         state.alertRules = data.alert_rules || [];
         var mine = state.alertRules.filter(function(r) { return r.metric === _alertModalMetric; });
         if (mine.length === 0) {
-            box.innerHTML = '<p style="color:#777;font-size:12px">Aucune alerte sur cette métrique.</p>';
+            box.innerHTML = '<p style="color:#777;font-size:12px">No alert on this metric yet.</p>';
             return;
         }
         box.innerHTML = mine.map(function(r) {
             return '<div class="alert-rule-row"><span>' +
-                (r.comparison === 'above' ? 'au-dessus de ' : 'en-dessous de ') +
+                (r.comparison === 'above' ? 'above ' : 'below ') +
                 esc(String(r.threshold)) + '</span>' +
-                '<button onclick="deleteAlertRuleUI(\'' + r.alert_id + '\')" title="Supprimer">×</button></div>';
+                '<button onclick="deleteAlertRuleUI(\'' + r.alert_id + '\')" title="Delete">×</button></div>';
         }).join('');
     }).catch(function() {
-        box.innerHTML = '<p style="color:#f87171;font-size:12px">Impossible de charger les alertes.</p>';
+        box.innerHTML = '<p style="color:#f87171;font-size:12px">Could not load alerts.</p>';
     });
 }
 
 function submitAlertRule() {
     var threshold = parseFloat($('alertThreshold').value);
-    if (isNaN(threshold)) { toast('Entrez un seuil valide'); return; }
+    if (isNaN(threshold)) { toast('Enter a valid threshold'); return; }
     var comparison = $('alertComparison').value;
     apiSend('/api/alert-rules', 'POST', { metric: _alertModalMetric, comparison: comparison, threshold: threshold })
         .then(function() {
-            toast('Alerte créée');
+            toast('Alert created');
             $('alertThreshold').value = '';
             loadAlertRulesForModal();
             refreshAlertRules();
         })
-        .catch(function(e) { toast('Erreur : ' + e.message); });
+        .catch(function(e) { toast('Error: ' + e.message); });
 }
 
 function deleteAlertRuleUI(alertId) {
     apiSend('/api/alert-rules/' + alertId, 'DELETE')
         .then(function() {
-            toast('Alerte supprimée');
+            toast('Alert deleted');
             loadAlertRulesForModal();
             refreshAlertRules();
         })
-        .catch(function(e) { toast('Erreur : ' + e.message); });
+        .catch(function(e) { toast('Error: ' + e.message); });
 }
 
 function refreshAlertRules() {
@@ -876,7 +875,7 @@ function trendHTML(p, invert) {
 }
 
 function areaChart(el, data, labels, color) {
-    color = color || '#a78bfa';
+    color = color || '#da7751';
     if (!data.length) {
         el.innerHTML = '<div class="empty">No data</div>';
         return;
@@ -1060,17 +1059,17 @@ function forecastBand(el, hist) {
     for (var j = fc.length - 1; j >= 0; j--) {
         lo += 'L' + XF(j + 1) + ',' + (pad.t + ch - (Math.max(0, fc[j] - band[j]) / max) * ch) + ' ';
     }
-    s += '<path d="M' + lx + ',' + ly + ' ' + up + lo + ' Z" fill="#4c8dff" opacity=".25"/>';
+    s += '<path d="M' + lx + ',' + ly + ' ' + up + lo + ' Z" fill="#da7751" opacity=".22"/>';
     var fl = 'M' + lx + ',' + ly;
     fc.forEach(function(v, i) {
         fl += ' L' + XF(i + 1) + ',' + (pad.t + ch - (v / max) * ch);
     });
-    s += '<path d="' + fl + '" fill="none" stroke="#7aa7ff" stroke-width="1"/></svg>';
+    s += '<path d="' + fl + '" fill="none" stroke="#e6b17e" stroke-width="1"/></svg>';
     el.innerHTML = s;
 }
 
 function spark(el, data, color) {
-    color = color || '#4c8dff';
+    color = color || '#da7751';
     if (!data || data.length < 2) {
         el.innerHTML = '';
         return;
@@ -1493,10 +1492,7 @@ document.addEventListener('keydown', function(e) {
         }
     }
 });
-/*
- * Alias utilisé par le bouton "+ Connection".
- * Cela évite d'avoir deux systèmes différents pour la même action.
- */
+
 function openConnectModal() {
     openConnectAgentModal();
 }
@@ -1509,9 +1505,6 @@ function closeConnectAgentModal() {
     document.body.style.overflow = '';
 }
 
-/*
- * Alias éventuel pour les boutons Close/X.
- */
 function closeConnectModal() {
     closeConnectAgentModal();
 }
@@ -1665,10 +1658,6 @@ function refreshAll() {
 }
 
 refreshAll();
-// ✅ FIX perf : ne pas taper le backend en continu quand l'onglet n'est
-// pas regarde (l'ancien setInterval tournait 24/7 des qu'un onglet
-// restait ouvert, meme en arriere-plan, ce qui pouvait saturer un
-// service Render free-tier mono-worker).
 var _refreshTimer = null;
 
 function startRefreshLoop() {
@@ -1695,159 +1684,311 @@ document.addEventListener('visibilitychange', function() {
 if (!document.hidden) {
     startRefreshLoop();
 }
-  async function openApiKeyModal() {
-    document.getElementById('apiKeyModal').style.display = 'flex';
-    document.getElementById('newKeyDisplay').style.display = 'none';
+
+/* ═════════════ API keys ═════════════ */
+async function openApiKeyModal() {
+    $('apiKeyModal').style.display = 'flex';
+    $('newKeyDisplay').style.display = 'none';
     await loadKeys();
-  }
+}
+function closeApiKeyModal() { $('apiKeyModal').style.display = 'none'; }
 
-  function closeApiKeyModal() {
-    document.getElementById('apiKeyModal').style.display = 'none';
-  }
-
-  async function loadKeys() {
-    const listDiv = document.getElementById('apiKeyList');
-    listDiv.innerHTML = '<p style="color: #aaa;">Chargement...</p>';
-    
+async function loadKeys() {
+    var box = $('apiKeyList');
+    box.innerHTML = '<div class="empty" style="padding:18px">Loading…</div>';
     try {
-      const response = await fetch('/api/keys', { credentials: 'include' });
-      const data = await response.json();
-      
-      if (data.keys && data.keys.length > 0) {
-        listDiv.innerHTML = data.keys.map(k => `
-          <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #222; border-radius: 6px; margin-bottom: 8px;">
-            <div>
-              <div style="font-weight: bold;">${k.name}</div>
-              <div style="font-size: 12px; color: #888; font-family: monospace;">${k.key_preview}</div>
-            </div>
-            <span style="font-size: 12px; padding: 4px 8px; border-radius: 4px; background: ${k.active ? '#064e3b' : '#450a0a'}; color: ${k.active ? '#34d399' : '#f87171'};">
-              ${k.active ? 'Active' : 'Révoquée'}
-            </span>
-          </div>
-        `).join('');
-      } else {
-        listDiv.innerHTML = '<p style="color: #888; font-style: italic;">Aucune clé générée pour le moment.</p>';
-      }
-    } catch (e) {
-      listDiv.innerHTML = '<p style="color: #ef4444;">Erreur de chargement.</p>';
-    }
-  }
-
-  async function generateNewKey() {
-    const btn = document.getElementById('btnGenerate');
-    btn.disabled = true;
-    btn.innerText = 'Génération en cours...';
-
-    try {
-      const response = await fetch('/api/keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ name: 'Clé Agent ' + new Date().toLocaleDateString() })
-      });
-      
-      const data = await response.json();
-      
-      if (data.key) {
-        document.getElementById('newKeyValue').value = data.key;
-        document.getElementById('newKeyDisplay').style.display = 'block';
-        await loadKeys(); // Rafraîchir la liste
-      } else {
-        alert('Erreur: ' + (data.error || 'Impossible de générer la clé'));
-      }
-    } catch (e) {
-      alert('Erreur réseau');
-    } finally {
-      btn.disabled = false;
-      btn.innerText = '+ Générer une nouvelle clé';
-    }
-  }
-
-  function copyKey() {
-    const copyText = document.getElementById("newKeyValue");
-    copyText.select();
-    document.execCommand("copy"); // Fallback pour ancienne compatibilité
-    navigator.clipboard.writeText(copyText.value);
-    alert("Clé copiée dans le presse-papiers !");
-  }
-  var _pendingApprovals = [];
-
-  async function checkApprovals() {
-    try {
-        // Même mécanisme d'auth que le reste du dashboard : cookie de
-        // session httpOnly, pas de token dans localStorage (il n'y en a
-        // jamais eu — l'ancien code envoyait toujours "Bearer null").
-        const data = await api('/api/approvals?status=pending');
-        var _prevCount = _pendingApprovals.length;
-        _pendingApprovals = data.approvals || [];
-
-        const pill = document.getElementById('approval-pill');
-        const count = document.getElementById('approval-count');
-
-        if (_pendingApprovals.length > 0) {
-            pill.style.display = 'inline-block';
-            count.textContent = _pendingApprovals.length;
-            if (_pendingApprovals.length > _prevCount && $('approvalModal').style.display !== 'flex') {
-                toast('Nouvelle action en attente d\'approbation');
-                openApprovalModal();
-            }
+        var data = await api('/api/keys');
+        if (data.keys && data.keys.length) {
+            box.innerHTML = data.keys.map(function(k) {
+                return '<div class="key-row"><div><b>' + esc(k.name) + '</b><code>' + esc(k.key_preview) + '</code></div>' +
+                       '<span class="key-state' + (k.active ? '' : ' off') + '">' + (k.active ? 'Active' : 'Revoked') + '</span></div>';
+            }).join('');
         } else {
-            pill.style.display = 'none';
-            closeApprovalModal();
-        }
-
-        if ($('approvalModal').style.display === 'flex') {
-            renderApprovalModalList();
+            box.innerHTML = '<div class="empty" style="padding:18px">No key yet. Generate one to connect your first agent.</div>';
         }
     } catch (e) {
-        console.error("Failed to fetch approvals", e);
+        box.innerHTML = '<div class="empty" style="padding:18px;color:var(--red2)">Could not load keys.</div>';
     }
-  }
+}
 
-  function renderApprovalModalList() {
-    const list = document.getElementById('approvalModalList');
-    if (_pendingApprovals.length === 0) {
-        list.innerHTML = '<p style="color:#aaa;font-size:13px">Aucune approbation en attente.</p>';
+async function generateNewKey() {
+    var btn = $('btnGenerate');
+    btn.disabled = true; btn.textContent = 'Generating…';
+    try {
+        var data = await apiSend('/api/keys', 'POST', { name: 'Agent key ' + new Date().toLocaleDateString('en-US') });
+        if (data.key) {
+            $('newKeyValue').value = data.key;
+            $('newKeyDisplay').style.display = 'block';
+            await loadKeys();
+        } else {
+            toast('Could not generate a key');
+        }
+    } catch (e) {
+        toast('Could not generate a key: ' + e.message);
+    } finally {
+        btn.disabled = false; btn.textContent = '+ Generate a new key';
+    }
+}
+
+function copyKey() {
+    var input = $('newKeyValue');
+    input.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    if (navigator.clipboard) navigator.clipboard.writeText(input.value).catch(function() {});
+    toast('Key copied to clipboard');
+}
+
+/* ═════════════ Shared helpers ═════════════ */
+function _openDrawer(id) { $(id).classList.add('open'); document.body.style.overflow = 'hidden'; }
+function _closeDrawer(id) {
+    $(id).classList.remove('open');
+    if (!document.querySelector('.drawer-wrap.open')) document.body.style.overflow = '';
+}
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') { closeApprovalsPanel(); closeAgentsPanel(); }
+});
+
+function _secondsSince(iso) {
+    var t = Date.parse(iso);
+    return isNaN(t) ? null : Math.max(0, Math.round((Date.now() - t) / 1000));
+}
+function _dur(iso) {
+    var s = _secondsSince(iso);
+    if (s === null) return '—';
+    if (s < 45) return 'seconds';
+    if (s < 3600) return Math.round(s / 60) + ' min';
+    if (s < 86400) return Math.round(s / 3600) + ' h';
+    return Math.round(s / 86400) + ' d';
+}
+function _ago(iso) {
+    var d = _dur(iso);
+    if (d === '—') return '—';
+    return d === 'seconds' ? 'just now' : d + ' ago';
+}
+
+/* ═════════════ Approval queue ═════════════ */
+var _ap = { tab: 'pending', pending: [], history: [], counts: { pending: 0, approved: 0, rejected: 0 }, seen: {}, booted: false };
+
+function openApprovalsPanel() { _openDrawer('approvalsPanel'); loadApprovals(); renderIcons($('approvalsPanel')); }
+function closeApprovalsPanel() { _closeDrawer('approvalsPanel'); }
+
+function setApprovalsTab(tab) {
+    _ap.tab = tab;
+    document.querySelectorAll('#approvalsPanel .drawer-tabs button').forEach(function(b) {
+        b.classList.toggle('active', b.dataset.ap === tab);
+    });
+    renderApprovals();
+    loadApprovals();
+}
+
+function _syncApprovalsBadge() {
+    var c = _ap.counts || {};
+    var n = c.pending || 0;
+    var badge = $('approvalsBadge');
+    badge.textContent = n > 99 ? '99+' : n;
+    badge.style.display = n > 0 ? 'inline-flex' : 'none';
+    $('btnApprovals').classList.toggle('has-pending', n > 0);
+    $('apTabPending').textContent = n;
+    $('apTabHistory').textContent = (c.approved || 0) + (c.rejected || 0);
+}
+
+async function loadApprovals() {
+    try {
+        var status = _ap.tab === 'pending' ? 'pending' : 'history';
+        var data = await api('/api/approvals?status=' + status + '&limit=100');
+        _ap.counts = data.counts || _ap.counts;
+        if (_ap.tab === 'pending') {
+            _ap.pending = data.approvals || [];
+            _ap.pending.forEach(function(a) { _ap.seen[a.id] = true; });
+        } else {
+            _ap.history = data.approvals || [];
+        }
+        _syncApprovalsBadge();
+        renderApprovals();
+    } catch (e) {
+        $('approvalsList').innerHTML = '<div class="d-empty"><h4>Could not load the queue</h4><p>' + esc(e.message) + '. It will retry automatically.</p></div>';
+    }
+}
+
+async function checkApprovals() {
+    if (document.hidden) return;
+    try {
+        var data = await api('/api/approvals?status=pending&limit=100');
+        var list = data.approvals || [];
+        _ap.counts = data.counts || _ap.counts;
+        var fresh = list.filter(function(a) { return !_ap.seen[a.id]; });
+        list.forEach(function(a) { _ap.seen[a.id] = true; });
+        var open = $('approvalsPanel').classList.contains('open');
+        if (_ap.tab === 'pending') _ap.pending = list;
+        _syncApprovalsBadge();
+        if (open && _ap.tab === 'pending') renderApprovals();
+        if (fresh.length && _ap.booted && !open) {
+            toast(fresh.length === 1 ? 'New action waiting for approval' : fresh.length + ' new actions waiting for approval');
+            openApprovalsPanel();
+        }
+        _ap.booted = true;
+    } catch (e) {
+        console.error('Failed to fetch approvals', e);
+    }
+}
+
+function _apEmpty(title, text, icon) {
+    return '<div class="d-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' + icon + '</svg><h4>' + title + '</h4><p>' + text + '</p></div>';
+}
+
+function _apPendingCard(a) {
+    var params = '';
+    try { params = JSON.stringify(a.params || {}, null, 2); } catch (e) {}
+    var late = (_secondsSince(a.created_at) || 0) > 900;
+    return '<div class="ap-card" data-card="' + esc(a.id) + '">' +
+      '<div class="ap-top"><span class="ap-avatar">' + esc((a.agent_id || '?').charAt(0).toUpperCase()) + '</span>' +
+        '<div class="ap-who"><b>' + esc(a.agent_id || 'Unknown agent') + '</b><span>is asking for permission</span></div>' +
+        '<span class="ap-age' + (late ? ' late' : '') + '">waiting ' + esc(_dur(a.created_at)) + '</span></div>' +
+      '<div class="ap-tool"><span>Action</span><code>' + esc(a.tool_name || 'unknown tool') + '</code></div>' +
+      '<div class="ap-reason"><span class="ui-icon" data-icon="security"></span><span>' + esc(a.reason || 'Approval required by policy') + '</span></div>' +
+      (params && params !== '{}' ? '<details class="ap-params"><summary>Show parameters</summary><pre>' + esc(params) + '</pre></details>' : '') +
+      '<div class="ap-actions">' +
+        '<button type="button" class="ap-btn approve" data-id="' + esc(a.id) + '" onclick="resolveApproval(this.dataset.id,\'approve\')">Approve</button>' +
+        '<button type="button" class="ap-btn reject" data-id="' + esc(a.id) + '" onclick="resolveApproval(this.dataset.id,\'reject\')">Reject</button>' +
+      '</div></div>';
+}
+
+function _apHistoryRow(a) {
+    var approved = a.status === 'approved';
+    return '<div class="ap-hist"><span class="st-chip ' + (approved ? 'approved' : 'rejected') + '">' + (approved ? 'Approved' : 'Rejected') + '</span>' +
+      '<span class="tool">' + esc(a.tool_name || '—') + '</span><span class="when">' + esc(_ago(a.resolved_at)) + '</span>' +
+      '<span class="meta">' + esc(a.agent_id || 'unknown agent') + ' · decided by ' + esc(a.resolved_by || 'a reviewer') + '</span></div>';
+}
+
+function renderApprovals() {
+    var box = $('approvalsList');
+    if (_ap.tab === 'pending') {
+        box.innerHTML = _ap.pending.length ? _ap.pending.map(_apPendingCard).join('') :
+            _apEmpty('All clear', 'No action is waiting for a decision. When an agent attempts something risky, it lands here first.',
+                     '<path d="M12 3 5 6v5c0 4.2 2.9 8 7 10 4.1-2 7-5.8 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>');
+    } else {
+        box.innerHTML = _ap.history.length ? _ap.history.map(_apHistoryRow).join('') :
+            _apEmpty('No decisions yet', 'Every approval and rejection is recorded here with who decided and when.',
+                     '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/>');
+    }
+    renderIcons(box);
+}
+
+async function resolveApproval(approvalId, action) {
+    var card = document.querySelector('.ap-card[data-card="' + (window.CSS && CSS.escape ? CSS.escape(approvalId) : approvalId) + '"]');
+    if (card) card.querySelectorAll('.ap-btn').forEach(function(b) { b.disabled = true; });
+    try {
+        await apiSend('/api/approvals/' + encodeURIComponent(approvalId) + '/' + action, 'POST', {});
+        toast(action === 'approve' ? 'Approved. The agent may proceed.' : 'Rejected. The action stays blocked.');
+        if (card) { card.classList.add('leaving'); await new Promise(function(r) { setTimeout(r, 240); }); }
+        await loadApprovals();
+    } catch (e) {
+        if (card) card.querySelectorAll('.ap-btn').forEach(function(b) { b.disabled = false; });
+        toast(/Human session/.test(e.message) ? 'Please sign in again to decide.' : 'Could not save the decision: ' + e.message);
+    }
+}
+
+/* ═════════════ Connected agents ═════════════ */
+var _ag = { list: [], counts: {}, armed: {}, timer: null };
+var _AG_LABEL = { connected: 'Connected', idle: 'Idle', offline: 'Offline', disconnected: 'Disconnected' };
+
+function openAgentsPanel() {
+    _openDrawer('agentsPanel');
+    loadAgents();
+    if (_ag.timer) clearInterval(_ag.timer);
+    _ag.timer = setInterval(loadAgents, 5000);
+}
+function closeAgentsPanel() {
+    _closeDrawer('agentsPanel');
+    if (_ag.timer) { clearInterval(_ag.timer); _ag.timer = null; }
+}
+
+function _syncAgentsBadge() {
+    var c = _ag.counts || {};
+    var live = (c.connected || 0) + (c.idle || 0);
+    var b = $('agentsBadge');
+    b.textContent = live;
+    b.classList.toggle('zero', !live);
+}
+
+async function loadAgents() {
+    try {
+        var data = await api('/api/agents');
+        _ag.list = data.agents || [];
+        _ag.counts = data.counts || {};
+        _syncAgentsBadge();
+        if ($('agentsPanel').classList.contains('open')) renderAgents();
+    } catch (e) {
+        if ($('agentsPanel').classList.contains('open')) {
+            $('agentsList').innerHTML = '<div class="d-empty"><h4>Could not load agents</h4><p>' + esc(e.message) + '. It will retry automatically.</p></div>';
+        }
+    }
+}
+
+function _agSub(a) {
+    var parts = [];
+    if (a.name && a.name !== a.agent_id) parts.push(a.agent_id);
+    if (a.sdk_version) parts.push('SDK ' + a.sdk_version);
+    return parts.join(' · ') || 'Agent';
+}
+
+function _agRow(a) {
+    var disc = a.state === 'disconnected';
+    var armed = !!_ag.armed[a.agent_id];
+    var action = disc
+        ? '<button type="button" class="ag-btn reconnect" data-agent="' + esc(a.agent_id) + '" onclick="toggleAgent(this.dataset.agent,\'reconnect\')">Reconnect</button>'
+        : '<button type="button" class="ag-btn disconnect' + (armed ? ' armed' : '') + '" data-agent="' + esc(a.agent_id) + '" onclick="toggleAgent(this.dataset.agent,\'disconnect\')">' + (armed ? 'Click again to confirm' : 'Disconnect') + '</button>';
+    var note = disc
+        ? 'Disconnected by ' + esc(a.disconnected_by || 'a reviewer') + ' ' + esc(_ago(a.disconnected_at)) + '. Its requests are refused until you reconnect it.'
+        : 'Last activity ' + esc(_ago(a.last_seen_at)) + ' · first seen ' + esc(_ago(a.first_seen_at));
+    return '<div class="ag-row' + (disc ? ' disc' : '') + '">' +
+        '<div class="ag-main"><span class="ag-dot ' + esc(a.state) + '"></span>' +
+        '<div class="ag-id"><b>' + esc(a.name || a.agent_id) + '</b><span>' + esc(_agSub(a)) + '</span></div>' +
+        '<span class="ag-state ' + esc(a.state) + '">' + esc(_AG_LABEL[a.state] || a.state) + '</span></div>' +
+        '<div class="ag-stats">' +
+        '<div class="ag-stat"><b>' + fmt(a.calls) + '</b><span>events</span></div>' +
+        '<div class="ag-stat' + (a.blocked ? ' bad' : '') + '"><b>' + fmt(a.blocked) + '</b><span>blocked</span></div>' +
+        '<div class="ag-stat' + (a.pending_approvals ? ' warn' : '') + '"><b>' + fmt(a.pending_approvals) + '</b><span>awaiting approval</span></div>' +
+        '<div class="ag-stat"><b>$' + Number(a.cost_usd || 0).toFixed(2) + '</b><span>spend</span></div></div>' +
+        '<div class="ag-foot"><div class="ag-note">' + note + '</div>' + action + '</div></div>';
+}
+
+function renderAgents() {
+    var c = _ag.counts || {};
+    $('agentsSummary').innerHTML = ['connected', 'idle', 'offline', 'disconnected'].map(function(s) {
+        return '<span class="ag-chip"><i class="ag-dot ' + s + '"></i><b>' + (c[s] || 0) + '</b> ' + _AG_LABEL[s].toLowerCase() + '</span>';
+    }).join('');
+    if (!_ag.list.length) {
+        $('agentsList').innerHTML = '<div class="d-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="7" width="14" height="11" rx="3"/><path d="M12 7V4M9 12.5h.01M15 12.5h.01M9.5 15.5h5"/></svg>' +
+            '<h4>No agent yet</h4><p>Agents appear here the first time they report to Cerbere. Connect your first one in a couple of minutes.</p>' +
+            '<button type="button" class="tb-btn primary" onclick="closeAgentsPanel();openConnectAgentModal()">+ Connect agent</button></div>';
         return;
     }
-    list.innerHTML = _pendingApprovals.map(function(app) {
-        var argsPreview = '';
-        try { argsPreview = JSON.stringify(app.params).substring(0, 160); } catch (e) { argsPreview = ''; }
-        return '<div style="border:1px solid #333;border-radius:8px;padding:12px;margin-bottom:10px;background:#151515">' +
-            '<div><strong>' + esc(app.tool_name || '') + '</strong> — agent <em>' + esc(app.agent_id || '') + '</em></div>' +
-            '<div style="color:#aaa;font-size:12px;margin-top:4px">Raison : ' + esc(app.reason || '—') + '</div>' +
-            (argsPreview ? '<div style="color:#777;font-size:11px;margin-top:4px;font-family:monospace;word-break:break-all">' + esc(argsPreview) + '</div>' : '') +
-            '<div style="margin-top:10px;display:flex;gap:8px">' +
-                '<button onclick="resolveApproval(\'' + app.id + '\', \'approve\')" style="background:#10b981;color:#fff;border:0;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:600">Approuver</button>' +
-                '<button onclick="resolveApproval(\'' + app.id + '\', \'reject\')" style="background:#ef4444;color:#fff;border:0;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:600">Rejeter</button>' +
-            '</div>' +
-        '</div>';
-    }).join('');
-  }
+    $('agentsList').innerHTML = _ag.list.map(_agRow).join('');
+}
 
-  function openApprovalModal() {
-    $('approvalModal').style.display = 'flex';
-    renderApprovalModalList();
-  }
-
-  function closeApprovalModal() {
-    var m = $('approvalModal');
-    if (m) m.style.display = 'none';
-  }
-
-  async function resolveApproval(approvalId, action) {
-    try {
-        await apiSend('/api/approvals/' + approvalId + '/' + action, 'POST', {});
-        toast(action === 'approve' ? 'Action approuvée' : 'Action rejetée');
-        await checkApprovals();
-    } catch (e) {
-        toast('Erreur : ' + e.message);
+async function toggleAgent(agentId, action) {
+    if (action === 'disconnect' && !_ag.armed[agentId]) {
+        _ag.armed[agentId] = true;
+        renderAgents();
+        setTimeout(function() { delete _ag.armed[agentId]; renderAgents(); }, 4000);
+        return;
     }
-  }
+    delete _ag.armed[agentId];
+    try {
+        await apiSend('/api/agents/' + encodeURIComponent(agentId) + '/' + action, 'POST', {});
+        toast(action === 'disconnect' ? agentId + ' disconnected. Its requests are now refused.' : agentId + ' reconnected.');
+        await loadAgents();
+    } catch (e) {
+        toast(/Human session/.test(e.message) ? 'Please sign in again to manage agents.' : 'Could not update the agent: ' + e.message);
+        renderAgents();
+    }
+}
 
-// Rafraîchir toutes les 10 secondes
 setInterval(checkApprovals, 10000);
-checkApprovals(); // Appel initial
+setInterval(function() { if (!document.hidden && !$('agentsPanel').classList.contains('open')) loadAgents(); }, 15000);
+checkApprovals();
+loadAgents();
 </script>
 </body>
 </html>
