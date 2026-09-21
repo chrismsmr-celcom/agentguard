@@ -105,14 +105,14 @@ def _ensure_arguments_hash_column() -> None:
     placeholder = sql_placeholder()
     
     if is_postgres():
-        db.execute("ALTER TABLE approval_requests ADD COLUMN IF NOT EXISTS arguments_hash TEXT")
+        db.execute("ALTER TABLE hitl_approvals ADD COLUMN IF NOT EXISTS arguments_hash TEXT")
         db.commit()
         return
 
-    cursor = db.execute("PRAGMA table_info(approval_requests)")
+    cursor = db.execute("PRAGMA table_info(hitl_approvals)")
     columns = {str(row[1]) for row in cursor.fetchall()}
     if "arguments_hash" not in columns:
-        db.execute("ALTER TABLE approval_requests ADD COLUMN arguments_hash TEXT")
+        db.execute("ALTER TABLE hitl_approvals ADD COLUMN arguments_hash TEXT")
         db.commit()
 
 
@@ -120,23 +120,12 @@ def ensure_approval_schema() -> None:
     """Create the approval table if it does not exist, or fix it if it has the wrong schema."""
     db = get_db()
     
-    # 1. Detect and fix schema mismatch (e.g., 'id' instead of 'approval_id')
-    if is_postgres():
-        cursor = db.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'approval_requests'")
-        cols = [row[0] for row in cursor.fetchall()]
-        if cols and 'id' in cols and 'approval_id' not in cols:
-            db.execute("DROP TABLE approval_requests")
-            db.commit()
-    else:
-        cursor = db.execute("PRAGMA table_info(approval_requests)")
-        cols = [row[1] for row in cursor.fetchall()]
-        if cols and 'id' in cols and 'approval_id' not in cols:
-            db.execute("DROP TABLE approval_requests")
-            db.commit()
-
+    # Table PROPRE à ce module (hitl_approvals). Elle portait autrefois le nom `hitl_approvals`,
+    # déjà utilisé par les routes /api/approvals avec un autre schéma : chaque module supprimait puis
+    # recréait la table de l'autre -> erreurs 500 en boucle. Les deux tables sont désormais séparées.
     # 2. Create the correct table
     query = """
-        CREATE TABLE IF NOT EXISTS approval_requests (
+        CREATE TABLE IF NOT EXISTS hitl_approvals (
             approval_id TEXT PRIMARY KEY,
             org_id TEXT,
             tenant_id TEXT,
@@ -165,11 +154,11 @@ def ensure_approval_schema() -> None:
     _ensure_arguments_hash_column()
 
     # 4. Backfill hashes for existing records
-    cursor = db.execute("SELECT approval_id, arguments FROM approval_requests WHERE arguments_hash IS NULL")
+    cursor = db.execute("SELECT approval_id, arguments FROM hitl_approvals WHERE arguments_hash IS NULL")
     rows = cursor.fetchall()
     if rows:
         placeholder = sql_placeholder()
-        update_query = f"UPDATE approval_requests SET arguments_hash = {placeholder} WHERE approval_id = {placeholder}"
+        update_query = f"UPDATE hitl_approvals SET arguments_hash = {placeholder} WHERE approval_id = {placeholder}"
         for row in rows:
             if hasattr(row, "keys"):
                 approval_id = row["approval_id"]
@@ -210,7 +199,7 @@ def create_approval(
     db = get_db()
     p = sql_placeholder()
     query = f"""
-        INSERT INTO approval_requests (
+        INSERT INTO hitl_approvals (
             approval_id, org_id, tenant_id, agent_id, session_id, trace_id, span_id,
             tool_name, arguments, arguments_hash, risk_score, reason, policy_name,
             status, requested_at, expires_at, decided_at, decided_by, decision_reason
@@ -240,7 +229,7 @@ def _expire_if_needed(approval: dict[str, Any]) -> dict[str, Any]:
     db = get_db()
     p = sql_placeholder()
     query = f"""
-        UPDATE approval_requests
+        UPDATE hitl_approvals
         SET status = {p}, decided_at = {p}, decision_reason = {p}
         WHERE approval_id = {p} AND status = {p}
     """
@@ -255,10 +244,10 @@ def get_approval(approval_id: str, *, org_id: Optional[str] = None) -> Optional[
     p = sql_placeholder()
     
     if org_id is None:
-        query = f"SELECT * FROM approval_requests WHERE approval_id = {p} LIMIT 1"
+        query = f"SELECT * FROM hitl_approvals WHERE approval_id = {p} LIMIT 1"
         cursor = db.execute(query, (approval_id,))
     else:
-        query = f"SELECT * FROM approval_requests WHERE approval_id = {p} AND org_id = {p} LIMIT 1"
+        query = f"SELECT * FROM hitl_approvals WHERE approval_id = {p} AND org_id = {p} LIMIT 1"
         cursor = db.execute(query, (approval_id, org_id))
         
     row = cursor.fetchone()
@@ -285,7 +274,7 @@ def list_approvals(*, org_id: Optional[str] = None, status: Optional[str] = None
         params.append(status)
 
     where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
-    query = f"SELECT * FROM approval_requests {where_clause} ORDER BY requested_at DESC LIMIT {limit}"
+    query = f"SELECT * FROM hitl_approvals {where_clause} ORDER BY requested_at DESC LIMIT {limit}"
     
     cursor = db.execute(query, tuple(params))
     approvals = [_expire_if_needed(_row_to_dict(row)) for row in cursor.fetchall()]
@@ -315,7 +304,7 @@ def decide_approval(
     db = get_db()
     p = sql_placeholder()
     query = f"""
-        UPDATE approval_requests
+        UPDATE hitl_approvals
         SET status = {p}, decided_at = {p}, decided_by = {p}, decision_reason = {p}
         WHERE approval_id = {p} AND status = {p}
     """
@@ -347,3 +336,4 @@ def approve_approval(approval_id: str, *, decided_by: Optional[str] = None, deci
 
 def reject_approval(approval_id: str, *, decided_by: Optional[str] = None, decision_reason: Optional[str] = None, org_id: Optional[str] = None) -> dict[str, Any]:
     return decide_approval(approval_id, decision=REJECTED, decided_by=decided_by, decision_reason=decision_reason, org_id=org_id)
+
