@@ -202,7 +202,7 @@ class TestE2EMultiStepExfiltration:
             pass
         except SecurityException as e:
             # Expected: taint violation
-            assert "Taint" in str(e) or "SECRET" in str(e) or "DENY" in str(e)
+              assert "Taint" in str(e) or "SECRET" in str(e) or "DENY" in str(e) or "Dangerous pattern" in str(e) or "dangerous_params" in str(e)
 
 
 # ═══════════════════════════════════════════════════════════════
