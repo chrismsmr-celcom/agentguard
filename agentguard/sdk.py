@@ -14,12 +14,12 @@ from .runtime import TrajectoryAnalyzer, RuntimeRiskEngine
 
 logger = structlog.get_logger("agentguard.sdk")
 
-SDK_VERSION = "0.4.1"
+SDK_VERSION = "0.4.2"
 
 
 class AgentGuard:
-    def __init__(self, collector_url: str = "http://localhost:8080", api_key: Optional[str] = None, policies: Optional[List[Dict[str, Any]]] = None, max_budget: float = 10.0, block_on_high: bool = True, debug: bool = False, use_ml: Optional[bool] = None, use_llm_judge: Optional[bool] = None, redis_url: Optional[str] = None, fail_open: bool = False, agent_id: Optional[str] = None):
-        self.collector_url = collector_url.rstrip("/")
+    def __init__(self, collector_url: Optional[str] = None, api_key: Optional[str] = None, policies: Optional[List[Dict[str, Any]]] = None, max_budget: float = 10.0, block_on_high: bool = True, debug: bool = False, use_ml: Optional[bool] = None, use_llm_judge: Optional[bool] = None, redis_url: Optional[str] = None, fail_open: bool = False, agent_id: Optional[str] = None):
+        self.collector_url = (collector_url or os.getenv("AGENTGUARD_COLLECTOR_URL") or "http://localhost:8080").rstrip("/")
         self.api_key = api_key or os.getenv("AGENTGUARD_API_KEY")
         self.agent_id = agent_id or os.getenv("AGENTGUARD_AGENT_ID", "default")
         self.max_budget = max(0.0, float(max_budget))
@@ -33,6 +33,7 @@ class AgentGuard:
         self._verifier = None
 
         # Kill switch : l'agent peut être déconnecté depuis le dashboard, sans toucher au code.
+        self._auth_warned = False
         self._conn_state = "connected"
         self._conn_checked_at = 0.0
         self._status_ttl = max(1.0, float(os.getenv("AGENTGUARD_STATUS_TTL", "5")))
@@ -50,6 +51,17 @@ class AgentGuard:
         if self.api_key: h["X-API-Key"] = self.api_key
         return h
 
+    def _warn_key_rejected(self):
+        """Une clé refusée ne doit jamais échouer en silence : sinon rien n'apparaît dans le dashboard."""
+        if self._auth_warned:
+            return
+        self._auth_warned = True
+        import warnings
+        warnings.warn(
+            f"[Cerbere] {self.collector_url} rejected your API key (HTTP 401): events are NOT being recorded. "
+            "Check AGENTGUARD_API_KEY and that the collector URL is correct.",
+            RuntimeWarning, stacklevel=3)
+
     def _ensure_connected(self):
         """Bloque l'agent s'il a été déconnecté depuis le dashboard.
 
@@ -63,6 +75,8 @@ class AgentGuard:
             try:
                 r = requests.get(f"{self.collector_url}/api/agent/status", headers=self._headers(),
                                  timeout=min(2.0, self.collector_timeout))
+                if r.status_code == 401:
+                    self._warn_key_rejected()
                 if r.status_code == 200:
                     self._conn_state = r.json().get("status", "connected")
                 elif r.status_code == 403 and "agent_disconnected" in r.text:
@@ -78,6 +92,8 @@ class AgentGuard:
         try:
             payload = SpanPayload(trace_id=span.trace_id, span_id=span.span_id, span_type=span.span_type, timestamp=span.timestamp, latency_ms=span.latency_ms, input_data=span.input_data, output_data=span.output_data, security_checks=[c.to_model() for c in span.security_checks], blocked=span.blocked, block_reason=span.block_reason, cost_usd=span.cost_usd, input_tokens=span.input_tokens, output_tokens=span.output_tokens).model_dump()
             resp = requests.post(f"{self.collector_url}/span", json=payload, headers=self._headers(), timeout=self.collector_timeout)
+            if resp.status_code == 401:
+                self._warn_key_rejected()
             if resp.status_code == 403 and "agent_disconnected" in resp.text:
                 self._conn_state = "disconnected"
             if resp.status_code >= 400:
@@ -299,4 +315,5 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     logger.info("Starting CerbereAG MCP Server (v1.x) on stdio...")
     from mcp.server.fastmcp import FastMCP
+
 
