@@ -134,3 +134,4 @@ def test_as_json_handles_jsonb_dicts_and_text():
     assert _as_json({"a": 1}, {}) == {"a": 1}       # PostgreSQL JSONB -> dict
     assert _as_json('{"a": 1}', {}) == {"a": 1}     # SQLite -> texte
     assert _as_json(None, []) == [] and _as_json("not json", {}) == {}
+
