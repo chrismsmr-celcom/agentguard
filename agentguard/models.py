@@ -131,8 +131,18 @@ class ApprovalRequiredException(Exception):
     Utilisé pour les cas de DLP (Data Loss Prevention) où l'action n'est ni bloquée brutalement, 
     ni autorisée aveuglément.
     """
-    def __init__(self, message: str, approval_id: str, details: Dict[str, Any]):
+    def __init__(self, message: str, approval_id: str, details: Dict[str, Any], timed_out: bool = False):
         super().__init__(message)
         self.approval_id = approval_id
         self.details = details
+        self.timed_out = timed_out  # True si guard_tool_call(..., wait_for_approval=True) a expiré sans décision
+
+
+class ApprovalRejectedException(SecurityException):
+    """Levée quand un humain a explicitement REJETÉ la demande (pas juste "en attente")."""
+    def __init__(self, message: str, approval_id: str, resolved_by: Optional[str] = None):
+        super().__init__(message)
+        self.approval_id = approval_id
+        self.resolved_by = resolved_by
+
 
