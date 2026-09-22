@@ -44,28 +44,21 @@ def backup_sqlite(db_path: str, backup_dir: Path, timestamp: str) -> Path:
     src = Path(db_path)
 
     if not src.exists():
-        log(f"{src} introuvable — initialisation d'une DB de test (mode CI)...")
-        
-        # ✅ Nouveau pattern : imports depuis collector.db et collector.app
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-        os.environ["AGENTGUARD_DB_PATH"] = str(src)
-        
-        try:
-            from collector.db import init_db
-            from collector.app import create_app
-            
-            # Initialise la DB
-            init_db()
-            
-            # Crée l'app (nécessaire pour certains initialisations)
-            app = create_app()
-            
-            log("✅ DB de test initialisée")
-        except Exception as e:
-            log(f"ERREUR: impossible d'initialiser la DB: {e}")
-            import traceback
-            traceback.print_exc()
-            sys.exit(1)
+        # Placeholder de CI uniquement : le vrai backup de production passe par
+        # DATABASE_URL + pg_dump (voir backup_postgres). Ce fichier ne sert qu'à
+        # ce que le job ne plante pas quand /tmp/agentguard.db n'existe pas encore
+        # (ex. premier run sur un nouveau runner). AVANT : on importait tout
+        # collector.db/collector.app (Flask, structlog, opentelemetry, ...) pour ça
+        # -> une dépendance manquante dans requirements.txt (structlog) faisait
+        # échouer le backup entier, même quand seul ce placeholder était utilisé.
+        log(f"{src} introuvable — création d'un fichier SQLite vide (mode CI, sqlite3 stdlib uniquement)...")
+        src.parent.mkdir(parents=True, exist_ok=True)
+        import sqlite3
+        conn = sqlite3.connect(src)
+        conn.execute("CREATE TABLE IF NOT EXISTS _ci_placeholder (created_at TEXT)")
+        conn.commit()
+        conn.close()
+        log("fichier placeholder créé")
 
     backup_file = backup_dir / f"agentguard_sqlite_{timestamp}.db"
     shutil.copy2(src, backup_file)
@@ -114,3 +107,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
