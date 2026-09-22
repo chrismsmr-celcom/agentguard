@@ -1,10 +1,12 @@
 import os
 import time
 import hashlib
+import json
 import requests
 import structlog
 import tiktoken
 import logging
+import warnings
 from functools import wraps
 from typing import Optional, Dict, Any, List, Callable, Tuple
 
@@ -24,7 +26,7 @@ SDK_VERSION = "0.4.1"
 class AgentGuard:
     def __init__(
         self,
-        collector_url: str = "http://localhost:8080",
+        collector_url: Optional[str] = None,
         api_key: Optional[str] = None,
         policies: Optional[List[Dict[str, Any]]] = None,
         max_budget: float = 10.0,
@@ -35,8 +37,9 @@ class AgentGuard:
         redis_url: Optional[str] = None,
         fail_open: bool = False,
         agent_id: Optional[str] = None,
+        wait_for_approval: bool = True,
     ):
-        self.collector_url = collector_url.rstrip("/")
+        self.collector_url = (collector_url or os.getenv("AGENTGUARD_COLLECTOR_URL", "http://localhost:8080")).rstrip("/")
         self.api_key = api_key or os.getenv("AGENTGUARD_API_KEY")
         self.agent_id = agent_id or os.getenv("AGENTGUARD_AGENT_ID", "default")
         self.max_budget = max(0.0, float(max_budget))
@@ -48,8 +51,12 @@ class AgentGuard:
         self.collector_timeout = max(0.5, float(os.getenv("AGENTGUARD_COLLECTOR_TIMEOUT", "5.0")))
         self.policy_engine = PolicyEngine(policies or [], redis_url)
         self._verifier = None
+        
+        # Gestion de l'approbation et cache pour éviter les requêtes en double
+        self.wait_for_approval = wait_for_approval
+        self._approved_cache = {}
 
-        # Kill switch : l'agent peut être déconnecté depuis le dashboard, sans toucher au code.
+        # Kill switch : l'agent peut être déconnecté depuis le dashboard
         self._conn_state = "connected"
         self._conn_checked_at = 0.0
         self._status_ttl = max(1.0, float(os.getenv("AGENTGUARD_STATUS_TTL", "5")))
@@ -69,10 +76,7 @@ class AgentGuard:
         return h
 
     def _ensure_connected(self):
-        """Bloque l'agent s'il a été déconnecté depuis le dashboard.
-
-        Vérifie l'état auprès du collecteur au plus toutes les AGENTGUARD_STATUS_TTL secondes.
-        Un collecteur injoignable ne bloque pas l'agent (les autres protections restent actives)."""
+        """Bloque l'agent s'il a été déconnecté depuis le dashboard."""
         if not self._status_check:
             return
         now = time.time()
@@ -93,8 +97,7 @@ class AgentGuard:
                 logger.debug("agent_status_check_failed", error=str(exc))
         if self._conn_state == "disconnected":
             raise AgentDisconnectedException(
-                f"Agent '{self.agent_id}' was disconnected from the Cerbere dashboard. "
-                "Reconnect it there to resume."
+                f"Agent '{self.agent_id}' was disconnected from the Cerbere dashboard. Reconnect it there to resume."
             )
 
     def _send_to_collector(self, span: GuardSpan):
@@ -114,7 +117,8 @@ class AgentGuard:
                 headers=self._headers(),
                 timeout=self.collector_timeout,
             )
-            if resp.status_code == 403 and "agent_disconnected" in resp.text:
+            if resp.status_code in (401, 403):
+                warnings.warn("Cerbere rejected your API key or agent is disconnected", RuntimeWarning)
                 self._conn_state = "disconnected"
             if resp.status_code >= 400:
                 logger.warning(
@@ -369,7 +373,7 @@ class AgentGuard:
                     tool_name,
                     RuntimeRiskDecision("DENY", 100.0, RiskLevel.CRITICAL, ["signed server decision unavailable"]),
                 )
-                raise SecurityException("️ AgentGuard DENY: server security decision unavailable")
+                raise SecurityException("🛡️ AgentGuard DENY: server security decision unavailable")
             if signed_decision.get("action") == "DENY":
                 raise SecurityException(f"🛡️ Signed DENY: {signed_decision.get('reason', 'policy violation')}")
             if signed_decision.get("action") == "REQUIRE_APPROVAL":
@@ -378,64 +382,72 @@ class AgentGuard:
         # --- GESTION DE L'APPROBATION HUMAINE (HITL) avec auto-retry ---
         if not check.passed:
             if check.metadata.get("requires_approval"):
-                approval_id = f"req_{hashlib.sha256(f'{time.time()}'.encode()).hexdigest()[:8]}"
+                cache_key = (tool_name, hashlib.sha256(json.dumps(params, sort_keys=True).encode()).hexdigest())
+                
+                # Si déjà approuvé précédemment, on skippe la demande
+                if self.wait_for_approval and self._approved_cache.get(cache_key):
+                    logger.info("tool_already_approved_from_cache", tool=tool_name)
+                else:
+                    approval_id = f"req_{hashlib.sha256(f'{time.time()}'.encode()).hexdigest()[:8]}"
 
-                # 1. Créer la demande d'approbation côté serveur
-                try:
-                    requests.post(
-                        f"{self.collector_url}/api/approvals",
-                        json={
-                            "approval_id": approval_id,
-                            "agent_id": self.agent_id,
-                            "tool_name": tool_name,
-                            "params": params,
-                            "reason": check.details,
-                        },
-                        headers=self._headers(),
-                        timeout=5,
-                    )
-                except Exception as e:
-                    logger.warning("failed_to_notify_collector_of_approval", error=str(e))
-
-                # 2. POLLER jusqu'à ce que l'humain approuve (timeout 5 min)
-                logger.info("waiting_for_human_approval", approval_id=approval_id, tool=tool_name)
-                max_wait = 300  # 5 minutes
-                poll_interval = 2  # secondes
-                elapsed = 0
-
-                while elapsed < max_wait:
-                    time.sleep(poll_interval)
-                    elapsed += poll_interval
-
+                    # 1. Créer la demande d'approbation côté serveur
                     try:
-                        r = requests.get(
-                            f"{self.collector_url}/api/approvals/{approval_id}",
+                        requests.post(
+                            f"{self.collector_url}/api/approvals",
+                            json={
+                                "approval_id": approval_id,
+                                "agent_id": self.agent_id,
+                                "tool_name": tool_name,
+                                "params": params,
+                                "reason": check.details,
+                            },
                             headers=self._headers(),
-                            timeout=3,
+                            timeout=5,
                         )
-                        if r.status_code == 200:
-                            status = r.json().get("status")
-                            if status == "approved":
-                                logger.info("approval_granted_executing_tool", approval_id=approval_id, tool=tool_name)
-                                break
-                            elif status == "rejected":
-                                raise ApprovalRequiredException(
-                                    f"Action rejetée par l'administrateur. (ID: {approval_id})",
-                                    approval_id=approval_id,
-                                    details=check.metadata,
-                                )
                     except Exception as e:
-                        logger.debug("poll_failed", error=str(e))
+                        logger.warning("failed_to_notify_collector_of_approval", error=str(e))
 
-                if elapsed >= max_wait:
-                    raise ApprovalRequiredException(
-                        f"Approbation expirée après {max_wait}s. (ID: {approval_id})",
-                        approval_id=approval_id,
-                        details=check.metadata,
-                    )
+                    # 2. POLLER jusqu'à ce que l'humain approuve (timeout 5 min)
+                    logger.info("waiting_for_human_approval", approval_id=approval_id, tool=tool_name)
+                    max_wait = 300  # 5 minutes
+                    poll_interval = 2  # secondes
+                    elapsed = 0
 
-                # 3. L'outil va maintenant s'exécuter normalement (on sort du bloc if)
-                logger.info("proceeding_with_tool_execution", tool=tool_name)
+                    while elapsed < max_wait:
+                        time.sleep(poll_interval)
+                        elapsed += poll_interval
+
+                        try:
+                            r = requests.get(
+                                f"{self.collector_url}/api/approvals/{approval_id}",
+                                headers=self._headers(),
+                                timeout=3,
+                            )
+                            if r.status_code == 200:
+                                status = r.json().get("status")
+                                if status == "approved":
+                                    logger.info("approval_granted_executing_tool", approval_id=approval_id, tool=tool_name)
+                                    if self.wait_for_approval:
+                                        self._approved_cache[cache_key] = True
+                                    break
+                                elif status == "rejected":
+                                    raise ApprovalRequiredException(
+                                        f"Action rejetée par l'administrateur. (ID: {approval_id})",
+                                        approval_id=approval_id,
+                                        details=check.metadata,
+                                    )
+                        except Exception as e:
+                            logger.debug("poll_failed", error=str(e))
+
+                    if elapsed >= max_wait:
+                        raise ApprovalRequiredException(
+                            f"Approbation expirée après {max_wait}s. (ID: {approval_id})",
+                            approval_id=approval_id,
+                            details=check.metadata,
+                        )
+
+                    # 3. L'outil va maintenant s'exécuter normalement
+                    logger.info("proceeding_with_tool_execution", tool=tool_name)
             else:
                 if check.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL) and self.block_on_high:
                     span = GuardSpan(
