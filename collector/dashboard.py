@@ -1822,6 +1822,17 @@ if (!document.hidden) {
   }
 
   /* ═════════════ Shared helpers ═════════════ */
+  function apiGet(u) {
+    return fetch(u, { credentials: 'include' }).then(function(r) {
+      return r.json().catch(function() { return {}; }).then(function(d) {
+        if (r.status === 404) throw new Error('this route does not exist on the server: deploy the latest backend');
+        if (r.status === 401) throw new Error('session expired: sign in again');
+        if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+        return d;
+      });
+    });
+  }
+
   function _openDrawer(id) { $(id).classList.add('open'); document.body.style.overflow = 'hidden'; }
   function _closeDrawer(id) {
     $(id).classList.remove('open');
@@ -1878,7 +1889,7 @@ if (!document.hidden) {
   async function loadApprovals() {
     try {
       var status = _ap.tab === 'pending' ? 'pending' : 'history';
-      var data = await api('/api/approvals?status=' + status + '&limit=100');
+      var data = await apiGet('/api/approvals?status=' + status + '&limit=100');
       _ap.counts = data.counts || _ap.counts;
       if (_ap.tab === 'pending') {
         _ap.pending = data.approvals || [];
@@ -1897,7 +1908,7 @@ if (!document.hidden) {
   async function checkApprovals() {
     if (document.hidden) return;
     try {
-      var data = await api('/api/approvals?status=pending&limit=100');
+      var data = await apiGet('/api/approvals?status=pending&limit=100');
       var list = data.approvals || [];
       _ap.counts = data.counts || _ap.counts;
       var fresh = list.filter(function(a) { return !_ap.seen[a.id]; });
@@ -1916,8 +1927,25 @@ if (!document.hidden) {
     }
   }
 
-  function _apEmpty(title, text, icon) {
-    return '<div class="d-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' + icon + '</svg><h4>' + title + '</h4><p>' + text + '</p></div>';
+  function _apEmpty(title, text, icon, extra) {
+    return '<div class="d-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' + icon + '</svg><h4>' + title + '</h4><p>' + text + '</p>' + (extra || '') + '</div>';
+  }
+
+  async function sendTestApproval() {
+    try {
+      await apiSend('/api/approvals/test', 'POST', {});
+      toast('Test request created. Review it below.');
+      await loadApprovals();
+      loadAgents();
+    } catch (e) { toast('Could not create the test request: ' + e.message); }
+  }
+
+  async function addTestAgent() {
+    try {
+      await apiSend('/api/agents/test', 'POST', {});
+      toast('Test agent added.');
+      await loadAgents();
+    } catch (e) { toast('Could not add the test agent: ' + e.message); }
   }
 
   function _apPendingCard(a) {
@@ -1949,7 +1977,8 @@ if (!document.hidden) {
     if (_ap.tab === 'pending') {
       box.innerHTML = _ap.pending.length ? _ap.pending.map(_apPendingCard).join('') :
         _apEmpty('All clear', 'No action is waiting for a decision. When an agent attempts something risky, it lands here first.',
-                 '<path d="M12 3 5 6v5c0 4.2 2.9 8 7 10 4.1-2 7-5.8 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>');
+                 '<path d="M12 3 5 6v5c0 4.2 2.9 8 7 10 4.1-2 7-5.8 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>',
+                 '<button type="button" class="tb-btn" onclick="sendTestApproval()">Send a test request</button>');
     } else {
       box.innerHTML = _ap.history.length ? _ap.history.map(_apHistoryRow).join('') :
         _apEmpty('No decisions yet', 'Every approval and rejection is recorded here with who decided and when.',
@@ -1997,7 +2026,7 @@ if (!document.hidden) {
 
   async function loadAgents() {
     try {
-      var data = await api('/api/agents');
+      var data = await apiGet('/api/agents');
       _ag.list = data.agents || [];
       _ag.counts = data.counts || {};
       _syncAgentsBadge();
@@ -2024,7 +2053,8 @@ if (!document.hidden) {
       : '<button type="button" class="ag-btn disconnect' + (armed ? ' armed' : '') + '" data-agent="' + esc(a.agent_id) + '" onclick="toggleAgent(this.dataset.agent,\'disconnect\')">' + (armed ? 'Click again to confirm' : 'Disconnect') + '</button>';
     var note = disc
       ? 'Disconnected by ' + esc(a.disconnected_by || 'a reviewer') + ' ' + esc(_ago(a.disconnected_at)) + '. Its requests are refused until you reconnect it.'
-      : 'Last activity ' + esc(_ago(a.last_seen_at)) + ' · first seen ' + esc(_ago(a.first_seen_at));
+      : 'Last activity ' + esc(_ago(a.last_seen_at)) + ' · first seen ' + esc(_ago(a.first_seen_at)) +
+        ((!a.sdk_version) ? '<br><span style="color:var(--yellow)">Older SDK: upgrade to cerbere-ag 0.4.2 so Disconnect really stops this agent.</span>' : '');
     return '<div class="ag-row' + (disc ? ' disc' : '') + '">' +
       '<div class="ag-main"><span class="ag-dot ' + esc(a.state) + '"></span>' +
         '<div class="ag-id"><b>' + esc(a.name || a.agent_id) + '</b><span>' + esc(_agSub(a)) + '</span></div>' +
@@ -2044,8 +2074,10 @@ if (!document.hidden) {
     }).join('');
     if (!_ag.list.length) {
       $('agentsList').innerHTML = '<div class="d-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="7" width="14" height="11" rx="3"/><path d="M12 7V4M9 12.5h.01M15 12.5h.01M9.5 15.5h5"/></svg>' +
-        '<h4>No agent yet</h4><p>Agents appear here the first time they report to Cerbere. Connect your first one in a couple of minutes.</p>' +
-        '<button type="button" class="tb-btn primary" onclick="closeAgentsPanel();openConnectAgentModal()">+ Connect agent</button></div>';
+        '<h4>No agent has reported yet</h4><p>An agent appears here as soon as it sends its first event. Make sure it runs the latest SDK and points at this server:</p>' +
+        '<pre class="ap-params" style="text-align:left;margin:0 auto 18px;max-width:440px;background:#0b0a09;border:1px solid var(--border);border-radius:10px;padding:12px;font:11.5px/1.7 var(--mono);color:#c9c0b3;white-space:pre-wrap">pip install -U cerbere-ag\nexport AGENTGUARD_API_KEY=ag_live_...\nexport AGENTGUARD_COLLECTOR_URL=' + esc(location.origin) + '\nexport AGENTGUARD_AGENT_ID=my-agent</pre>' +
+        '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap"><button type="button" class="tb-btn primary" onclick="closeAgentsPanel();openConnectAgentModal()">+ Connect agent</button>' +
+        '<button type="button" class="tb-btn" onclick="addTestAgent()">Add a test agent</button></div></div>';
       return;
     }
     $('agentsList').innerHTML = _ag.list.map(_agRow).join('');
@@ -2078,4 +2110,5 @@ if (!document.hidden) {
 </body>
 </html>
 '''
+
 
