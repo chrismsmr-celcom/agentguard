@@ -1047,51 +1047,45 @@ def _clear_human_session(response):
 # ═══════════════════════════════════════════════════════════════
 
 def _lookup_org_by_key(key: str):
-    """Legacy lookup in api_keys."""
+    """Résout une clé API en organisation.
+
+    Cherche dans `api_keys` (clés admin / historiques) PUIS dans `user_api_keys` (clés générées
+    depuis le dashboard). Avant ce correctif, seule la première table était consultée : un agent
+    utilisant une clé du dashboard recevait 401 sur /span et /api/approvals, donc rien
+    n'apparaissait jamais dans le dashboard (0 approbation, 0 agent)."""
     if not key:
         return None
 
     key_hash = hash_key(key)
     p = sql_placeholder()
+    active = "TRUE" if is_postgres() else "1"
 
-    if is_postgres():
-        conn = get_pg_conn()
-
+    for table, has_name in (("api_keys", False), ("user_api_keys", True)):
         try:
-            cur = conn.cursor()
-            cur.execute(
-                f"""
-                SELECT org_id
-                FROM api_keys
-                WHERE key_hash = {p}
-                  AND active = TRUE
-                LIMIT 1
-                """,
-                (key_hash,),
-            )
-            row = cur.fetchone()
-            return row[0] if row else None
-        finally:
-            conn.close()
+            conn = get_pg_conn() if is_postgres() else sqlite3.connect(_get_db_path())
+            try:
+                cur = conn.cursor()
+                cols = "org_id, name" if has_name else "org_id"
+                cur.execute(
+                    f"SELECT {cols} FROM {table} WHERE key_hash = {p} AND active = {active} LIMIT 1",
+                    (key_hash,),
+                )
+                row = cur.fetchone()
+            finally:
+                conn.close()
+        except Exception as exc:
+            logger.debug("api_key_lookup_failed", table=table, error=str(exc))
+            continue
 
-    conn = sqlite3.connect(_get_db_path())
+        if row:
+            if has_name:
+                try:
+                    g.api_key_name = str(row[1])   # sert à nommer les agents des anciens SDK
+                except RuntimeError:
+                    pass
+            return row[0]
 
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT org_id
-            FROM api_keys
-            WHERE key_hash = ?
-              AND active = 1
-            LIMIT 1
-            """,
-            (key_hash,),
-        )
-        row = cur.fetchone()
-        return row[0] if row else None
-    finally:
-        conn.close()
+    return None
 
 
 def resolve_org_id(key: str):
@@ -4023,4 +4017,5 @@ def revoke_api_key(key_id):
     except Exception as e:
         logger.error("revoke_api_key_crashed", error=str(e), exc_info=True)
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
 
