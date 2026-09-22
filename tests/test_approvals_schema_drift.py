@@ -152,3 +152,4 @@ def test_hitl_module_never_touches_the_api_table(client_wrong_schema):
     listed = c.get("/api/approvals?status=pending", headers={"X-API-Key": "key-a"})
     assert listed.status_code == 200
     assert [a["id"] for a in listed.get_json()["approvals"]] == ["req-9"]
+
