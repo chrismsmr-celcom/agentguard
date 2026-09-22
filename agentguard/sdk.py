@@ -8,7 +8,8 @@ import logging
 from functools import wraps
 from typing import Optional, Dict, Any, List, Callable, Tuple
 
-from .models import SecurityCheck, RiskLevel, SecurityAction, SecurityException, ApprovalRequiredException, AgentDisconnectedException, GuardSpan, SpanPayload, RuntimeRiskDecision, TrajectoryEvent
+import json
+from .models import SecurityCheck, RiskLevel, SecurityAction, SecurityException, ApprovalRequiredException, ApprovalRejectedException, AgentDisconnectedException, GuardSpan, SpanPayload, RuntimeRiskDecision, TrajectoryEvent
 from .policy import PolicyEngine
 from .runtime import TrajectoryAnalyzer, RuntimeRiskEngine
 
@@ -18,7 +19,7 @@ SDK_VERSION = "0.4.2"
 
 
 class AgentGuard:
-    def __init__(self, collector_url: Optional[str] = None, api_key: Optional[str] = None, policies: Optional[List[Dict[str, Any]]] = None, max_budget: float = 10.0, block_on_high: bool = True, debug: bool = False, use_ml: Optional[bool] = None, use_llm_judge: Optional[bool] = None, redis_url: Optional[str] = None, fail_open: bool = False, agent_id: Optional[str] = None):
+    def __init__(self, collector_url: Optional[str] = None, api_key: Optional[str] = None, policies: Optional[List[Dict[str, Any]]] = None, max_budget: float = 10.0, block_on_high: bool = True, debug: bool = False, use_ml: Optional[bool] = None, use_llm_judge: Optional[bool] = None, redis_url: Optional[str] = None, fail_open: bool = False, agent_id: Optional[str] = None, wait_for_approval: Optional[bool] = None, approval_timeout: Optional[float] = None):
         self.collector_url = (collector_url or os.getenv("AGENTGUARD_COLLECTOR_URL") or "http://localhost:8080").rstrip("/")
         self.api_key = api_key or os.getenv("AGENTGUARD_API_KEY")
         self.agent_id = agent_id or os.getenv("AGENTGUARD_AGENT_ID", "default")
@@ -38,6 +39,15 @@ class AgentGuard:
         self._conn_checked_at = 0.0
         self._status_ttl = max(1.0, float(os.getenv("AGENTGUARD_STATUS_TTL", "5")))
         self._status_check = bool(self.api_key) and os.getenv("AGENTGUARD_STATUS_CHECK", "true").lower() == "true"
+
+        # HITL : par défaut, une action en attente lève ApprovalRequiredException (mode "async") ;
+        # avec wait_for_approval=True (ici ou par appel), le SDK PATIENTE que l'humain décide, puis
+        # exécute l'outil lui-même : c'est ce qui manquait pour que l'approbation débloque réellement l'agent.
+        self.wait_for_approval = (wait_for_approval if wait_for_approval is not None
+                                  else os.getenv("AGENTGUARD_WAIT_FOR_APPROVAL", "false").lower() == "true")
+        self.approval_timeout = (float(approval_timeout) if approval_timeout is not None
+                                 else float(os.getenv("AGENTGUARD_APPROVAL_TIMEOUT", "300")))
+        self.approval_poll_interval = max(1.0, float(os.getenv("AGENTGUARD_APPROVAL_POLL_INTERVAL", "3")))
         
         self._runtime_enabled = os.getenv("AGENTGUARD_RUNTIME_RISK_ENABLED", "true").lower() == "true"
         self._runtime_fail_closed = os.getenv("AGENTGUARD_RUNTIME_FAIL_CLOSED", "true").lower() == "true"
@@ -61,6 +71,68 @@ class AgentGuard:
             f"[Cerbere] {self.collector_url} rejected your API key (HTTP 401): events are NOT being recorded. "
             "Check AGENTGUARD_API_KEY and that the collector URL is correct.",
             RuntimeWarning, stacklevel=3)
+
+    @staticmethod
+    def _stable_approval_id(agent_id: str, tool_name: str, params: Dict[str, Any]) -> str:
+        """ID déterministe pour UNE action (même agent + même outil + mêmes paramètres).
+
+        Avant : chaque appel générait un ID basé sur time.time(), donc un agent qui réessaie la
+        MÊME action après une approbation créait une NOUVELLE demande "pending" au lieu de voir
+        que l'humain avait déjà décidé -> l'approbation ne débloquait jamais rien."""
+        try:
+            canon = json.dumps(params or {}, sort_keys=True, default=str)
+        except TypeError:
+            canon = str(params)
+        digest = hashlib.sha256(f"{agent_id}|{tool_name}|{canon}".encode("utf-8")).hexdigest()[:16]
+        return f"req_{digest}"
+
+    def _fetch_approval_status(self, approval_id: str) -> Tuple[Optional[str], Optional[str]]:
+        """(status, resolved_by). status est 'approved' | 'rejected' | 'pending' | None (demande
+        inconnue du collecteur, clé refusée, ou collecteur injoignable)."""
+        try:
+            r = requests.get(f"{self.collector_url}/api/approvals/{approval_id}",
+                             headers=self._headers(), timeout=min(5.0, self.collector_timeout))
+            if r.status_code == 401:
+                self._warn_key_rejected()
+            elif r.status_code == 200:
+                data = r.json()
+                return data.get("status"), data.get("resolved_by")
+        except Exception as e:
+            logger.warning("approval_status_check_failed", approval_id=approval_id, error=str(e))
+        return None, None
+
+    def _create_approval_request(self, approval_id: str, tool_name: str, params: Dict[str, Any], reason: str):
+        try:
+            resp = requests.post(
+                f"{self.collector_url}/api/approvals",
+                json={"approval_id": approval_id, "agent_id": self.agent_id, "tool_name": tool_name,
+                     "params": params, "reason": reason},
+                headers=self._headers(), timeout=5)
+            if resp.status_code == 401:
+                self._warn_key_rejected()
+            elif resp.status_code >= 400:
+                logger.warning("collector_rejected_approval", status_code=resp.status_code, body=resp.text[:300])
+        except Exception as e:
+            logger.warning("failed_to_notify_collector_of_approval", error=str(e))
+
+    def _resolve_approval(self, approval_id, tool_name, params, reason, wait, timeout):
+        """Retourne (status, resolved_by). Crée la demande si elle n'existe pas encore ; si `wait`,
+        patiente jusqu'à `timeout` secondes qu'un humain décide (poll toutes les
+        `self.approval_poll_interval` secondes) au lieu de bloquer l'agent immédiatement."""
+        status, resolved_by = self._fetch_approval_status(approval_id)
+        if status is None:
+            self._create_approval_request(approval_id, tool_name, params, reason)
+            status = "pending"
+        if status == "pending" and wait:
+            deadline = time.time() + max(0.0, timeout)
+            while time.time() < deadline:
+                time.sleep(min(self.approval_poll_interval, max(0.1, deadline - time.time())))
+                status, resolved_by = self._fetch_approval_status(approval_id)
+                if status is None:
+                    status = "pending"
+                if status != "pending":
+                    break
+        return status, resolved_by
 
     def _ensure_connected(self):
         """Bloque l'agent s'il a été déconnecté depuis le dashboard.
@@ -195,7 +267,7 @@ class AgentGuard:
             return result
         return wrapper
 
-    def guard_tool_call(self, tool_name: Optional[str] = None, params: Optional[Dict[str, Any]] = None, func: Optional[Callable] = None):
+    def guard_tool_call(self, tool_name: Optional[str] = None, params: Optional[Dict[str, Any]] = None, func: Optional[Callable] = None, wait_for_approval: Optional[bool] = None, approval_timeout: Optional[float] = None):
         if callable(tool_name):
             actual_func = tool_name
             actual_tool_name = actual_func.__name__
@@ -213,12 +285,14 @@ class AgentGuard:
             return decorator
             
         if func is not None and isinstance(tool_name, str):
-            return self._execute_guarded_tool(tool_name, params or {}, func)
+            return self._execute_guarded_tool(tool_name, params or {}, func, wait_for_approval, approval_timeout)
             
         raise TypeError("Usage invalide de guard_tool_call. Utilisez @guard.guard_tool_call ou @guard.guard_tool_call('nom')")
 
-    def _execute_guarded_tool(self, tool_name: str, params: Dict[str, Any], func: Callable):
+    def _execute_guarded_tool(self, tool_name: str, params: Dict[str, Any], func: Callable, wait_for_approval: Optional[bool] = None, approval_timeout: Optional[float] = None):
         self._ensure_connected()
+        wait = self.wait_for_approval if wait_for_approval is None else wait_for_approval
+        timeout = self.approval_timeout if approval_timeout is None else approval_timeout
         span_id = hashlib.sha256(f"{time.time_ns()}".encode()).hexdigest()[:16]
         start = time.time()
         budget_remaining = self.max_budget - self.total_spent
@@ -244,35 +318,31 @@ class AgentGuard:
             if signed_decision.get("action") == "REQUIRE_APPROVAL": raise SecurityException("🛡️ AgentGuard: human approval required")
 
         # --- GESTION DE L'APPROBATION HUMAINE (HITL) ---
+        approved_override = False
         if not check.passed:
             if check.metadata.get("requires_approval"):
-                approval_id = f"req_{hashlib.sha256(f'{time.time()}'.encode()).hexdigest()[:8]}"
-                
-                try:
-                    resp = requests.post(
-                        f"{self.collector_url}/api/approvals",
-                        json={
-                            "approval_id": approval_id,
-                            "agent_id": self.agent_id,
-                            "tool_name": tool_name,
-                            "params": params,
-                            "reason": check.details
-                        },
-                        headers=self._headers(),
-                        timeout=5
-                    )
-                    if resp.status_code >= 400:
-                        logger.warning("collector_rejected_approval", status_code=resp.status_code, body=resp.text[:300])
-                except Exception as e:
-                    logger.warning("failed_to_notify_collector_of_approval", error=str(e))
+                approval_id = self._stable_approval_id(self.agent_id, tool_name, params)
+                status, resolved_by = self._resolve_approval(approval_id, tool_name, params, check.details, wait, timeout)
 
-                raise ApprovalRequiredException(
-                    f"Action suspendue. Approbation requise pour l'envoi vers {check.metadata.get('recipient')}. (ID: {approval_id})",
-                    approval_id=approval_id,
-                    details=check.metadata
-                )
-                
-            if check.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL) and self.block_on_high:
+                if status == "approved":
+                    # DÉBLOCAGE : un humain a déjà validé exactement cette action -> on l'exécute.
+                    approved_override = True
+                    logger.info("approval_granted_action_released", approval_id=approval_id, tool=tool_name, by=resolved_by)
+                elif status == "rejected":
+                    span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000,
+                                     {"tool": tool_name, "params": params}, {"blocked": True}, [check, runtime_check],
+                                     True, f"[HITL] Rejected by {resolved_by or 'a reviewer'} (ID: {approval_id})")
+                    self.spans.append(span); self._send_to_collector(span); self._record_trajectory_tool(tool_name, runtime_decision)
+                    raise ApprovalRejectedException(
+                        f"🛡️ Action rejected by {resolved_by or 'a reviewer'}. (ID: {approval_id})",
+                        approval_id=approval_id, resolved_by=resolved_by)
+                else:
+                    timed_out = wait and status == "pending"
+                    msg = (f"Action suspendue. Toujours en attente après {int(timeout)}s. (ID: {approval_id})" if timed_out else
+                          f"Action suspendue. Approbation requise pour l'envoi vers {check.metadata.get('recipient')}. (ID: {approval_id})")
+                    raise ApprovalRequiredException(msg, approval_id=approval_id, details=check.metadata, timed_out=timed_out)
+
+            if not approved_override and check.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL) and self.block_on_high:
                 span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000, {"tool": tool_name, "params": params}, {"blocked": True, "reason": "policy_block_on_high"}, [check, runtime_check], True, f"[POLICY] {check.details}")
                 self.spans.append(span); self._send_to_collector(span); self._record_trajectory_tool(tool_name, runtime_decision)
                 details = check.details or "policy violation"
