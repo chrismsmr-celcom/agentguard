@@ -526,6 +526,16 @@ def init_db():
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_spans_agent ON spans(org_id, agent_id)")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_api_keys (
+                    id TEXT PRIMARY KEY,
+                    org_id TEXT NOT NULL,
+                    key_hash TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
             conn.commit()
         finally:
@@ -641,6 +651,16 @@ def init_db():
                     disconnected_at TIMESTAMP NULL,
                     disconnected_by TEXT NULL,
                     PRIMARY KEY (org_id, agent_id)
+                )
+            """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS user_api_keys (
+                    id TEXT PRIMARY KEY,
+                    org_id TEXT NOT NULL,
+                    key_hash TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    active INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             try:
@@ -976,4 +996,5 @@ __all__ = [
     "sql_false",
     "sql_placeholder",
 ]
+
 
