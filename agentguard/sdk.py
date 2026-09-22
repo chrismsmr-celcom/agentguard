@@ -289,94 +289,110 @@ class AgentGuard:
             
         raise TypeError("Usage invalide de guard_tool_call. Utilisez @guard.guard_tool_call ou @guard.guard_tool_call('nom')")
 
-    def _execute_guarded_tool(self, tool_name: str, params: Dict[str, Any], func: Callable, wait_for_approval: Optional[bool] = None, approval_timeout: Optional[float] = None):
-        self._ensure_connected()
-        wait = self.wait_for_approval if wait_for_approval is None else wait_for_approval
-        timeout = self.approval_timeout if approval_timeout is None else approval_timeout
-        span_id = hashlib.sha256(f"{time.time_ns()}".encode()).hexdigest()[:16]
-        start = time.time()
-        budget_remaining = self.max_budget - self.total_spent
-        
-        check = self.policy_engine.check_tool_policy(tool_name, params, budget_remaining)
-        runtime_decision = self._runtime_risk.evaluate(tool_name, params) if self._runtime_enabled else RuntimeRiskDecision("ALLOW", 0.0, RiskLevel.LOW)
-        runtime_check = SecurityCheck("runtime_risk", runtime_decision.allowed, runtime_decision.risk_level, "; ".join(runtime_decision.reasons[:5]))
+    def _execute_guarded_tool(self, tool_name: str, params: Dict[str, Any], func: Callable):
+    self._ensure_connected()
+    span_id = hashlib.sha256(f"{time.time_ns()}".encode()).hexdigest()[:16]
+    start = time.time()
+    budget_remaining = self.max_budget - self.total_spent
+    
+    check = self.policy_engine.check_tool_policy(tool_name, params, budget_remaining)
+    runtime_decision = self._runtime_risk.evaluate(tool_name, params) if self._runtime_enabled else RuntimeRiskDecision("ALLOW", 0.0, RiskLevel.LOW)
+    runtime_check = SecurityCheck("runtime_risk", runtime_decision.allowed, runtime_decision.risk_level, "; ".join(runtime_decision.reasons[:5]))
 
-        if not runtime_decision.allowed:
-            span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000, {"tool": tool_name, "params": params}, {"blocked": True}, [check, runtime_check], True, f"[RUNTIME {runtime_decision.action}] {runtime_decision.reasons[0] if runtime_decision.reasons else 'blocked'}")
-            self.spans.append(span); self._send_to_collector(span); self._record_trajectory_tool(tool_name, runtime_decision)
-            raise SecurityException(f"🛡️ Runtime risk {runtime_decision.action}: {runtime_decision.reasons[0] if runtime_decision.reasons else 'blocked'}")
+    if not runtime_decision.allowed:
+        span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000, {"tool": tool_name, "params": params}, {"blocked": True}, [check, runtime_check], True, f"[RUNTIME {runtime_decision.action}] {runtime_decision.reasons[0] if runtime_decision.reasons else 'blocked'}")
+        self.spans.append(span); self._send_to_collector(span); self._record_trajectory_tool(tool_name, runtime_decision)
+        raise SecurityException(f"🛡️ Runtime risk {runtime_decision.action}: {runtime_decision.reasons[0] if runtime_decision.reasons else 'blocked'}")
 
-        signed_decision = None
-        if self._verifier:
-            signed_decision = self._request_signed_decision(tool_name, params or {})
-            if signed_decision is None:
-                span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000, {"tool": tool_name, "params": params}, {"blocked": True, "reason": "signed_decision_unavailable"}, [check, runtime_check], True, "[SECURITY] Signed server decision unavailable")
-                self.spans.append(span); self._send_to_collector(span)
-                self._record_trajectory_tool(tool_name, RuntimeRiskDecision("DENY", 100.0, RiskLevel.CRITICAL, ["signed server decision unavailable"]))
-                raise SecurityException("🛡️ AgentGuard DENY: server security decision unavailable")
-            if signed_decision.get("action") == "DENY": raise SecurityException(f"🛡️ Signed DENY: {signed_decision.get('reason', 'policy violation')}")
-            if signed_decision.get("action") == "REQUIRE_APPROVAL": raise SecurityException("🛡️ AgentGuard: human approval required")
+    signed_decision = None
+    if self._verifier:
+        signed_decision = self._request_signed_decision(tool_name, params or {})
+        if signed_decision is None:
+            span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000, {"tool": tool_name, "params": params}, {"blocked": True, "reason": "signed_decision_unavailable"}, [check, runtime_check], True, "[SECURITY] Signed server decision unavailable")
+            self.spans.append(span); self._send_to_collector(span)
+            self._record_trajectory_tool(tool_name, RuntimeRiskDecision("DENY", 100.0, RiskLevel.CRITICAL, ["signed server decision unavailable"]))
+            raise SecurityException("️ AgentGuard DENY: server security decision unavailable")
+        if signed_decision.get("action") == "DENY": raise SecurityException(f"🛡️ Signed DENY: {signed_decision.get('reason', 'policy violation')}")
+        if signed_decision.get("action") == "REQUIRE_APPROVAL": raise SecurityException("🛡️ AgentGuard: human approval required")
 
-        # --- GESTION DE L'APPROBATION HUMAINE (HITL) ---
-        approved_override = False
-        if not check.passed:
-            if check.metadata.get("requires_approval"):
-                approval_id = self._stable_approval_id(self.agent_id, tool_name, params)
-                status, resolved_by = self._resolve_approval(approval_id, tool_name, params, check.details, wait, timeout)
+    # --- GESTION DE L'APPROBATION HUMAINE (HITL) avec auto-retry ---
+    if not check.passed:
+        if check.metadata.get("requires_approval"):
+            approval_id = f"req_{hashlib.sha256(f'{time.time()}'.encode()).hexdigest()[:8]}"
+            
+            # 1. Créer la demande d'approbation côté serveur
+            try:
+                requests.post(
+                    f"{self.collector_url}/api/approvals",
+                    json={
+                        "approval_id": approval_id,
+                        "agent_id": self.agent_id,
+                        "tool_name": tool_name,
+                        "params": params,
+                        "reason": check.details
+                    },
+                    headers=self._headers(),
+                    timeout=5
+                )
+            except Exception as e:
+                logger.warning("failed_to_notify_collector_of_approval", error=str(e))
 
-                if status == "approved":
-                    # DÉBLOCAGE : un humain a déjà validé exactement cette action -> on l'exécute.
-                    approved_override = True
-                    logger.info("approval_granted_action_released", approval_id=approval_id, tool=tool_name, by=resolved_by)
-                elif status == "rejected":
-                    span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000,
-                                     {"tool": tool_name, "params": params}, {"blocked": True}, [check, runtime_check],
-                                     True, f"[HITL] Rejected by {resolved_by or 'a reviewer'} (ID: {approval_id})")
-                    self.spans.append(span); self._send_to_collector(span); self._record_trajectory_tool(tool_name, runtime_decision)
-                    raise ApprovalRejectedException(
-                        f"🛡️ Action rejected by {resolved_by or 'a reviewer'}. (ID: {approval_id})",
-                        approval_id=approval_id, resolved_by=resolved_by)
-                else:
-                    timed_out = wait and status == "pending"
-                    msg = (f"Action suspendue. Toujours en attente après {int(timeout)}s. (ID: {approval_id})" if timed_out else
-                          f"Action suspendue. Approbation requise pour l'envoi vers {check.metadata.get('recipient')}. (ID: {approval_id})")
-                    raise ApprovalRequiredException(msg, approval_id=approval_id, details=check.metadata, timed_out=timed_out)
-
-            if not approved_override and check.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL) and self.block_on_high:
+            # 2. POLLER jusqu'à ce que l'humain approuve (timeout 5 min)
+            logger.info("waiting_for_human_approval", approval_id=approval_id, tool=tool_name)
+            max_wait = 300  # 5 minutes
+            poll_interval = 2  # secondes
+            elapsed = 0
+            
+            while elapsed < max_wait:
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+                
+                try:
+                    r = requests.get(
+                        f"{self.collector_url}/api/approvals/{approval_id}",
+                        headers=self._headers(),
+                        timeout=3
+                    )
+                    if r.status_code == 200:
+                        status = r.json().get("status")
+                        if status == "approved":
+                            logger.info("approval_granted_executing_tool", approval_id=approval_id, tool=tool_name)
+                            # L'humain a approuvé → exécuter l'outil
+                            break
+                        elif status == "rejected":
+                            raise ApprovalRequiredException(
+                                f"Action rejetée par l'administrateur. (ID: {approval_id})",
+                                approval_id=approval_id,
+                                details=check.metadata
+                            )
+                except Exception as e:
+                    logger.debug("poll_failed", error=str(e))
+            
+            if elapsed >= max_wait:
+                raise ApprovalRequiredException(
+                    f"Approbation expirée après {max_wait}s. (ID: {approval_id})",
+                    approval_id=approval_id,
+                    details=check.metadata
+                )
+                
+            # 3. L'outil va maintenant s'exécuter normalement (on sort du bloc if)
+            logger.info("proceeding_with_tool_execution", tool=tool_name)
+        else:
+            if check.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL) and self.block_on_high:
                 span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000, {"tool": tool_name, "params": params}, {"blocked": True, "reason": "policy_block_on_high"}, [check, runtime_check], True, f"[POLICY] {check.details}")
                 self.spans.append(span); self._send_to_collector(span); self._record_trajectory_tool(tool_name, runtime_decision)
-                details = check.details or "policy violation"
+                raise SecurityException(f"🛡️ Tool blocked: {check.details}")
 
-                metadata = getattr(check, "metadata", {}) or {}
+    try: 
+        result = func(**params)
+    except Exception as exc:
+        span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000, {"tool": tool_name, "params": params}, {"error": str(exc)[:1000]}, [check, runtime_check])
+        self.spans.append(span); self._send_to_collector(span)
+        raise
 
-                reason_parts = [details]
-
-                if metadata.get("taint"):
-                    reason_parts.append(f"Taint: {metadata['taint']}")
-
-                if metadata.get("secret"):
-                    reason_parts.append(f"SECRET: {metadata['secret']}")
-
-                if metadata.get("action"):
-                    reason_parts.append(f"Action: {metadata['action']}")
-
-                if metadata.get("reason"):
-                    reason_parts.append(str(metadata["reason"]))
-
-                raise SecurityException(
-                    f"🛡️ Tool blocked: {' | '.join(reason_parts)}"
-                )
-
-        try: 
-            result = func(**params)
-        except Exception as exc:
-            span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000, {"tool": tool_name, "params": params}, {"error": str(exc)[:1000]}, [check, runtime_check])
-            self.spans.append(span); self._send_to_collector(span)
-            raise
-
-        span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000, {"tool": tool_name, "params": params}, {"result": str(result)[:500]}, [check, runtime_check])
-        self.spans.append(span); self._send_to_collector(span); self._record_trajectory_tool(tool_name, runtime_decision)
-        return result
+    span = GuardSpan(span_id, self.trace_id, "tool_call", start, (time.time()-start)*1000, {"tool": tool_name, "params": params}, {"result": str(result)[:500]}, [check, runtime_check])
+    self.spans.append(span); self._send_to_collector(span); self._record_trajectory_tool(tool_name, runtime_decision)
+    return result
 
     def get_report(self) -> Dict[str, Any]:
         return {"trace_id": self.trace_id, "total_spans": len(self.spans), "blocked_operations": sum(1 for s in self.spans if s.blocked), "total_cost_usd": round(self.total_spent, 6), "runtime_risk_enabled": self._runtime_enabled}
