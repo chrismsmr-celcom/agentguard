@@ -54,3 +54,4 @@ def test_unreachable_collector_does_not_block_agent(guard, monkeypatch):
         raise sdk_mod.requests.ConnectionError("down")
     monkeypatch.setattr(sdk_mod.requests, "get", boom)
     assert guard.guard_tool_call("read_doc", {"id": 1}, func=lambda **kw: "ok") == "ok"
+
