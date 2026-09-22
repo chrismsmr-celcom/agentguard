@@ -125,3 +125,4 @@ def test_sdk_reads_collector_url_from_environment(monkeypatch):
     monkeypatch.setenv("AGENTGUARD_COLLECTOR_URL", "https://app.cerbereag.site/")
     assert AgentGuard(api_key="k").collector_url == "https://app.cerbereag.site"
     assert AgentGuard(collector_url="http://x.test", api_key="k").collector_url == "http://x.test"
+
