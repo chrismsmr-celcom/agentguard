@@ -1212,6 +1212,8 @@ _AGENT_ID_RE = re.compile(r"^[A-Za-z0-9_.:@\- ]{1,64}$")
 _AGENT_SEEN = {}      # (org, agent) -> dernier upsert (limite l'écriture en base)
 _AGENT_STATUS = {}    # (org, agent) -> (ts, status) cache court de lecture
 _AGENT_TOUCH_EVERY = 15.0
+# Anciens SDK (sans en-tête) : seuls ces endpoints d'ingestion font apparaître l'agent
+_INGEST_ENDPOINTS = {"api.receive_span", "api.decide", "api.api_sdk_create_approval"}
 _AGENT_STATUS_TTL = 3.0
 
 
@@ -1223,6 +1225,12 @@ def _request_agent_id():
     identity = getattr(g, "agent_identity", None)
     if isinstance(identity, dict) and identity.get("agent_id"):
         return str(identity["agent_id"])[:64]
+    # SDK < 0.4.1 : pas d'en-tête X-Agent-Id -> l'agent est identifié par le nom de sa clé API
+    key_name = getattr(g, "api_key_name", None)
+    if key_name:
+        safe = re.sub(r"[^A-Za-z0-9_.:@\- ]", "-", key_name).strip()[:58]
+        if safe:
+            return "key:" + safe
     return None
 
 
@@ -1260,7 +1268,7 @@ def _reject_if_agent_disconnected():
     return None
 
 
-def _touch_agent(org_id, agent_id, sdk_version=None):
+def _touch_agent(org_id, agent_id, sdk_version=None, name=None):
     """Enregistre / rafraîchit l'agent (upsert), au plus une fois par _AGENT_TOUCH_EVERY s."""
     key = (org_id, agent_id)
     now = time.time()
@@ -1275,7 +1283,7 @@ def _touch_agent(org_id, agent_id, sdk_version=None):
             last_seen_at = CURRENT_TIMESTAMP,
             sdk_version = COALESCE(excluded.sdk_version, connected_agents.sdk_version)
         """,
-        (org_id, agent_id, agent_id, sdk_version), commit=True,
+        (org_id, agent_id, name or agent_id, sdk_version), commit=True,
     )
 
 
@@ -1283,16 +1291,18 @@ def _touch_agent(org_id, agent_id, sdk_version=None):
 def _register_agent_activity(response):
     """Toute requête authentifiée d'un SDK (X-Agent-Id) alimente le registre des agents."""
     try:
+        endpoint = request.endpoint or ""
         if (
             response.status_code < 400
-            and request.headers.get("X-Agent-Id")
-            and (request.endpoint or "").startswith("api.")
+            and endpoint.startswith("api.")
+            and (request.headers.get("X-Agent-Id") or endpoint in _INGEST_ENDPOINTS)
         ):
             org_id = getattr(g, "org_id", None)
             agent_id = _request_agent_id()
             if org_id and agent_id:
                 sdk_version = (request.headers.get("X-Agent-Sdk") or "")[:32] or None
-                _touch_agent(org_id, agent_id, sdk_version)
+                name = getattr(g, "api_key_name", None) if agent_id.startswith("key:") else None
+                _touch_agent(org_id, agent_id, sdk_version, name)
     except Exception as exc:  # ne jamais casser une réponse pour de la télémétrie
         logger.debug("agent_touch_failed", error=str(exc))
     return response
@@ -1438,6 +1448,51 @@ def api_agent_disconnect(agent_id):
 @api_bp.route("/api/agents/<agent_id>/reconnect", methods=["POST"], endpoint="api_agent_reconnect")
 def api_agent_reconnect(agent_id):
     return _set_agent_status(agent_id, "connected")
+
+
+# ── Boutons "test" du dashboard : vérifier la chaîne complète sans écrire une ligne de code ──
+TEST_AGENT_ID = "cerbere-test-agent"
+
+
+def _ensure_test_agent(org_id):
+    _db_run(
+        """INSERT INTO connected_agents (org_id, agent_id, name, status, sdk_version)
+           VALUES (?, ?, ?, 'connected', ?)
+           ON CONFLICT (org_id, agent_id) DO UPDATE SET last_seen_at = CURRENT_TIMESTAMP""",
+        (org_id, TEST_AGENT_ID, "Cerbere test agent", "test"), commit=True)
+
+
+@api_bp.route("/api/agents/test", methods=["POST"], endpoint="api_test_agent")
+def api_test_agent():
+    if not require_human_auth():
+        return jsonify({"error": "Human session required"}), 401
+    try:
+        _ensure_test_agent(g.org_id)
+    except Exception as exc:
+        return jsonify({"error": f"Database error: {str(exc)}"}), 500
+    return jsonify({"agent_id": TEST_AGENT_ID, "status": "connected"}), 201
+
+
+@api_bp.route("/api/approvals/test", methods=["POST"], endpoint="api_test_approval")
+def api_test_approval():
+    """Crée une demande d'approbation factice, pour voir la file et la décision de bout en bout."""
+    if not require_human_auth():
+        return jsonify({"error": "Human session required"}), 401
+    approval_id = "test_" + secrets.token_hex(4)
+    try:
+        _ensure_test_agent(g.org_id)
+        _db_run(
+            """INSERT INTO approval_requests (id, org_id, agent_id, tool_name, params, reason, status)
+               VALUES (?, ?, ?, ?, ?, ?, 'pending')""",
+            (approval_id, g.org_id, TEST_AGENT_ID, "send_email",
+             json.dumps({"to": "partner@gmail.com", "subject": "Q3 customer export",
+                         "attachments": ["customers_q3.csv"]}),
+             "Test request from the dashboard: external recipient on a personal domain"),
+            commit=True)
+    except Exception as exc:
+        return jsonify({"error": f"Database error: {str(exc)}"}), 500
+    return jsonify({"id": approval_id, "status": "pending"}), 201
+
 
 
 @api_bp.route("/api/agent/status", methods=["GET"], endpoint="api_agent_status")
@@ -1731,4 +1786,5 @@ def api_delete_alert_rule(alert_id):
     except Exception as e:
         logger.error("alert_rule_delete_failed", error=str(e), org_id=org_id)
         return jsonify({"error": "Failed to delete alert rule"}), 500
+
 
