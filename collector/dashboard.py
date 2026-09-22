@@ -1906,26 +1906,28 @@ if (!document.hidden) {
 
   // Background poll: badge + a slide-in of the queue when a NEW action needs a decision.
   async function checkApprovals() {
-    if (document.hidden) return;
-    try {
-      var data = await apiGet('/api/approvals?status=pending&limit=100');
-      var list = data.approvals || [];
-      _ap.counts = data.counts || _ap.counts;
-      var fresh = list.filter(function(a) { return !_ap.seen[a.id]; });
-      list.forEach(function(a) { _ap.seen[a.id] = true; });
-      var open = $('approvalsPanel').classList.contains('open');
-      if (_ap.tab === 'pending') _ap.pending = list;
-      _syncApprovalsBadge();
-      if (open && _ap.tab === 'pending') renderApprovals();
-      if (fresh.length && _ap.booted && !open) {
-        toast(fresh.length === 1 ? 'New action waiting for approval' : fresh.length + ' new actions waiting for approval');
-        openApprovalsPanel();
-      }
-      _ap.booted = true;
-    } catch (e) {
-      console.error('Failed to fetch approvals', e);
+  if (document.hidden) return;
+  try {
+    var data = await api('/api/approvals?status=pending&limit=100');
+    var list = data.approvals || [];
+    _ap.counts = data.counts || _ap.counts;
+    var fresh = list.filter(function(a) { return !_ap.seen[a.id]; });
+    list.forEach(function(a) { _ap.seen[a.id] = true; });
+    var open = $('approvalsPanel').classList.contains('open');
+    if (_ap.tab === 'pending') _ap.pending = list;
+    _syncApprovalsBadge();
+    if (open && _ap.tab === 'pending') renderApprovals();
+    
+    // OUVERTURE AUTOMATIQUE du popup si nouvelle approbation
+    if (fresh.length && _ap.booted && !open) {
+      toast(fresh.length === 1 ? '🔔 New action waiting for approval' : fresh.length + ' new actions waiting');
+      openApprovalsPanel();  // ← Ouvre automatiquement
     }
+    _ap.booted = true;
+  } catch (e) {
+    console.error('Failed to fetch approvals', e);
   }
+}
 
   function _apEmpty(title, text, icon, extra) {
     return '<div class="d-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' + icon + '</svg><h4>' + title + '</h4><p>' + text + '</p>' + (extra || '') + '</div>';
