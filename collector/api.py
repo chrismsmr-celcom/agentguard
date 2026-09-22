@@ -1610,22 +1610,30 @@ def api_reject_approval(approval_id):
     return _resolve_approval(approval_id, "rejected")
 
 
-@api_bp.route("/api/approvals/<approval_id>", methods=["GET"], endpoint="api_get_approval")
-def api_get_approval(approval_id):
-    """Statut d'une demande — interrogeable par le SDK (clé API) pour reprendre l'action."""
+@api_bp.route("/api/approvals/<approval_id>", methods=["GET"], endpoint="api_get_approval_status")
+def api_get_approval_status(approval_id):
+    """Statut d'une demande — interrogé par le SDK pour savoir quand exécuter."""
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
+    
     org_id = getattr(g, "org_id", None) or "default"
+    
     try:
         row, _ = _db_run(
             "SELECT id, status, resolved_by, resolved_at FROM approval_requests WHERE id = ? AND org_id = ?",
             (approval_id, org_id), fetch="one")
     except Exception as e:
         return jsonify({"error": f"Database error: {str(e)}"}), 500
+    
     if not row:
         return jsonify({"error": "Approval not found"}), 404
-    return jsonify({"id": row[0], "status": row[1], "resolved_by": row[2],
-                    "resolved_at": _iso_utc(row[3])}), 200
+    
+    return jsonify({
+        "id": row[0],
+        "status": row[1],
+        "resolved_by": row[2],
+        "resolved_at": _iso_utc(row[3])
+    }), 200
 
 
 @api_bp.route("/api/approvals", methods=["POST"], endpoint="api_sdk_create_approval")
