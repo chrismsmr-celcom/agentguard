@@ -37,3 +37,4 @@ def test_approval_and_agent_panels_are_present():
     # plus de doublon "AI Agents" / "+ Connection", plus d'ancienne bannière jaune
     assert "approval-pill" not in DASHBOARD_HTML
     assert 'onclick="openConnectModal()"' not in DASHBOARD_HTML   # plus de bouton doublon "+ Connection"
+
