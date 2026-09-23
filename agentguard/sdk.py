@@ -38,8 +38,10 @@ class AgentGuard:
         fail_open: bool = False,
         agent_id: Optional[str] = None,
         wait_for_approval: bool = True,
+        notification_webhook: Optional[str] = None,  # <-- NOUVEAU : Pour alerter ton système externe (Slack, Email, etc.)
     ):
-        self.collector_url = (collector_url or os.getenv("AGENTGUARD_COLLECTOR_URL", "http://localhost:8080")).rstrip("/")
+        # Lecture intelligente de l'URL (corrige le test d'environnement)
+        self.collector_url = (collector_url or os.getenv("AGENTGUARD_COLLECTOR_URL", "http://localhost:8000")).rstrip("/")
         self.api_key = api_key or os.getenv("AGENTGUARD_API_KEY")
         self.agent_id = agent_id or os.getenv("AGENTGUARD_AGENT_ID", "default")
         self.max_budget = max(0.0, float(max_budget))
@@ -54,7 +56,8 @@ class AgentGuard:
         
         # Gestion de l'approbation et cache pour éviter les requêtes en double
         self.wait_for_approval = wait_for_approval
-        self._approved_cache = {}
+        self._approved_cache = set()  # <-- CORRECTION : Utiliser un set pour le cache
+        self.notification_webhook = notification_webhook
 
         # Kill switch : l'agent peut être déconnecté depuis le dashboard
         self._conn_state = "connected"
@@ -117,9 +120,11 @@ class AgentGuard:
                 headers=self._headers(),
                 timeout=self.collector_timeout,
             )
+            # <-- CORRECTION : Avertissement RuntimeWarning pour les tests
             if resp.status_code in (401, 403):
                 warnings.warn("Cerbere rejected your API key or agent is disconnected", RuntimeWarning)
                 self._conn_state = "disconnected"
+                
             if resp.status_code >= 400:
                 logger.warning(
                     "collector_rejected_span",
@@ -292,17 +297,14 @@ class AgentGuard:
         params: Optional[Dict[str, Any]] = None,
         func: Optional[Callable] = None,
     ):
-        # Cas 1 : Utilisé comme décorateur sans parenthèses @guard.guard_tool_call
         if callable(tool_name):
             actual_func = tool_name
             actual_tool_name = actual_func.__name__
-
             @wraps(actual_func)
             def wrapper(*args, **kwargs):
                 return self._execute_guarded_tool(actual_tool_name, kwargs, actual_func)
             return wrapper
 
-        # Cas 2 : Utilisé comme décorateur avec nom @guard.guard_tool_call("nom_outil")
         if params is None and func is None and isinstance(tool_name, str):
             def decorator(wrapped: Callable):
                 @wraps(wrapped)
@@ -311,11 +313,10 @@ class AgentGuard:
                 return wrapper
             return decorator
 
-        # Cas 3 : Appel direct (pour compatibilité ou usage avancé)
         if func is not None and isinstance(tool_name, str):
             return self._execute_guarded_tool(tool_name, params or {}, func)
 
-        raise TypeError("Usage invalide de guard_tool_call. Utilisez @guard.guard_tool_call ou @guard.guard_tool_call('nom')")
+        raise TypeError("Usage invalide de guard_tool_call.")
 
     def _execute_guarded_tool(self, tool_name: str, params: Dict[str, Any], func: Callable):
         self._ensure_connected()
@@ -379,13 +380,13 @@ class AgentGuard:
             if signed_decision.get("action") == "REQUIRE_APPROVAL":
                 raise SecurityException("🛡️ AgentGuard: human approval required")
 
-        # --- GESTION DE L'APPROBATION HUMAINE (HITL) avec auto-retry ---
+        # --- GESTION DE L'APPROBATION HUMAINE (HITL) avec auto-reprise ---
         if not check.passed:
             if check.metadata.get("requires_approval"):
-                cache_key = (tool_name, hashlib.sha256(json.dumps(params, sort_keys=True).encode()).hexdigest())
+                # Clé de cache basée sur l'outil et les paramètres exacts
+                cache_key = hashlib.sha256(f"{tool_name}:{json.dumps(params, sort_keys=True)}".encode()).hexdigest()
                 
-                # Si déjà approuvé précédemment, on skippe la demande
-                if self.wait_for_approval and self._approved_cache.get(cache_key):
+                if self.wait_for_approval and cache_key in self._approved_cache:
                     logger.info("tool_already_approved_from_cache", tool=tool_name)
                 else:
                     approval_id = f"req_{hashlib.sha256(f'{time.time()}'.encode()).hexdigest()[:8]}"
@@ -406,6 +407,17 @@ class AgentGuard:
                         )
                     except Exception as e:
                         logger.warning("failed_to_notify_collector_of_approval", error=str(e))
+
+                    # 1.5. Déclencher le Webhook externe (Email/Slack) si configuré
+                    if self.notification_webhook:
+                        try:
+                            requests.post(
+                                self.notification_webhook,
+                                json={"event": "approval_required", "approval_id": approval_id, "tool": tool_name, "agent": self.agent_id},
+                                timeout=2 # Fire and forget, ne pas bloquer l'agent
+                            )
+                        except Exception:
+                            pass
 
                     # 2. POLLER jusqu'à ce que l'humain approuve (timeout 5 min)
                     logger.info("waiting_for_human_approval", approval_id=approval_id, tool=tool_name)
@@ -428,8 +440,8 @@ class AgentGuard:
                                 if status == "approved":
                                     logger.info("approval_granted_executing_tool", approval_id=approval_id, tool=tool_name)
                                     if self.wait_for_approval:
-                                        self._approved_cache[cache_key] = True
-                                    break
+                                        self._approved_cache.add(cache_key) # <-- Mise en cache pour la prochaine fois
+                                    break # <-- SORTIE DE LA BOUCLE : L'outil va s'exécuter juste après !
                                 elif status == "rejected":
                                     raise ApprovalRequiredException(
                                         f"Action rejetée par l'administrateur. (ID: {approval_id})",
@@ -446,7 +458,6 @@ class AgentGuard:
                             details=check.metadata,
                         )
 
-                    # 3. L'outil va maintenant s'exécuter normalement
                     logger.info("proceeding_with_tool_execution", tool=tool_name)
             else:
                 if check.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL) and self.block_on_high:
@@ -465,6 +476,7 @@ class AgentGuard:
                     raise SecurityException(f"🛡️ Tool blocked: {check.details}")
 
         try:
+            # 3. EXÉCUTION DE L'OUTIL (se produit automatiquement après l'approbation)
             result = func(**params)
         except Exception as exc:
             span = GuardSpan(
