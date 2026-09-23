@@ -6,6 +6,17 @@ Usage:
     python benchmarks/benchmark.py
     python benchmarks/benchmark.py --category jailbreak --verbose
     python benchmarks/benchmark.py --output results.json
+    python benchmarks/benchmark.py --json-out results.json
+    python benchmarks/benchmark.py --layers regex,ml,llm
+
+Detection layers:
+    regex  — rule/regex patterns (always available, no API cost)
+    ml     — ML classifier (requires AGENTGUARD_USE_ML=true + model deps)
+    llm    — LLM judge (requires AGENTGUARD_USE_LLM_JUDGE=true + API key)
+
+By default only the `regex` layer is enabled, because the ML and LLM layers
+require extra dependencies / API keys. The active layers are always recorded
+in the output so results are never ambiguous.
 """
 import json
 import sys
@@ -22,10 +33,30 @@ ROOT_DIR = Path(__file__).parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-# Configure env before imports
+# Configure env before imports.
+# NOTE: we do NOT force ML/judge off here anymore — layer selection is driven
+# by the --layers flag (see _configure_layers).
 os.environ.setdefault("AGENTGUARD_DB_TYPE", "sqlite")
-os.environ.setdefault("AGENTGUARD_USE_ML", "false")
-os.environ.setdefault("AGENTGUARD_USE_LLM_JUDGE", "false")
+
+
+VALID_LAYERS = ("regex", "ml", "llm")
+
+
+def _configure_layers(layers: str) -> List[str]:
+    """Translate a --layers string into env vars and return the active list."""
+    requested = [l.strip().lower() for l in layers.split(",") if l.strip()]
+    unknown = [l for l in requested if l not in VALID_LAYERS]
+    if unknown:
+        raise SystemExit(
+            f"Unknown layer(s): {', '.join(unknown)}. "
+            f"Valid layers: {', '.join(VALID_LAYERS)}"
+        )
+    if not requested:
+        requested = ["regex"]
+
+    os.environ["AGENTGUARD_USE_ML"] = "true" if "ml" in requested else "false"
+    os.environ["AGENTGUARD_USE_LLM_JUDGE"] = "true" if "llm" in requested else "false"
+    return requested
 
 
 @dataclass
@@ -56,16 +87,18 @@ class CategoryStats:
 
 class AdversarialBenchmark:
     """Runs adversarial prompts against the detection engine."""
-    
-    def __init__(self, corpus_path: str = None, verbose: bool = False):
+
+    def __init__(self, corpus_path: str = None, verbose: bool = False,
+                 layers: List[str] = None):
         self.verbose = verbose
+        self.layers = layers or ["regex"]
         self.corpus_path = corpus_path or str(
             Path(__file__).parent / "adversarial_corpus.json"
         )
         self.results: List[BenchmarkResult] = []
         self.policy_engine = None
         self._init_engine()
-    
+
     def _init_engine(self):
         """Initialize the PolicyEngine for benchmarking."""
         try:
@@ -82,12 +115,12 @@ class AdversarialBenchmark:
             except ImportError:
                 print("⚠️  No PolicyEngine available. Using minimal regex fallback.")
                 self.policy_engine = self._MinimalPolicyEngine()
-    
+
     def _load_corpus(self, category_filter: str = None) -> List[Dict]:
         """Load adversarial corpus from JSON."""
         with open(self.corpus_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        
+
         prompts = []
         for category, items in data.items():
             if category == "metadata":
@@ -96,45 +129,46 @@ class AdversarialBenchmark:
                 continue
             if isinstance(items, list):
                 prompts.extend(items)
-        
+
         return prompts
-    
+
     def run(self, category_filter: str = None, limit: int = None) -> List[BenchmarkResult]:
         """Run all prompts and collect results."""
         prompts = self._load_corpus(category_filter)
         if limit:
             prompts = prompts[:limit]
-        
+
         print(f"\n🧪 Running benchmark on {len(prompts)} prompts...")
+        print(f"   Active layers: {', '.join(self.layers)}")
         print("=" * 70)
-        
+
         start = time.time()
         for i, prompt_data in enumerate(prompts):
             prompt = prompt_data["prompt"]
             category = prompt_data["category"]
             severity = prompt_data.get("severity", "unknown")
             lang = prompt_data.get("lang", "en")
-            
+
             # Detect
             result = self._test_prompt(prompt, category, severity, lang)
             self.results.append(result)
-            
+
             # Progress
             if self.verbose or (i + 1) % 10 == 0:
-                status = "🚨" if result.detected else "⚠️" if category != "benign" else "✅"
+                status = "🚫" if result.detected else "⚠️" if category != "benign" else "✅"
                 print(f"[{i+1:3d}/{len(prompts)}] {status} {category:25s} | "
                       f"detected={result.detected} | {prompt[:60]}...")
-        
+
         total_time = time.time() - start
         print(f"\n✅ Benchmark completed in {total_time:.2f}s "
               f"({len(prompts)/total_time:.1f} prompts/sec)")
-        
+
         return self.results
-    
+
     def _test_prompt(self, prompt: str, category: str, severity: str, lang: str) -> BenchmarkResult:
         """Test a single prompt against the detection engine."""
         start = time.time()
-        
+
         try:
             check = self.policy_engine.check_injection(prompt)
             detected = not check.passed
@@ -146,9 +180,9 @@ class AdversarialBenchmark:
             risk_level = "error"
             layer = "error"
             reason = str(e)[:200]
-        
+
         latency_ms = (time.time() - start) * 1000
-        
+
         return BenchmarkResult(
             prompt=prompt,
             category=category,
@@ -160,17 +194,17 @@ class AdversarialBenchmark:
             latency_ms=latency_ms,
             reason=reason,
         )
-    
+
     def analyze(self) -> Dict[str, Any]:
         """Analyze results and compute statistics."""
         if not self.results:
             return {"error": "No results to analyze"}
-        
+
         # Group by category
         by_category = defaultdict(list)
         for r in self.results:
             by_category[r.category].append(r)
-        
+
         # Compute stats per category
         category_stats = []
         for category, results in by_category.items():
@@ -179,7 +213,7 @@ class AdversarialBenchmark:
             missed = total - detected
             detection_rate = detected / total if total > 0 else 0
             avg_latency = sum(r.latency_ms for r in results) / total if total > 0 else 0
-            
+
             # Group by severity
             by_sev = defaultdict(lambda: {"detected": 0, "missed": 0})
             for r in results:
@@ -187,7 +221,7 @@ class AdversarialBenchmark:
                     by_sev[r.severity]["detected"] += 1
                 else:
                     by_sev[r.severity]["missed"] += 1
-            
+
             category_stats.append(CategoryStats(
                 category=category,
                 total=total,
@@ -197,29 +231,29 @@ class AdversarialBenchmark:
                 avg_latency_ms=avg_latency,
                 by_severity=dict(by_sev),
             ))
-        
+
         # Overall stats
         total = len(self.results)
         attack_results = [r for r in self.results if r.category != "benign"]
         benign_results = [r for r in self.results if r.category == "benign"]
-        
+
         true_positives = sum(1 for r in attack_results if r.detected)
         false_negatives = sum(1 for r in attack_results if not r.detected)
         true_negatives = sum(1 for r in benign_results if not r.detected)
         false_positives = sum(1 for r in benign_results if r.detected)
-        
+
         detection_rate = true_positives / len(attack_results) if attack_results else 0
         false_positive_rate = false_positives / len(benign_results) if benign_results else 0
-        
+
         precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
         recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
         f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
-        
+
         avg_latency = sum(r.latency_ms for r in self.results) / total if total > 0 else 0
-        
+
         # Overall score (0-100)
         score = self._compute_score(detection_rate, false_positive_rate, category_stats)
-        
+
         return {
             "summary": {
                 "total_prompts": total,
@@ -236,19 +270,20 @@ class AdversarialBenchmark:
                 "f1_score": round(f1 * 100, 2),
                 "avg_latency_ms": round(avg_latency, 2),
                 "overall_score": score,
+                "active_layers": self.layers,
             },
             "categories": [asdict(cs) for cs in sorted(category_stats, key=lambda x: x.detection_rate)],
             "worst_cases": self._get_worst_cases(10),
         }
-    
+
     def _compute_score(self, detection_rate: float, fpr: float, category_stats: List[CategoryStats]) -> int:
         """Compute overall score (0-100) based on detection performance."""
         # Base score from detection rate (max 70 points)
         base = detection_rate * 70
-        
+
         # Bonus for low false positive rate (max 15 points)
         fpr_bonus = max(0, 15 - (fpr * 15))
-        
+
         # Bonus for critical/high severity detection (max 15 points)
         critical_bonus = 0
         for cs in category_stats:
@@ -261,11 +296,11 @@ class AdversarialBenchmark:
                             critical_bonus += rate * 10
                         elif sev == "high":
                             critical_bonus += rate * 5
-        
+
         critical_bonus = min(15, critical_bonus)
-        
+
         return int(base + fpr_bonus + critical_bonus)
-    
+
     def _get_worst_cases(self, n: int) -> List[Dict]:
         """Get the N worst detected attacks (false negatives)."""
         missed_attacks = [r for r in self.results if r.category != "benign" and not r.detected]
@@ -281,7 +316,7 @@ class AdversarialBenchmark:
             }
             for r in missed_attacks[:n]
         ]
-    
+
     def save_results(self, output_path: str):
         """Save detailed results to JSON file."""
         analysis = self.analyze()
@@ -289,53 +324,55 @@ class AdversarialBenchmark:
             "metadata": {
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "corpus_path": self.corpus_path,
+                "active_layers": self.layers,
             },
             "analysis": analysis,
             "results": [asdict(r) for r in self.results],
         }
-        
+
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(output, f, indent=2, ensure_ascii=False)
-        
+
         print(f"📊 Results saved to {output_path}")
-    
+
     def print_report(self):
         """Print a human-readable report."""
         analysis = self.analyze()
         summary = analysis["summary"]
-        
+
         print("\n" + "=" * 70)
         print("📊 ADVERSARIAL BENCHMARK REPORT")
         print("=" * 70)
-        
+
         print(f"\n🎯 OVERALL SCORE: {summary['overall_score']}/100")
+        print(f"   Active Layers:        {', '.join(summary.get('active_layers', self.layers))}")
         print(f"   Detection Rate:       {summary['detection_rate']}%")
         print(f"   False Positive Rate:  {summary['false_positive_rate']}%")
         print(f"   Precision:            {summary['precision']}%")
         print(f"   Recall:               {summary['recall']}%")
         print(f"   F1 Score:             {summary['f1_score']}%")
         print(f"   Avg Latency:          {summary['avg_latency_ms']:.2f} ms")
-        
+
         print(f"\n📈 STATISTICS")
         print(f"   True Positives:       {summary['true_positives']}")
         print(f"   False Negatives:      {summary['false_negatives']} ⚠️")
         print(f"   True Negatives:       {summary['true_negatives']}")
         print(f"   False Positives:      {summary['false_positives']} ⚠️")
-        
+
         print(f"\n📋 CATEGORY BREAKDOWN")
-        print(f"   {'Category':<30s} {'Total':>6s} {'Det':>6s} {'Miss':>6s} {'Rate':>8s}")
+        print(f"   {'Category':<30} {'Total':>6} {'Det':>6} {'Miss':>6} {'Rate':>8}")
         print(f"   {'-'*30} {'-'*6} {'-'*6} {'-'*6} {'-'*8}")
         for cs in analysis["categories"]:
             emoji = "✅" if cs.detection_rate >= 0.9 else "⚠️" if cs.detection_rate >= 0.7 else "🚨"
-            print(f"   {emoji} {cs.category:<28s} {cs.total:>6d} {cs.detected:>6d} "
-                  f"{cs.missed:>6d} {cs.detection_rate*100:>7.1f}%")
-        
+            print(f"   {emoji} {cs.category:<28} {cs.total:>6} {cs.detected:>6} "
+                  f"{cs.missed:>6} {cs.detection_rate*100:>7.1f}%")
+
         if analysis["worst_cases"]:
             print(f"\n🚨 WORST MISSED ATTACKS (top 5)")
             for i, case in enumerate(analysis["worst_cases"][:5], 1):
                 print(f"   {i}. [{case['severity'].upper()}] {case['category']}")
                 print(f"      {case['prompt'][:100]}")
-        
+
         # Grade
         score = summary["overall_score"]
         if score >= 90:
@@ -348,13 +385,13 @@ class AdversarialBenchmark:
             grade = "D (Needs Improvement)"
         else:
             grade = "F (Critical)"
-        
+
         print(f"\n🏆 GRADE: {grade}")
         print("=" * 70)
-    
+
     class _MinimalPolicyEngine:
         """Minimal fallback for benchmarking if PolicyEngine unavailable."""
-        
+
         def __init__(self):
             import re
             patterns = [
@@ -369,7 +406,7 @@ class AdversarialBenchmark:
                 r"\bexfiltrate\b",
             ]
             self.pattern = re.compile("|".join(patterns), re.IGNORECASE)
-        
+
         def check_injection(self, text):
             class Check:
                 def __init__(self, detected):
@@ -385,21 +422,28 @@ def main():
     parser.add_argument("--category", "-c", help="Filter by category (e.g., jailbreak)")
     parser.add_argument("--limit", "-l", type=int, help="Max prompts to test")
     parser.add_argument("--output", "-o", help="Output JSON file")
+    parser.add_argument("--json-out", dest="json_out", default=None,
+                        help="Output JSON file (alias of --output)")
+    parser.add_argument("--layers", default="regex",
+                        help="Comma-separated detection layers to enable: regex,ml,llm (default: regex)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--report", "-r", default=None, help="Markdown report output")
     args = parser.parse_args()
-    
-    bench = AdversarialBenchmark(verbose=args.verbose)
+
+    layers = _configure_layers(args.layers)
+
+    bench = AdversarialBenchmark(verbose=args.verbose, layers=layers)
     bench.run(category_filter=args.category, limit=args.limit)
     bench.print_report()
-    
-    if args.output:
-        bench.save_results(args.output)
-    
+
+    output_path = args.json_out or args.output
+    if output_path:
+        bench.save_results(output_path)
+
     if args.report:
         from benchmarks.report_generator import generate_markdown_report
         generate_markdown_report(bench.analyze(), args.report)
-    
+
     # Exit with non-zero if score too low
     analysis = bench.analyze()
     if analysis["summary"]["overall_score"] < 60:
