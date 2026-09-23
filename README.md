@@ -1,9 +1,9 @@
-# 🐕‍🦺 Cerbere — The Three-Headed Guardian of AI Agents
+# 🐕‍🦺 Cerbère — The Three-Headed Guardian of AI Agents
 
 Runtime Security & Observability for AI Agents
 > **No agent passes unseen.**
 
-Cerbere is a runtime security control plane for autonomous AI agents. It intercepts every LLM call and tool invocation, applies multi-layered security policies, and blocks threats in real-time.
+Cerbère is a runtime security control plane for autonomous AI agents. It intercepts every LLM call and tool invocation, applies multi-layered security policies, and blocks threats in real-time.
 
 ## 🏛️ The Three Heads
 
@@ -11,7 +11,7 @@ One SDK. One Collector. Three detection layers.
 
 ⸻
 
-Why Cerbere -- AgentGuard?
+Why Cerbère -- AgentGuard?
 
 AI agents can call LLMs, APIs, databases, browsers, email systems, code interpreters, and other tools.
 
@@ -19,51 +19,51 @@ Traditional application security does not fully understand these interactions.
 
 AgentGuard provides a runtime security layer designed specifically for agentic workflows:
 
-                 ┌──────────────────────┐
-                 │      AI AGENT        │
-                 └──────────┬───────────┘
-                            │
-                            ▼
-                 ┌──────────────────────┐
-                 │     AgentGuard SDK   │
-                 │                      │
-                 │  Policy Enforcement  │
-                 │  Security Checks     │
-                 │  Budget Controls     │
-                 │  Tool Controls       │
-                 └──────────┬───────────┘
-                            │
-                            ▼
-                 ┌──────────────────────┐
-                 │   3-Layer Detection  │
-                 │                      │
-                 │  1. Regex / Rules    │
-                 │  2. ML Classifier    │
-                 │  3. LLM Judge        │
-                 └──────────┬───────────┘
-                            │
-                 ┌──────────┴───────────┐
-                 ▼                      ▼
-             🟢 ALLOW               🔴 BLOCK
-                 │
-                 ▼
-          ┌─────────────────┐
-          │    Collector    │
-          │                 │
-          │ Traces          │
-          │ Metrics         │
-          │ Security Events │
-          │ Cost / Usage    │
-          └────────┬────────┘
-                   │
-                   ▼
-             📊 Dashboard
+```
+                     ┌──────────────────────┐
+                     │       AI AGENT       │
+                     └──────────┬───────────┘
+                                │
+                     ┌──────────▼───────────┐
+                     │    AgentGuard SDK    │
+                     │                      │
+                     │  Policy Enforcement  │
+                     │  Security Checks     │
+                     │  Budget Controls     │
+                     │  Tool Controls       │
+                     └──────────┬───────────┘
+                                │
+                     ┌──────────▼───────────┐
+                     │   3-Layer Detection  │
+                     │                      │
+                     │  1. Regex / Rules    │
+                     │  2. ML Classifier    │
+                     │  3. LLM Judge        │
+                     └──────────┬───────────┘
+                                │
+                     ┌──────────▼───────────┐
+                     │  ✅ ALLOW   /  🚫 BLOCK │
+                     └──────────┬───────────┘
+                                │
+                     ┌──────────▼───────────┐
+                     │    Collector         │
+                     │                      │
+                     │ Traces               │
+                     │ Metrics              │
+                     │ Security Events      │
+                     │ Cost / Usage         │
+                     └──────────┬───────────┘
+                                │
+                     ┌──────────▼───────────┐
+                     │      📊 Dashboard    │
+                     └──────────────────────┘
+```
 
 ⸻
 
-✨ Core Capabilities
+## ✨ Core Capabilities
 
-🔍 AI Observability
+### 🔍 AI Observability
 
 * Real-time agent traces
 * LLM calls and tool calls
@@ -73,7 +73,7 @@ AgentGuard provides a runtime security layer designed specifically for agentic w
 * Security events
 * Detection statistics
 
-🛡️ Runtime Security
+### 🛡️ Runtime Security
 
 * Prompt injection detection
 * PII detection and redaction
@@ -84,9 +84,9 @@ AgentGuard provides a runtime security layer designed specifically for agentic w
 * Runtime blocking
 * Risk scoring
 
-🧠 Multi-Layer Detection
+### 🧠 Multi-Layer Detection
 
-Cerbere -- AgentGuard combines three detection mechanisms:
+Cerbère -- AgentGuard combines three detection mechanisms:
 
 1. Rules / Regex — fast deterministic checks
 2. ML Classifier — semantic threat detection
@@ -96,8 +96,9 @@ This allows the system to use inexpensive deterministic checks first and reserve
 
 ⸻
 
-🛡️ Three-Layer Security Engine
+### 🛡️ Three-Layer Security Engine
 
+```mermaid
 flowchart TD
     A[Incoming Prompt / Tool Call] --> B{Layer 1<br/>Rules + Regex}
     B -->|Strong malicious pattern| X[BLOCK]
@@ -108,34 +109,37 @@ flowchart TD
     D -->|High risk| X
     D -->|Moderate risk| R[ALERT / REVIEW]
     D -->|Low risk| P
+```
 
 Detection flow
 
-Layer	Technology	Purpose
-1	Rules / Regex	Fast deterministic detection
-2	ML	Semantic classification
-3	LLM Judge	Ambiguous or complex cases
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| 1 | Rules / Regex | Fast deterministic detection |
+| 2 | ML | Semantic classification |
+| 3 | LLM Judge | Ambiguous or complex cases |
 
 The exact thresholds are configurable.
 
 ⸻
 
-🚨 Threat Coverage
+## 🚨 Threat Coverage
 
-Threat	Rules	ML	LLM Judge	Possible Action
-Prompt Injection	✅	✅	✅	Block
-PII Leakage	✅	✅	✅	Redact / Block
-Tool Misuse	✅	✅	✅	Block
-Unauthorized Tools	✅	—	—	Block
-Budget Overflow	✅	—	—	Block
-Suspicious Input	✅	✅	✅	Alert
-Ambiguous Behavior	—	⚠️	✅	Review
+| Threat | Rules | ML | LLM Judge | Possible Action |
+|--------|-------|----|-----------|-----------------|
+| Prompt Injection | ✅ | ✅ | ✅ | Block |
+| PII Leakage | ✅ | ✅ | ✅ | Redact / Block |
+| Tool Misuse | ✅ | ✅ | ✅ | Block |
+| Unauthorized Tools | ✅ | — | — | Block |
+| Budget Overflow | ✅ | — | — | Block |
+| Suspicious Input | ✅ | ✅ | ✅ | Alert |
+| Ambiguous Behavior | — | ⚠️ | ✅ | Review |
 
-Cerbere -- AgentGuard is intended to provide defense in depth, not a guarantee that every attack will be detected.
+Cerbère -- AgentGuard is intended to provide defense in depth, not a guarantee that every attack will be detected.
 
 ⸻
 
-🚀 Quick Start
+## 🚀 Quick Start
 
 Requirements
 
@@ -144,8 +148,11 @@ Requirements
 
 ### Option 1 — Install the SDK only (recommended if you already have a Collector)
 
+```bash
 pip install cerbere-ag
+```
 
+```python
 from agentguard import AgentGuard
 
 guard = AgentGuard(
@@ -153,72 +160,97 @@ guard = AgentGuard(
     api_key="ag-your-key",
     agent_id="my-agent",
 )
+```
 
 Optional extras:
 
-pip install "cerbere-ag[signing]"  # verify signed policy decisions (Ed25519)
-pip install "cerbere-ag[pii]"      # advanced PII detection via Presidio
-pip install "cerbere-ag[redis]"    # distributed rate limiting / LLM Judge cache
-pip install "cerbere-ag[ml]"       # local ML classifier (torch + transformers)
+```bash
+pip install "cerbere-ag[signing]"   # verify signed policy decisions (Ed25519)
+pip install "cerbere-ag[pii]"       # advanced PII detection via Presidio
+pip install "cerbere-ag[redis]"     # distributed rate limiting / LLM Judge cache
+pip install "cerbere-ag[ml]"        # local ML classifier (torch + transformers)
+```
 
 ### Option 2 — Run your own Collector (self-hosted)
 
 1. Clone
 
-git clone https://github.com/chrismsmr-celcom/agentguard.git
-cd agentguard
+```bash
+git clone https://github.com/chrismsmr-celcom/cerbere-AG.git
+cd cerbere-AG
+```
 
 2. Install
 
+```bash
 pip install -r requirements.txt
+```
 
 Optional ML dependencies:
 
+```bash
 pip install -r requirements-ml.txt
+```
 
 3. Start the Collector
 
+```bash
 gunicorn wsgi:app --bind 0.0.0.0:8080
+```
 
 The default collector runs on:
 
+```
 http://localhost:8080
+```
 
 4. Run the example agent
 
+```bash
 python example_agent.py
+```
 
 5. Check the API
 
+```bash
 curl http://localhost:8080/api/metrics
+```
 
 ⸻
 
-🤖 MCP Server (for agents built with Claude, Cursor, etc.)
+## 🧩 MCP Server (for agents built with Claude, Cursor, etc.)
 
 If your agent is built on top of an LLM client that supports the Model
 Context Protocol, install the MCP server instead of wiring the SDK by hand:
 
+```bash
 pip install cerbere-ag-mcp
+```
 
 See [README_MCP.md](README_MCP.md) for the Claude Desktop / Cursor
 configuration snippets and the full list of exposed tools.
 
 ⸻
 
-🐳 Docker
+## 🐳 Docker
 
 Docker Compose provides a convenient deployment environment.
 
+```bash
 cp env.example .env
+```
 
 Generate an API key:
 
+```bash
 python -c "import secrets; print('ag-' + secrets.token_urlsafe(32))"
+```
 
 Set the key in .env, then:
 
+```bash
 docker compose up -d
+```
 
 Services can include:
 
@@ -231,10 +263,11 @@ Services can include:
 
 ⸻
 
-🔌 SDK Integration
+## 🔌 SDK Integration
 
 AgentGuard can wrap LLM and tool execution.
 
+```python
 from agentguard import AgentGuard
 guard = AgentGuard(
     collector_url="http://localhost:8080",
@@ -244,43 +277,50 @@ guard = AgentGuard(
     use_ml=True,
     use_llm_judge=True,
 )
+```
 
 Protect an LLM call
 
+```python
 @guard.guard_llm_call
 def call_openai(messages):
     return client.chat.completions.create(
         model="gpt-4o",
         messages=messages,
     )
+```
 
 Protect a tool
 
+```python
 @guard.guard_tool_call
 def send_email(to, subject, body):
     return email_service.send(to, subject, body)
+```
 
 ⸻
 
-🔗 Integrations
+## 🔗 Integrations
 
 Current examples include:
 
-Integration	Support
-LangChain	✅
-CrewAI	✅
-OpenAI	✅
-DeepSeek	✅
-Anthropic	✅
+| Integration | Support |
+|-------------|---------|
+| LangChain | ✅ |
+| CrewAI | ✅ |
+| OpenAI | ✅ |
+| DeepSeek | ✅ |
+| Anthropic | ✅ |
 
 The SDK is designed to sit at the execution boundary rather than requiring changes to the underlying model.
 
 ⸻
 
-🔧 Configuration
+## 🔧 Configuration
 
 Example configuration:
 
+```bash
 # Authentication
 AGENTGUARD_API_KEY=ag-your-key
 # Database
@@ -300,67 +340,79 @@ AGENTGUARD_BLOCK_ON_AMBIGUOUS=true
 AGENTGUARD_RATE_LIMIT=300 per minute
 AGENTGUARD_SPAN_RATE_LIMIT=150 per minute
 AGENTGUARD_LOG_LEVEL=INFO
+```
 
 ⸻
 
-🧠 ML Detection
+## 🧠 ML Detection
 
 AgentGuard includes an optional ML detection pipeline.
 
 Generate a dataset
 
+```bash
 python scripts/generate_dataset.py \
     --samples 50000 \
     --output dataset.csv
+```
 
 Train
 
+```bash
 python scripts/train_detector.py \
     --dataset dataset.csv \
     --output models/agentguard-injection-v1
+```
 
 Evaluate
 
+```bash
 python scripts/evaluate_detection.py \
     --model models/agentguard-injection-v1
+```
 
 Performance
 
 The following are engineering targets, not guaranteed results:
 
-Metric	Target
-Recall	> 99%
-Precision	> 98%
-False Positive Rate	< 1%
-Detection latency	< 50 ms
+| Metric | Target |
+|--------|--------|
+| Recall | > 99% |
+| Precision | > 98% |
+| False Positive Rate | < 1% |
+| Detection latency | < 50 ms |
 
 Actual performance must be established through reproducible benchmarks on an independent test set.
 
 ⸻
 
-🎯 LLM Judge
+## 🎯 LLM Judge
 
 The LLM Judge is designed for cases where deterministic rules and the ML classifier cannot confidently determine whether an interaction is malicious.
 
 Example:
 
+```json
 {
   "score": 88,
   "reason": "Potential attempt to bypass agent restrictions through contextual manipulation.",
   "is_attack": true
 }
+```
 
 LLM Judge support is configurable and can be disabled when low latency or deterministic behavior is preferred.
 
 ⸻
 
-📊 Observability Dashboard
+## 📊 Observability Dashboard
 
 AgentGuard includes a web dashboard for runtime monitoring.
 
 Dashboard
 
+```
 http://localhost:8080/
+```
 
 Depending on the deployment configuration, the dashboard provides:
 
@@ -376,21 +428,23 @@ Depending on the deployment configuration, the dashboard provides:
 
 API endpoints
 
+```
 GET  /api/metrics
 GET  /api/traces
 GET  /api/detection/stats
 GET  /api/llm/stats
 GET  /trace/<trace-id>
 POST /span
+```
 
 Authentication is required according to the configured security policy.
 
 ⸻
 
-📁 Project Structure
+## 📁 Project Structure
 
+```
 agentguard/
-│
 ├── agentguard_sdk.py
 ├── agentguard_ml.py
 ├── collector.py
@@ -417,30 +471,37 @@ agentguard/
 ├── wsgi.py
 ├── LICENSE
 └── README.md
+```
 
 ⸻
 
-🧪 Testing
+## 🧪 Testing
 
 Run the complete test suite:
 
+```bash
 pytest -q
+```
 
 Security-specific tests:
 
+```bash
 pytest tests/test_security.py -vv
+```
 
 Detection tests:
 
+```bash
 pytest tests/test_detection.py -vv
+```
 
 Security testing and independent evaluation are an ongoing part of the project.
 
 ⸻
 
-🗺️ Roadmap
+## 🗺️ Roadmap
 
-v4.x — Runtime Security Foundation
+### v4.x — Runtime Security Foundation
 
 * Three-layer detection architecture
 * Runtime telemetry
@@ -452,7 +513,7 @@ v4.x — Runtime Security Foundation
 * ML detection pipeline
 * LLM Judge integration
 
-v5.x — Platform
+### v5.x — Platform
 
 * Multi-tenant architecture
 * OpenTelemetry integration
@@ -463,7 +524,7 @@ v5.x — Platform
 * Policy management
 * Advanced RBAC
 
-v6.x — AI Security Infrastructure
+### v6.x — AI Security Infrastructure
 
 * High-performance collector
 * Distributed detection
@@ -477,18 +538,22 @@ Roadmap items are subject to change.
 
 ⸻
 
-🤝 Contributing
+## 🤝 Contributing
 
 Contributions are welcome for permitted non-commercial development.
 
 Typical workflow:
 
+```bash
 git clone <repository>
 git checkout -b feature/my-feature
+```
 
 Make your changes, run the tests:
 
+```bash
 pytest -q
+```
 
 Then submit a Pull Request.
 
@@ -501,40 +566,25 @@ Before contributing, please read:
 
 ⸻
 
-📜 License
+## 📜 License
 
-AgentGuard is source-available under a custom non-commercial license.
+Cerbère / AgentGuard uses an **open-core** model:
 
-Commercial use is NOT permitted without written authorization.
+- **SDK & MCP server** (`agentguard/`, `agentguard_sdk.py`, `mcp/`)
+  → **Apache License 2.0** — free for commercial and non-commercial use.
+  See [LICENSE](LICENSE).
 
-This includes:
+- **Collector, Dashboard & multi-tenant platform** (`collector/`, `dashboard/`)
+  → **Commercial license required** for production/commercial use.
+  See [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md).
 
-* Commercial SaaS
-* Paid APIs
-* Commercial software products
-* Managed security services
-* Commercial forks
-* Selling modified versions
-* Incorporating AgentGuard into a commercial product
-
-Permitted non-commercial uses include:
-
-* Personal use
-* Education
-* Academic research
-* Security research
-* Non-commercial experimentation
-* Non-commercial contributions
-
-Attribution to the original project and creator is required.
+For commercial licensing, contact: **contact@cerbereag.site**
 
 Copyright © 2026 Christopher Dikesa
 
-See LICENSE for the complete terms.
-
 ⸻
 
-🧾 Attribution
+## 🧾 Attribution
 
 If you use or reference AgentGuard in research, documentation, presentations, or derivative non-commercial projects, please credit:
 
@@ -542,11 +592,13 @@ AgentGuard — created by Christopher Dikesa
 
 Original project repository:
 
-chrismsmr-celcom/agentguard
+```
+chrismsmr-celcom/cerbere-AG
+```
 
 ⸻
 
-⚠️ Security Disclaimer
+## ⚠️ Security Disclaimer
 
 AgentGuard is a security layer designed to reduce risk in AI agent systems.
 
@@ -558,7 +610,7 @@ If you discover a security vulnerability, please report it responsibly rather th
 
 ⸻
 
-🙏 Acknowledgements
+## 🙏 Acknowledgements
 
 AgentGuard builds upon ideas, research, and tooling from the broader AI security ecosystem, including:
 
@@ -580,4 +632,3 @@ Runtime security infrastructure for agentic AI.
 Copyright © 2026 Christopher Dikesa
 
 </div>
-
