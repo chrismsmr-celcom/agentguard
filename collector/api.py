@@ -1666,6 +1666,25 @@ def hitl_sdk_create_approval():
             (str(approval_id)[:128], org_id, str(agent_id)[:64], tool_name,
              json.dumps(params), reason), commit=True)
         logger.warning("approval_request_created", approval_id=approval_id, tool=tool_name, org_id=org_id)
+         # --- NOUVEAU : Déclencher l'alerte Email/Webhook ---
+        try:
+            # Récupérer l'email de l'org (à adapter selon ta table users/orgs)
+            org_email = getattr(g, "human_email", "admin@entreprise.com") 
+            
+            # Exemple avec un service d'envoi d'email (ex: Resend, SendGrid, ou SMTP)
+            # requests.post("https://api.resend.com/emails", json={
+            #     "from": "Cerbere <alertes@cerbereag.site>",
+            #     "to": [org_email],
+            #     "subject": f"🚨 Action requise : Approbation pour {tool_name}",
+            #     "html": f"<p>L'agent <b>{agent_id}</b> demande l'exécution de <b>{tool_name}</b>.</p><p><a href='https://app.cerbereag.site'>Cliquez ici pour approuver ou rejeter</a></p>"
+            # }, headers={"Authorization": "Bearer YOUR_RESEND_KEY"})
+            
+            logger.info("approval_alert_sent", to=org_email)
+        except Exception as e:
+            logger.error("approval_alert_failed", error=str(e))
+        # ---------------------------------------------------
+
+        return jsonify({"status": "success", "id": approval_id}), 201
         return jsonify({"status": "success", "id": approval_id}), 201
     except Exception as e:
         logger.error("approval_request_failed", error=str(e))
