@@ -22,12 +22,14 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("AGENTGUARD_DB_TYPE", "sqlite")
 
-    import collector
-    importlib.reload(collector)
-    collector.init_db()
-    collector.app.config["TESTING"] = True
-    with collector.app.test_client() as c:
-        yield c, collector
+    from collector.db import init_db
+    from collector.app import create_app
+
+    init_db()
+    app = create_app()
+    app.config["TESTING"] = True
+    with app.test_client() as c:
+        yield c, app
 
 
 def _create_customer(c, org_name, plan="pro"):
