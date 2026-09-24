@@ -37,7 +37,7 @@ class AgentGuard:
         redis_url: Optional[str] = None,
         fail_open: bool = False,
         agent_id: Optional[str] = None,
-        wait_for_approval: bool = True,
+        wait_for_approval: bool = False,
         notification_webhook: Optional[str] = None,  # <-- NOUVEAU : Pour alerter ton systeme externe (Slack, Email, etc.)
         approval_timeout: Optional[float] = None,  # <-- NOUVEAU : timeout configurable (secondes)
         approval_poll_interval: Optional[float] = None,  # <-- NOUVEAU : intervalle de polling
