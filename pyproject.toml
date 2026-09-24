@@ -19,7 +19,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Topic :: Security",
-    "License :: OSI Approved :: Apache Software License",
+    # "License :: OSI Approved :: Apache Software License",  # SUPPRIMÉ : remplacé par license = "Apache-2.0"
 ]
 dependencies = [
     "requests>=2.31.0,<3.0.0",
