@@ -4,7 +4,7 @@ Test rapide — vérifie que ton agent peut parler au collector Render.
 Usage:
     export AGENTGUARD_COLLECTOR_URL=https://agentguard-aqal.onrender.com
     export AGENTGUARD_API_KEY=ta-cle
-    python test_connection.py
+    python scripts/test_connection.py
 """
 import os
 import requests
@@ -15,9 +15,9 @@ HEADERS = {"Content-Type": "application/json"}
 if API_KEY:
     HEADERS["X-API-Key"] = API_KEY
 else:
-    print("⚠️  AGENTGUARD_API_KEY non définie — les routes protégées répondront 401.")
+    print("⚠️  AGENTGUARD_API_KEY non défini — les routes protégées répondront 401.")
 
-print(f"🔗 Test de connexion vers: {COLLECTOR}")
+print(f"🔗 Test de connexion vers : {COLLECTOR}")
 print("-" * 50)
 
 # Test 1: Health check
