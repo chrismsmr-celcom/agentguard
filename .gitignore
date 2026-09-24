@@ -1,4 +1,4 @@
-# Secrets et config locale — ne doivent JAMAIS être committés
+# Secrets et config locale — ne doivent JAMAIS être commités
 .env
 *.env
 !.env.example
@@ -32,7 +32,10 @@ venv/
 .vscode/
 .idea/
 .DS_Store
-# Ajoute cette ligne à .gitignore
-echo "" >> .gitignore
-echo "# Git hooks (installed by scripts/setup-hooks.sh)" >> .gitignore
-echo ".git/hooks/pre-push" >> .gitignore
+
+# Patchs de mise à jour — artefacts de dev, ne doivent pas être versionnés
+*.patch
+*.diff
+
+# Git hooks (installés par scripts/setup-hooks.sh)
+.git/hooks/pre-push
