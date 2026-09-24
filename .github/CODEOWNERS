@@ -1,0 +1,24 @@
+# Routage des reviews — Cerbère AG
+# Le propriétaire est notifié automatiquement sur toute PR touchant ces chemins.
+
+# Défaut : tout le repo
+*                       @chrismsmr-celcom
+
+# Cœur sécurité — review obligatoire
+/collector/auth.py      @chrismsmr-celcom
+/collector/authz.py     @chrismsmr-celcom
+/collector/api.py       @chrismsmr-celcom
+/collector/dashboard.py @chrismsmr-celcom
+/agentguard/            @chrismsmr-celcom
+/policy/                @chrismsmr-celcom
+/mcp/                   @chrismsmr-celcom
+
+# CI / infra
+/.github/               @chrismsmr-celcom
+/requirements*.txt      @chrismsmr-celcom
+/Dockerfile*            @chrismsmr-celcom
+/docker-compose.yml     @chrismsmr-celcom
+
+# Docs & légal
+/legal/                 @chrismsmr-celcom
+/*.md                   @chrismsmr-celcom
