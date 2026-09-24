@@ -47,6 +47,24 @@ DATASETS = [
 ]
 
 
+def safe_extract(zf: zipfile.ZipFile, dest: Path) -> None:
+    """Extrait une archive zip en rejetant tout membre qui sortirait de `dest`
+    (path traversal / zip-slip via des chemins absolus ou des '../').
+    """
+    dest = dest.resolve()
+
+    for member in zf.namelist():
+        member_path = (dest / member).resolve()
+
+        if member_path != dest and dest not in member_path.parents:
+            raise ValueError(
+                f"Membre d'archive suspect (path traversal) : {member!r}"
+            )
+
+    # Sûr : chaque membre a été validé ci-dessus (pas de path traversal possible).
+    zf.extractall(dest)  # nosec B202
+
+
 def download(url, dest):
 
     print(f"\nDownloading {url}")
@@ -85,6 +103,6 @@ for ds in DATASETS:
 
     with zipfile.ZipFile(archive) as z:
 
-        z.extractall(extract)
+        safe_extract(z, extract)
 
 print("\nDone.")

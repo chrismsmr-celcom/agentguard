@@ -41,6 +41,12 @@ jobs:
           python -m py_compile *.py
           python -m py_compile tests/*.py 2>/dev/null || true
 
+      - name: Audit dependencies for known vulnerabilities
+        if: matrix.python-version == '3.12'
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt
+
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@v3

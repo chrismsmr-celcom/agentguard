@@ -12,7 +12,6 @@ from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from itsdangerous import URLSafeTimedSerializer
-from .config import config
 from datetime import datetime
 from flask import Flask, jsonify
 from .db import get_db
@@ -27,19 +26,6 @@ structlog.configure(
 )
 
 logger = structlog.get_logger("agentguard.collector")
-
-def create_app():
-    app = Flask(__name__)
-    
-    # Utilisation de la config centralisée
-    app.config["SECRET_KEY"] = config.agentguard_flask_secret
-    
-    # CORS sécurisé par la config
-    cors_origins = config.agentguard_cors_origins.split(",") if config.agentguard_cors_origins != "*" else ["*"]
-    if config.environment == "production" and "*" in cors_origins:
-        raise RuntimeError("CORS '*' interdit en production")
-        
-    CORS(app, origins=cors_origins, supports_credentials=True)
 
 def create_app() -> Flask:
     """Create and configure the Flask application."""

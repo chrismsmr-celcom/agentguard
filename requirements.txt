@@ -12,7 +12,7 @@ PyYAML>=6.0
 flask>=3.0.0,<4.0.0
 werkzeug>=3.0.0,<4.0.0         # generate_password_hash, safe_str_cmp
 itsdangerous>=2.1.2,<3.0.0     # Signature des cookies/session
-flask-cors>=4.0.0,<5.0.0       # CORS pour le dashboard
+flask-cors>=6.0.0,<7.0.0       # CORS pour le dashboard (>=6.0.0 : fix CVE-2024-6866/6844/6839)
 gunicorn>=21.2.0,<23.0.0       # WSGI server (prod only)
 python-dotenv>=1.0.0,<2.0.0    # Chargement propre de .env
 markupsafe>=3.0.0,<4.0.0       # HTML escaping (utilisé par collector)
@@ -29,14 +29,17 @@ certifi>=2024.0.0              # CA bundle à jour
 # ----------------------------------------------------------------------------
 flask-limiter>=3.5.0,<4.0.0
 redis>=5.0.0,<6.0.0            # Backend pour rate-limit distribué + cache LLM Judge
-cryptography>=41.0.0,<45.0.0   # Chiffrement (si besoin)
+cryptography>=50.0.0,<51.0.0   # Chiffrement (si besoin) — >=50.0.0 : fix CVE-2026-26007/34073/69247/69249/69248
 
 # ----------------------------------------------------------------------------
-# SECURITY - Détection (Budget + PII)
+# SECURITY - Détection (Budget)
 # ----------------------------------------------------------------------------
 tiktoken>=0.7.0,<1.0.0          # Tokenisation précise pour le calcul de coût
-presidio-analyzer>=2.2.350,<3.0.0    # Détection PII (standard Microsoft)
-presidio-anonymizer>=2.2.350,<3.0.0
+# presidio-analyzer / presidio-anonymizer : retirés du core (2026-09-24).
+# Non importés nulle part dans le code actuel, et leur pin cryptography<44.1
+# bloquait la mise à jour de sécurité de `cryptography`. Toujours disponibles
+# via l'extra optionnel `pii` dans pyproject.toml si la détection PII est
+# implémentée plus tard.
 
 # ----------------------------------------------------------------------------
 # DATABASE - PostgreSQL via psycopg3

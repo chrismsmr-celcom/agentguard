@@ -245,6 +245,6 @@ def test_dashboard_module_exports_single_html_constant():
 
 def test_dashboard_html_has_no_duplicate_ids():
     """Aucun id HTML ne doit etre duplique dans DASHBOARD_HTML."""
-    ids = re.findall(r'id="([^"]+)"', DASHBOARD_HTML)
+    ids = re.findall(r'(?<![-\w])id="([^"]+)"', DASHBOARD_HTML)
     duplicates = {i for i in ids if ids.count(i) > 1}
     assert not duplicates, f"IDs HTML dupliques dans DASHBOARD_HTML : {duplicates}"
