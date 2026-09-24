@@ -38,12 +38,12 @@ class AgentGuard:
         fail_open: bool = False,
         agent_id: Optional[str] = None,
         wait_for_approval: bool = True,
-        notification_webhook: Optional[str] = None,  # <-- NOUVEAU : Pour alerter ton systeme externe (Slack, Email, etc.)
-        approval_timeout: Optional[float] = None,  # <-- NOUVEAU : timeout configurable (secondes)
-        approval_poll_interval: Optional[float] = None,  # <-- NOUVEAU : intervalle de polling
+        notification_webhook: Optional[str] = None,
+        approval_timeout: Optional[float] = None,
+        approval_poll_interval: Optional[float] = None,
     ):
         # Lecture intelligente de l'URL (corrige le test d'environnement)
-        self.collector_url = (collector_url or os.getenv("AGENTGUARD_COLLECTOR_URL", "http://localhost:8000")).rstrip("/")
+        self.collector_url = (collector_url or os.getenv("AGENTGUARD_COLLECTOR_URL", "http://localhost:8080")).rstrip("/")
         self.api_key = api_key or os.getenv("AGENTGUARD_API_KEY")
         self.agent_id = agent_id or os.getenv("AGENTGUARD_AGENT_ID", "default")
         self.max_budget = max(0.0, float(max_budget))
@@ -56,8 +56,8 @@ class AgentGuard:
         self.policy_engine = PolicyEngine(policies or [], redis_url)
         self._verifier = None
 
-        # Gestion de l'approbation et cache pour eviter les requetes en double
-        # Priorite : argument explicite > variable d'env > defaut
+        # Gestion de l'approbation et cache pour éviter les requêtes en double
+        # Priorité : argument explicite > variable d'env > défaut
         env_wait = os.getenv("AGENTGUARD_WAIT_FOR_APPROVAL")
         if env_wait is not None:
             self.wait_for_approval = env_wait.lower() == "true"
@@ -72,12 +72,12 @@ class AgentGuard:
         self.approval_poll_interval = float(
             approval_poll_interval
             if approval_poll_interval is not None
-            else os.getenv("AGENTGUARD_APPROVAL_POLL_INTERVAL", "2")
+            else os.getenv("AGENTGUARD_APPROVAL_POLL_INTERVAL", "2.0")
         )
-        self._approved_cache = set()  # <-- CORRECTION : Utiliser un set pour le cache
+        self._approved_cache = set()
         self.notification_webhook = notification_webhook
 
-        # Kill switch : l'agent peut etre deconnecte depuis le dashboard
+        # Kill switch : l'agent peut être déconnecté depuis le dashboard
         self._conn_state = "connected"
         self._conn_checked_at = 0.0
         self._status_ttl = max(1.0, float(os.getenv("AGENTGUARD_STATUS_TTL", "5")))
