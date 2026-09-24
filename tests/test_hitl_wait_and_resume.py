@@ -1,15 +1,6 @@
 """
-"L'approbation qui ne libère pas l'action" (21/09) — la corriger et la GARDER corrigée.
-
-Deux façons d'utiliser guard_tool_call sur une action qui demande une approbation :
-
-  A) wait_for_approval=True  : l'appel BLOQUE jusqu'à la décision, puis exécute l'outil lui-même.
-  B) par défaut (async)      : ApprovalRequiredException immédiate ; un NOUVEL appel avec les
-                                MÊMES paramètres, après approbation, exécute l'outil sans relancer
-                                une nouvelle demande (id déterministe = même agent + outil + params).
-
-Tests contre un vrai serveur Flask qui tourne (pas de mock du collecteur) : c'est la jointure
-SDK <-> collecteur qui posait problème, un mock l'aurait masquée.
+"L'approbation qui ne libère pas l'action" — la corriger et la GARDER corrigée.
+Tests optimisés pour la CI : approval_timeout très court pour éviter les blocages de 300s.
 """
 import threading
 import time
@@ -49,7 +40,7 @@ def server(tmp_path, monkeypatch):
 
 
 def _approve(url, cookie, approval_id, deadline=5.0, delay=0.0):
-    """Simule le CISO : attend que la demande existe, puis clique Approve depuis le dashboard."""
+    """Simule le CISO : attend que la demande existe, puis clique Approve."""
     if delay:
         time.sleep(delay)
     start = time.time()
@@ -67,7 +58,9 @@ EMAIL = {"to": "j.martin@gmail.com", "subject": "customer export"}
 def test_wait_for_approval_blocks_then_executes_the_tool(server):
     """C'est le cœur du bug : approuver doit vraiment débloquer l'action, sans nouvel appel."""
     url, cookie = server
-    g = AgentGuard(collector_url=url, api_key="key-a", agent_id="finance-bot", wait_for_approval=True)
+    # CORRECTION CI : timeout court (5s) et intervalle de poll rapide (0.2s)
+    g = AgentGuard(collector_url=url, api_key="key-a", agent_id="finance-bot", 
+                   wait_for_approval=True, approval_timeout=5, approval_poll_interval=0.2)
     approval_id = g._stable_approval_id("finance-bot", "send_email", EMAIL)
     calls = []
 
@@ -78,14 +71,16 @@ def test_wait_for_approval_blocks_then_executes_the_tool(server):
     approver.join(timeout=5)
 
     assert result == "SENT"
-    assert calls == [EMAIL]                       # l'outil a vraiment tourné, une seule fois
+    assert calls == [EMAIL]
     hist = requests.get(f"{url}/api/approvals?status=history", cookies={cookie: "HUMAN"}).json()
     assert hist["approvals"][0]["resolved_by"] == "ciso@acme.io"
 
 
 def test_wait_for_approval_raises_on_rejection(server):
     url, cookie = server
-    g = AgentGuard(collector_url=url, api_key="key-a", agent_id="finance-bot", wait_for_approval=True)
+    # CORRECTION CI : timeout court
+    g = AgentGuard(collector_url=url, api_key="key-a", agent_id="finance-bot", 
+                   wait_for_approval=True, approval_timeout=5, approval_poll_interval=0.2)
     REJECT_EMAIL = {"to": "reject-me@gmail.com"}
     approval_id = g._stable_approval_id("finance-bot", "send_email", REJECT_EMAIL)
 
@@ -107,9 +102,9 @@ def test_wait_for_approval_raises_on_rejection(server):
 
 def test_wait_for_approval_times_out_if_nobody_decides(server):
     url, _ = server
+    # CORRECTION CI : timeout très court (0.5s) pour tester l'échec rapidement
     g = AgentGuard(collector_url=url, api_key="key-a", agent_id="finance-bot",
-                   wait_for_approval=True, approval_timeout=0.5)
-    g.approval_poll_interval = 0.1
+                   wait_for_approval=True, approval_timeout=0.5, approval_poll_interval=0.1)
     with pytest.raises(ApprovalRequiredException) as exc:
         g.guard_tool_call("send_email", {"to": "nobody-decides@gmail.com"}, func=lambda **kw: "SENT")
     assert exc.value.timed_out is True
@@ -118,14 +113,17 @@ def test_wait_for_approval_times_out_if_nobody_decides(server):
 def test_async_mode_retry_after_approval_runs_the_tool_without_a_new_request(server):
     """Le mode par défaut (pas de thread bloqué) : c'est le pattern le plus courant côté agent."""
     url, cookie = server
-    g = AgentGuard(collector_url=url, api_key="key-a", agent_id="finance-bot")   # wait_for_approval=False
+    # CORRECTION CI : forcer wait_for_approval=False pour ne PAS bloquer
+    g = AgentGuard(collector_url=url, api_key="key-a", agent_id="finance-bot", wait_for_approval=False)
 
     with pytest.raises(ApprovalRequiredException) as exc:
         g.guard_tool_call("send_email", EMAIL, func=lambda **kw: "SENT")
     approval_id = exc.value.approval_id
     assert exc.value.timed_out is False
 
+    # On approuve manuellement via l'API
     requests.post(f"{url}/api/approvals/{approval_id}/approve", cookies={cookie: "HUMAN"})
+    time.sleep(0.2) # Petit délai pour s'assurer que le cache du SDK se met à jour si besoin
 
     # même agent, même outil, MÊMES paramètres -> reconnu comme la même demande, déjà approuvée
     calls = []
@@ -133,29 +131,30 @@ def test_async_mode_retry_after_approval_runs_the_tool_without_a_new_request(ser
     assert result == "SENT" and calls == [1]
 
     pending = requests.get(f"{url}/api/approvals?status=pending", cookies={cookie: "HUMAN"}).json()
-    assert pending["approvals"] == []   # aucune demande fantôme en double
+    assert pending["approvals"] == []
 
 
 def test_async_mode_retry_still_blocked_while_pending(server):
     url, _ = server
-    g = AgentGuard(collector_url=url, api_key="key-a", agent_id="finance-bot")
+    # CORRECTION CI : forcer wait_for_approval=False
+    g = AgentGuard(colador_url=url, api_key="key-a", agent_id="finance-bot", wait_for_approval=False)
     with pytest.raises(ApprovalRequiredException):
         g.guard_tool_call("send_email", EMAIL, func=lambda **kw: "SENT")
     with pytest.raises(ApprovalRequiredException) as exc2:
         g.guard_tool_call("send_email", EMAIL, func=lambda **kw: "SENT")
-    assert exc2.value.timed_out is False   # toujours en attente, pas un timeout
+    assert exc2.value.timed_out is False
 
 
 def test_different_params_get_different_approval_ids(server):
     url, _ = server
-    g = AgentGuard(collector_url=url, api_key="key-a", agent_id="finance-bot")
+    g = AgentGuard(collector_url=url, api_key="key-a", agent_id="finance-bot", wait_for_approval=False)
     ids = set()
     for to in ("a@gmail.com", "b@gmail.com"):
         try:
             g.guard_tool_call("send_email", {"to": to}, func=lambda **kw: "x")
         except ApprovalRequiredException as e:
             ids.add(e.approval_id)
-    assert len(ids) == 2   # pas la même demande pour deux actions différentes
+    assert len(ids) == 2
 
 
 def test_decorator_form_respects_env_wait_flag(server, monkeypatch):
@@ -163,7 +162,8 @@ def test_decorator_form_respects_env_wait_flag(server, monkeypatch):
     url, cookie = server
     monkeypatch.setenv("AGENTGUARD_WAIT_FOR_APPROVAL", "true")
     monkeypatch.setenv("AGENTGUARD_APPROVAL_TIMEOUT", "5")
-    g = AgentGuard(collector_url=url, api_key="key-a", agent_id="finance-bot")
+    # CORRECTION CI : poll interval court
+    g = AgentGuard(collector_url=url, api_key="key-a", agent_id="finance-bot", approval_poll_interval=0.2)
     assert g.wait_for_approval is True
 
     @g.guard_tool_call
