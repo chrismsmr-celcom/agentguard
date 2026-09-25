@@ -87,14 +87,19 @@ def load_json(name: str) -> list:
 
 
 class Engine:
-    """Thin wrapper around PolicyEngine, mirroring benchmarks/benchmark.py."""
+    """Thin wrapper around PolicyEngine (same API as benchmarks/benchmark.py)."""
 
     def __init__(self):
         from agentguard_sdk import PolicyEngine
         self.policy_engine = PolicyEngine()
 
     def check(self, prompt: str):
-        return self.policy_engine.check_prompt(prompt)
+        check = self.policy_engine.check_injection(prompt)
+        return {
+            "detected": not check.passed,
+            "risk_level": str(getattr(check.risk_level, "value", check.risk_level)),
+            "reason": (check.details or "")[:200] if check.details else "",
+        }
 
 
 def run_subset(engine, entries, expect_detected: bool, label: str):
@@ -104,13 +109,9 @@ def run_subset(engine, entries, expect_detected: bool, label: str):
         start = time.perf_counter()
         try:
             check = engine.check(e["prompt"])
-            detected = bool(getattr(check, "is_attack", None) or
-                            getattr(check, "detected", None) or
-                            (isinstance(check, dict) and check.get("is_attack")))
-            risk = getattr(check, "risk_level", None) or (
-                check.get("risk_level") if isinstance(check, dict) else "n/a")
-            reason = getattr(check, "reason", None) or (
-                check.get("reason") if isinstance(check, dict) else "")
+            detected = bool(check["detected"])
+            risk = check["risk_level"]
+            reason = check["reason"]
         except Exception as exc:  # engine crash counts as miss, never hidden
             detected, risk, reason = False, "error", f"engine error: {exc}"
         latency_ms = (time.perf_counter() - start) * 1000
