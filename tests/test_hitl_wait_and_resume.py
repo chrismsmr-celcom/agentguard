@@ -137,7 +137,7 @@ def test_async_mode_retry_after_approval_runs_the_tool_without_a_new_request(ser
 def test_async_mode_retry_still_blocked_while_pending(server):
     url, _ = server
     # CORRECTION CI : forcer wait_for_approval=False
-    g = AgentGuard(colador_url=url, api_key="key-a", agent_id="finance-bot", wait_for_approval=False)
+    g = AgentGuard(collector_url=url, api_key="key-a", agent_id="finance-bot", wait_for_approval=False)
     with pytest.raises(ApprovalRequiredException):
         g.guard_tool_call("send_email", EMAIL, func=lambda **kw: "SENT")
     with pytest.raises(ApprovalRequiredException) as exc2:
