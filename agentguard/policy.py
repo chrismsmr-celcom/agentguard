@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import base64
 import requests
 import structlog
 import unicodedata
@@ -21,17 +22,16 @@ except ImportError:
 
 
 def _normalize_prompt(text: str) -> str:
-    """Normalise le prompt pour contrer les techniques d'obfuscation courantes."""
     if not isinstance(text, str):
         return text
     
     # 1. Correction manuelle des homoglyphes spécifiques
     text = text.replace('ɿ', 'r').replace('і', 'i').replace('ο', 'o').replace('с', 'c')
     
-    # 2. Normalisation Unicode standard
+    # 2. Normalisation Unicode standard (gère la majorité des cas)
     text = unicodedata.normalize('NFKC', text)
     
-    # 3. Suppression des caractères invisibles (zero-width spaces)
+    # 3. Suppression des caractères invisibles
     text = re.sub(r'[\u200b\u200c\u200d\ufeff\u2060\u200e\u200f]', '', text)
     
     # 4. Colle les lettres séparées par des points/espaces (i . g . n . o . r . e -> ignore)
@@ -41,9 +41,24 @@ def _normalize_prompt(text: str) -> str:
     text = re.sub(r'\\x([0-9a-fA-F]{2})', lambda m: chr(int(m.group(1), 16)), text)
     text = re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1), 16)), text)
     
-    # 6. Révèle le texte caché dans les commentaires HTML (ne pas le supprimer)
+    # 6. Révèle le texte caché dans les commentaires HTML
     text = re.sub(r'<!--(.*?)-->', r' \1 ', text, flags=re.DOTALL)
     
+    # 7. NOUVEAU : Correction basique du Leetspeak (1->l, 3->e, 4->a, 5->s, @->a, 0->o)
+    leet_map = str.maketrans('01345@', 'oleisa')
+    text = text.translate(leet_map)
+    
+    # 8. NOUVEAU : Tentative de décodage Base64 si la chaîne ressemble à du base64
+    # (On ne décode que si c'est plausible pour éviter les erreurs de perf)
+    if len(text) > 10 and re.match(r'^[A-Za-z0-9+/=]+$', text.replace(' ', '')):
+        try:
+            # On essaie de décoder. Si ça donne du texte lisible avec des mots-clés, on le garde.
+            decoded = base64.b64decode(text).decode('utf-8', errors='ignore')
+            if any(kw in decoded.lower() for kw in ['ignore', 'previous', 'system', 'prompt', 'admin']):
+                text = decoded + " " + text # On garde les deux versions pour la détection
+        except Exception:
+            pass # Si ce n'est pas du base64 valide, on ignore
+            
     return text.strip()
 
 
