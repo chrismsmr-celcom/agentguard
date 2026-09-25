@@ -67,7 +67,25 @@ WEAK_PATTERNS = [
 # ALERT/REVIEW — not silently allowed. A quoted payload + didactic
 # framing deserves human attention, not a hard block that breaks
 # legitimate workflows.
+# (?i)                              -> Insensible à la casse
+# (?<!explain how )                 -> Ignore si précédé de "explain how "
+# (?<!describe )                    -> Ignore si précédé de "describe "
+# (?<!['"])                         -> Ignore si le mot est immédiatement après un guillemet (ex: 'ignore')
+# (?<!like )                        -> Ignore si précédé de "like " (ex: a command like 'rm -rf')
 
+INJECTION_REGEX = re.compile(
+    r"(?i)"
+    r"(?<!explain how )"
+    r"(?<!describe )"
+    r"(?<!['\"])"
+    r"(?<!like )"
+    r"\b(?:forget|ignore|bypass|override|disregard|void|cancel|pretend|enable|enter|activate)\s+"
+    r"(?:"
+    r"(?:all\s+)?(?:previous|prior|your|the|above)\s+(?:instructions|prompts|rules|context|safety|guidelines|directives)"
+    r"|"
+    r"(?:evil\s+mode|developer\s+mode|unrestricted\s+mode)"
+    r")"
+)
 DIDACTIC_MARKERS = re.compile(
     r"\b(?:explain|explains|explained|explaining|how\s+(?:do|does|did|to|"
     r"attacks)|defen[cs]e|protect|protection|quiz|training|course|"
