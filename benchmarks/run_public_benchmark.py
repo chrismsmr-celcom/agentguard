@@ -24,8 +24,10 @@ import hashlib
 import json
 import os
 import platform
+import re
 import sys
 import time
+import unicodedata
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,6 +45,37 @@ LAYER_PRESETS = {
     "regex,ml": ["regex", "ml"],
     "regex,ml,llm": ["regex", "ml", "llm"],
 }
+
+
+def normalize_prompt(text: str) -> str:
+    """
+    Normalise le prompt pour contrer les techniques d'obfuscation courantes.
+    (Idéalement, cette logique doit être déplacée dans agentguard_sdk.policy_engine)
+    """
+    if not isinstance(text, str):
+        return text
+    
+    # 1. Supprimer les caractères invisibles (zero-width space, etc.)
+    text = re.sub(r'[\u200b\u200c\u200d\ufeff\u2060]', '', text)
+    
+    # 2. Normaliser les homoglyphes unicode (ex: ɿ -> r)
+    text = unicodedata.normalize('NFKC', text)
+    
+    # 3. Corriger l'obfuscation par espaces/points (ex: "i . g . n . o . r . e" -> "ignore")
+    text = re.sub(r'(\w)\s*\.\s*(\w)', r'\1\2', text)
+    
+    # 4. Décoder les échappements hexadécimaux simples (ex: \x67 -> g)
+    def replace_hex(match):
+        try:
+            return chr(int(match.group(1), 16))
+        except ValueError:
+            return match.group(0)
+    text = re.sub(r'\\x([0-9a-fA-F]{2})', replace_hex, text)
+    
+    # 5. Supprimer les balises HTML/Commentaires courants utilisés pour cacher des instructions
+    text = re.sub(r'<!--.*?-->', ' ', text, flags=re.DOTALL)
+    
+    return text.strip()
 
 
 def sha256_file(path: Path) -> str:
@@ -87,14 +120,19 @@ def load_json(name: str) -> list:
 
 
 class Engine:
-    """Thin wrapper around PolicyEngine (same API as benchmarks/benchmark.py)."""
+    """Thin wrapper around PolicyEngine avec prétraitement de normalisation."""
 
     def __init__(self):
         from agentguard_sdk import PolicyEngine
         self.policy_engine = PolicyEngine()
 
     def check(self, prompt: str):
-        check = self.policy_engine.check_injection(prompt)
+        # 🛡️ PRÉTRAITEMENT : Normalisation pour contrer l'obfuscation
+        # Note : Pour la production, déplacez cette logique à l'intérieur 
+        # de `PolicyEngine.check_injection` afin qu'elle s'applique partout.
+        normalized_prompt = normalize_prompt(prompt)
+        
+        check = self.policy_engine.check_injection(normalized_prompt)
         return {
             "detected": not check.passed,
             "risk_level": str(getattr(check.risk_level, "value", check.risk_level)),
