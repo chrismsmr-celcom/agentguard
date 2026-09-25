@@ -5,6 +5,7 @@ import re
 import secrets
 import structlog
 from flask import Blueprint, request, jsonify, g, current_app, send_from_directory
+from collector.extensions import limiter
 from datetime import datetime
 import time
 import sqlite3
@@ -162,9 +163,8 @@ def _db_run(sql, params=(), fetch=None, commit=False):
 # ═══════════════════════════════════════════════════════════════
 
 @api_bp.route("/span", methods=["POST"])
+@limiter.limit(lambda: current_app.config["SPAN_RATE_LIMIT"])
 def receive_span():
-    span_rate_limit = current_app.config["SPAN_RATE_LIMIT"]
-
     refused = _reject_if_agent_disconnected()
     if refused:
         return refused

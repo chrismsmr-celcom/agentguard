@@ -9,8 +9,7 @@ import structlog
 from flask import Flask
 from mcp_routes import mcp_bp
 from flask_cors import CORS
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+from collector.extensions import limiter
 from itsdangerous import URLSafeTimedSerializer
 from datetime import datetime
 from flask import Flask, jsonify
@@ -178,17 +177,13 @@ def create_app() -> Flask:
             storage=limiter_storage,
         )
 
-    app.limiter = Limiter(
-        get_remote_address,
-        app=app,
-        default_limits=[
-            os.environ.get(
-                "AGENTGUARD_RATE_LIMIT",
-                "120 per minute",
-            )
-        ],
-        storage_uri=limiter_storage,
+    app.config["RATELIMIT_DEFAULT"] = os.environ.get(
+        "AGENTGUARD_RATE_LIMIT",
+        "120 per minute",
     )
+    app.config["RATELIMIT_STORAGE_URI"] = limiter_storage
+    limiter.init_app(app)
+    app.limiter = limiter  # garde l'attribut pour compat avec le code existant
 
     # ==============================================================
     # AUTHENTICATION SERIALIZERS

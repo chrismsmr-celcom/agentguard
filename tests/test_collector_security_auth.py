@@ -136,8 +136,6 @@ def test_api_key_endpoint_works_with_configured_secret(client, monkeypatch):
 # ── RATE LIMIT ──
 
 # Au lieu de 35 requêtes, utiliser la limite actuelle + 10%
-@pytest.mark.xfail(reason="AUDIT P0-5/6 (2026-09) : comportement a verifier apres reparation du fixture create_app() -- voir issue de suivi rate-limit/auth")
-
 def test_span_rate_limit_kicks_in(client):
     headers = {"X-API-Key": TEST_API_KEY}
     limit = 30  # Doit rester synchronisé avec @limiter.limit(...) sur /span dans collector.py
