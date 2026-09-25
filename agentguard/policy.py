@@ -14,37 +14,18 @@ try:
     from agentguard_ml import MLDetector
 except ImportError:
     class MLDetector:
-        def __init__(self): self.enabled = False
-        def predict(self, text): return {"score": 0.0, "risk": "UNKNOWN", "confidence": "low"}
+        def __init__(self): 
+            self.enabled = False
+        def predict(self, text): 
+            return {"score": 0.0, "risk": "UNKNOWN", "confidence": "low"}
 
-class PolicyEngine:
-    def __init__(self):
-        pass
-        
-    def check_injection(self, prompt: str):  # <-- Correct : exactement 4 espaces
-        clean_prompt = _normalize_prompt(prompt)
-        
-        # ⚠️ DÉTECTION SPÉCIFIQUE : Mots inversés (très faible coût CPU)
-        # Le benchmark contient "snoitcurtsni suoiverp" (instructions previous à l'envers)
-        if "snoitcurtsni" in clean_prompt.lower() or "suoiverp" in clean_prompt.lower():
-            return DetectionResult(
-                passed=False, 
-                risk_level="high", 
-                details="Reversed keyword obfuscation detected"
-            )
 
-        # ... MAINTENANT, appliquez vos regex sur `clean_prompt` (et NON sur `prompt`) ...
-        # Exemple :
-        # if INJECTION_REGEX.search(clean_prompt):
-        #     return DetectionResult(passed=False, risk_level="high", details="...")
-        
-        # Si rien n'est détecté :
-        return DetectionResult(passed=True, risk_level="low", details="No injection detected")
 def _normalize_prompt(text: str) -> str:
+    """Normalise le prompt pour contrer les techniques d'obfuscation courantes."""
     if not isinstance(text, str):
         return text
     
-    # 1. Correction manuelle des homoglyphes spécifiques du benchmark
+    # 1. Correction manuelle des homoglyphes spécifiques
     text = text.replace('ɿ', 'r').replace('і', 'i').replace('ο', 'o').replace('с', 'c')
     
     # 2. Normalisation Unicode standard
@@ -60,10 +41,16 @@ def _normalize_prompt(text: str) -> str:
     text = re.sub(r'\\x([0-9a-fA-F]{2})', lambda m: chr(int(m.group(1), 16)), text)
     text = re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1), 16)), text)
     
-    # 6. Révèle le texte caché dans les commentaires HTML (ne pas le supprimer !)
+    # 6. Révèle le texte caché dans les commentaires HTML (ne pas le supprimer)
     text = re.sub(r'<!--(.*?)-->', r' \1 ', text, flags=re.DOTALL)
     
     return text.strip()
+
+
+class PolicyEngine:
+    _STRONG_PATTERNS = None
+    _WEAK_PATTERNS = None
+
     def __init__(self, policies: Optional[List[Dict[str, Any]]] = None, redis_url: Optional[str] = None):
         self.policies = policies or []
         self._compile_patterns()
@@ -81,12 +68,6 @@ def _normalize_prompt(text: str) -> str:
             except Exception:
                 self._redis_client = None
 
-        # Whitelists d'outils : une entrée "tool_whitelist" sans "agent_id"
-        # ni "agents" est globale (s'applique à tout agent). Une entrée
-        # avec "agent_id: X" ou "agents: [X, Y]" ne s'applique qu'à ces
-        # agents-là — c'est ce qui permet à check_tool_policy() de scoper
-        # correctement par agent au lieu d'un seul whitelist plat partagé
-        # par tout le monde.
         self._allowed_tools_global = set()
         self._allowed_tools_by_agent: Dict[str, set] = {}
         for policy in self.policies:
@@ -104,27 +85,12 @@ def _normalize_prompt(text: str) -> str:
 
     @property
     def _allowed_tools(self) -> set:
-        """Vue à plat de toutes les whitelists (global + tous les agents).
-
-        Conservée pour compatibilité : ex. mcp/mcp_server.py l'utilise pour
-        afficher un résumé des politiques actives. Ne PAS utiliser pour une
-        décision de sécurité — check_tool_policy() utilise le scoping par
-        agent_id, plus strict, et c'est lui qui fait foi.
-        """
         merged = set(self._allowed_tools_global)
         for tools in self._allowed_tools_by_agent.values():
             merged.update(tools)
         return merged
 
     def _effective_whitelist(self, agent_id: Optional[str]) -> set:
-        """Whitelist applicable à un agent donné.
-
-        Un agent avec sa propre whitelist scopée est régi par elle (plus
-        les entrées globales, qui s'appliquent à tous). Un agent sans
-        whitelist scopée hérite seulement des entrées globales — s'il n'y
-        en a aucune, l'ensemble est vide et check_tool_policy() n'impose
-        aucune restriction (comportement historique conservé).
-        """
         scoped = self._allowed_tools_by_agent.get(agent_id, set()) if agent_id else set()
         if scoped:
             return scoped | self._allowed_tools_global
@@ -144,33 +110,47 @@ def _normalize_prompt(text: str) -> str:
 
     def check_injection(self, text: str) -> SecurityCheck:
         text = str(text or "")
-        if not text.strip(): return SecurityCheck("prompt_injection", True, RiskLevel.LOW, "Empty prompt")
+        if not text.strip(): 
+            return SecurityCheck("prompt_injection", True, RiskLevel.LOW, "Empty prompt")
         
+        # 🛡️ ÉTAPE 1 : Normaliser le texte pour contrer l'obfuscation
+        clean_text = _normalize_prompt(text)
+        
+        # 🛡️ ÉTAPE 2 : Détection spécifique des mots inversés (très faible coût CPU)
+        if "snoitcurtsni" in clean_text.lower() or "suoiverp" in clean_text.lower():
+            return SecurityCheck("prompt_injection", False, RiskLevel.HIGH, "Reversed keyword obfuscation detected", {"layer": "regex"}, SecurityAction.BLOCK)
+
+        # 🛡️ ÉTAPE 3 : Triple Judge (sur le texte nettoyé)
         if self._triple_judge is not None:
             try:
-                tj_result = self._triple_judge.evaluate(text)
+                tj_result = self._triple_judge.evaluate(clean_text)
                 if tj_result.get("final_verdict") == "DENY":
                     return SecurityCheck("prompt_injection", False, RiskLevel.HIGH, f"[TRIPLE JUDGE] {tj_result.get('reason')}", {"layer": "triple_judge"}, SecurityAction.BLOCK)
-            except Exception as e: logger.warning("triple_judge_failed", error=str(e))
+            except Exception as e: 
+                logger.warning("triple_judge_failed", error=str(e))
             
+        # 🛡️ ÉTAPE 4 : Détection ML (sur le texte nettoyé)
         if self.ml_detector.enabled:
-            ml_result = self.ml_detector.predict(text)
+            ml_result = self.ml_detector.predict(clean_text)
             if ml_result["risk"] == "HIGH" and ml_result["score"] >= 0.85:
                 return SecurityCheck("prompt_injection", False, RiskLevel.HIGH, f"ML detected threat ({ml_result['score']:.2%})", {"layer": "ml"}, SecurityAction.BLOCK)
                 
-        if PolicyEngine._STRONG_PATTERNS.findall(text):
+        # 🛡️ ÉTAPE 5 : Patterns Regex (sur le texte nettoyé)
+        if PolicyEngine._STRONG_PATTERNS.findall(clean_text):
             return SecurityCheck("prompt_injection", False, RiskLevel.HIGH, "Strong injection pattern detected", {"layer": "regex"}, SecurityAction.BLOCK)
             
         return SecurityCheck("prompt_injection", True, RiskLevel.LOW, "No injection detected", {"layer": "all_clear"}, SecurityAction.ALLOW)
 
     def check_pii(self, text: str) -> SecurityCheck:
         text = str(text or "")
-        if not text.strip(): return SecurityCheck("pii_detection", True, RiskLevel.LOW, "Empty text")
+        if not text.strip(): 
+            return SecurityCheck("pii_detection", True, RiskLevel.LOW, "Empty text")
         patterns = {"ssn": r"\b\d{3}-\d{2}-\d{4}\b", "credit_card": r"\b(?:\d{4}[-\s]?){3}\d{4}\b"}
         findings = {}
         for name, pattern in patterns.items():
             matches = re.findall(pattern, text)
-            if matches: findings[name] = len(matches)
+            if matches: 
+                findings[name] = len(matches)
         if findings:
             return SecurityCheck("pii_detection", False, RiskLevel.HIGH, f"PII detected: {findings}", {"pii_types": findings}, SecurityAction.BLOCK)
         return SecurityCheck("pii_detection", True, RiskLevel.LOW, "No PII detected")
@@ -193,11 +173,10 @@ def _normalize_prompt(text: str) -> str:
         if budget_remaining < 0:
             return SecurityCheck("budget_policy", False, RiskLevel.HIGH, "Budget exceeded", {}, SecurityAction.BLOCK)
         
-        # --- NOUVEAU : Règle DLP (Data Loss Prevention) ---
+        # --- Règle DLP (Data Loss Prevention) ---
         if tool_name in ["COMPOSIO_MULTI_EXECUTE_TOOL", "GMAIL_SEND_EMAIL", "send_email"]:
             tools_to_run = params.get("tools", []) if isinstance(params, dict) and "tools" in params else []
             
-            # Si c'est un appel direct et non multi-execute
             if tool_name in ["GMAIL_SEND_EMAIL", "send_email"]:
                 tools_to_run = [{"tool_slug": tool_name, "arguments": params}]
                 
@@ -207,7 +186,6 @@ def _normalize_prompt(text: str) -> str:
                     recipient = str(args.get("recipient_email", args.get("to", ""))).lower()
                     has_attachment = "attachment" in args or "attachments" in args
                     
-                    # Domaines personnels à surveiller (en prod, on vérifierait plutôt "not in allowed_domains")
                     personal_domains = ["@gmail.com", "@yahoo.com", "@hotmail.com", "@outlook.com", "@icloud.com"]
                     
                     if any(domain in recipient for domain in personal_domains):
@@ -223,14 +201,16 @@ def _normalize_prompt(text: str) -> str:
                             metadata={"requires_approval": True, "recipient": recipient, "has_attachment": has_attachment},
                             action=SecurityAction.REVIEW
                         )
-        # --------------------------------------------------
 
         if tool_name == "execute_command":
             check = self._check_command(params)
-            if not check.passed: return check
+            if not check.passed: 
+                return check
 
-        try: params_string = json.dumps(params, default=str)
-        except Exception: params_string = str(params)
+        try: 
+            params_string = json.dumps(params, default=str)
+        except Exception: 
+            params_string = str(params)
         
         dangerous_patterns = re.compile(r"\b(?:delete_all|drop\s+table|truncate|drop\s+database|rm\s+-rf|sudo|chmod\s+777|mkfs|dd\s+if=|attacker|evil\.com)\b", re.IGNORECASE)
         if dangerous_patterns.search(params_string):
