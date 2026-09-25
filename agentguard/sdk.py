@@ -20,7 +20,7 @@ from .runtime import TrajectoryAnalyzer, RuntimeRiskEngine
 
 logger = structlog.get_logger("agentguard.sdk")
 
-SDK_VERSION = "0.4.1"
+SDK_VERSION = "0.5.0"
 
 
 class AgentGuard:
