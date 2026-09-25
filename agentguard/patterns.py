@@ -344,14 +344,30 @@ def get_extended_strong_patterns() -> List[str]:
     )
 
 
-def get_all_strong_patterns() -> List[str]:
-    """Return every strong pattern (base + extended), deduplicated. Use this one."""
-    return list(dict.fromkeys(BASE_STRONG_PATTERNS + get_extended_strong_patterns()))
+def get_all_strong_patterns() -> list:
+    return [
+        # 1. Injection directe / Jailbreak
+        # (?<!explain\s) etc. empêche le match si le mot est précédé d'un verbe descriptif
+        r"(?i)(?<!explain\s)(?<!about\s)(?<!how\s)(?<!discussing\s)(?<!documenting\s)\b(?:forget|ignore|bypass|override|disregard|void|cancel|pretend|enable|enter|activate)\s+(?:all\s+)?(?:previous|prior|your|the|above)\s+(?:instructions|prompts|rules|context|safety|guidelines|directives)",
+        
+        # 2. Modes développeur / sans restriction
+        r"(?i)(?<!explain\s)(?<!about\s)\b(?:enable|enter|activate|switch to)\s+(?:evil\s+mode|developer\s+mode|unrestricted\s+mode|god\s+mode)",
+        
+        # 3. Usurpation d'identité admin pour extraction
+        r"(?i)(?<!test\s)(?<!explain\s)\b(?:i\s+am|act\s+as)\s+(?:the\s+)?(?:system\s+)?admin(?:istrator)?\b.*?\b(?:show|give|reveal|output|print)\b.*?\b(?:configuration|system\s+prompt|secrets|credentials)\b",
+        
+        # 4. Commandes dangereuses (exclut les exemples entre guillemets ou précédés de "like")
+        r"(?i)(?<!explain\s)(?<!documenting\s)(?<!example\s)(?<!like\s)\b(?:run|execute|perform|issue)?\s*(?:['\"]|`)?(?:rm\s+-rf|drop\s+table|sudo\s+su|chmod\s+777|del\s+/f|format\s+c:)",
+        
+        # 5. Injections indirectes (Conteneur de données + Instruction)
+        r"(?i)\b(?:database|record|email|csv|file|output|feed|tool|payload)\b.*?\b(?:ignore|forget|bypass|override|leak|exfiltrate|send\s+all\s+data)\b"
+    ]
 
-
-def get_weak_patterns() -> List[str]:
-    """Return low-confidence patterns (used as secondary signal, not a block on their own)."""
-    return list(WEAK_PATTERNS)
+def get_weak_patterns() -> list:
+    return [
+        # Motifs plus larges pour le scoring ML ou les avertissements, mais pas pour le blocage direct
+        r"(?i)\b(?:jailbreak|prompt injection|ignore previous)\b"
+    ]
 
 
 def get_pattern_stats() -> Dict[str, int]:
