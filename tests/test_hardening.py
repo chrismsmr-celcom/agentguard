@@ -4,7 +4,11 @@ os.environ["AGENTGUARD_FLASK_SECRET"] = "test-secret"
 os.environ["AGENTGUARD_DB_TYPE"] = "sqlite"
 os.environ["AGENTGUARD_API_KEY"] = "test-api-key"
 
-from collector import app
+from collector.db import init_db
+from collector.app import create_app
+
+init_db()
+app = create_app()
 
 
 def test_healthz():

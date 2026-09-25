@@ -6,7 +6,6 @@ sans valeur par défaut, rate-limit sur /span.
 Lancer : pytest test_security.py -v
 """
 import os
-import importlib
 
 import pytest
 

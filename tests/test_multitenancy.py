@@ -6,7 +6,6 @@ dans l'org 'default', et la révocation coupe l'accès immédiatement.
 Lancer : pytest test_multitenancy.py -v
 """
 import os
-import importlib
 
 import pytest
 

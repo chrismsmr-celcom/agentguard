@@ -363,9 +363,10 @@ class AdversarialBenchmark:
         print(f"   {'Category':<30} {'Total':>6} {'Det':>6} {'Miss':>6} {'Rate':>8}")
         print(f"   {'-'*30} {'-'*6} {'-'*6} {'-'*6} {'-'*8}")
         for cs in analysis["categories"]:
-            emoji = "✅" if cs.detection_rate >= 0.9 else "⚠️" if cs.detection_rate >= 0.7 else "🚨"
-            print(f"   {emoji} {cs.category:<28} {cs.total:>6} {cs.detected:>6} "
-                  f"{cs.missed:>6} {cs.detection_rate*100:>7.1f}%")
+            cs = asdict(cs) if not isinstance(cs, dict) else cs
+            emoji = "✅" if cs["detection_rate"] >= 0.9 else "⚠️" if cs["detection_rate"] >= 0.7 else "🚨"
+            print(f"   {emoji} {cs['category']:<28} {cs['total']:>6} {cs['detected']:>6} "
+                  f"{cs['missed']:>6} {cs['detection_rate']*100:>7.1f}%")
 
         if analysis["worst_cases"]:
             print(f"\n🚨 WORST MISSED ATTACKS (top 5)")
