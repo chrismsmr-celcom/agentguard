@@ -9,7 +9,9 @@ description = "Runtime security & observability guard for AI agents — intercep
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+# Note: setuptools détecte automatiquement les fichiers "LICENSE". 
+# Vous pouvez garder cette ligne, mais assurez-vous que votre fichier s'appelle bien exactement "LICENSE" (et non LICENSE.txt).
+license-files = ["LICENSE"] 
 authors = [
     { name = "Christopher Dikesa" }
 ]
@@ -19,7 +21,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Topic :: Security",
-    # "License :: OSI Approved :: Apache Software License",  # SUPPRIMÉ : remplacé par license = "Apache-2.0"
+    # SUPPRIMÉ : "License :: OSI Approved :: Apache Software License" (Conflit PEP 639)
 ]
 dependencies = [
     "requests>=2.31.0,<3.0.0",
@@ -38,8 +40,8 @@ ml = ["torch==2.1.2", "transformers==4.36.2", "scikit-learn==1.3.2"]
 Homepage = "https://app.cerbereag.site"
 Repository = "https://github.com/chrismsmr-celcom/cerbere-AG"
 
-[tool.setuptools]
-py-modules = ["agentguard_sdk", "agentguard_ml"]
+# SUPPRIMÉ : La section [tool.setuptools] avec py-modules a été retirée.
+# Voir l'explication ci-dessous.
 
 [tool.setuptools.packages.find]
 include = ["agentguard*"]
