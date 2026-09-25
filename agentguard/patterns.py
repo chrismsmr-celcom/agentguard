@@ -344,29 +344,39 @@ def get_extended_strong_patterns() -> List[str]:
     )
 
 
-def get_all_strong_patterns() -> list:
+s() -> list:
+    """
+    Motifs de détection forte (blocage immédiat).
+    Note : Le flag (?i) a été retiré car re.IGNORECASE est appliqué 
+    globalement dans PolicyEngine._compile_patterns().
+    """
     return [
-        # 1. Injection directe / Jailbreak
-        # (?<!explain\s) etc. empêche le match si le mot est précédé d'un verbe descriptif
-        r"(?i)(?<!explain\s)(?<!about\s)(?<!how\s)(?<!discussing\s)(?<!documenting\s)\b(?:forget|ignore|bypass|override|disregard|void|cancel|pretend|enable|enter|activate)\s+(?:all\s+)?(?:previous|prior|your|the|above)\s+(?:instructions|prompts|rules|context|safety|guidelines|directives)",
+        # 1. Injection directe / Jailbreak (avec lookbehinds pour exclure les contextes éducatifs)
+        r"(?<!explain\s)(?<!about\s)(?<!how\s)(?<!discussing\s)(?<!documenting\s)\b(?:forget|ignore|bypass|override|disregard|void|cancel|pretend|enable|enter|activate)\s+(?:all\s+)?(?:previous|prior|your|the|above)\s+(?:instructions|prompts|rules|context|safety|guidelines|directives)",
         
-        # 2. Modes développeur / sans restriction
-        r"(?i)(?<!explain\s)(?<!about\s)\b(?:enable|enter|activate|switch to)\s+(?:evil\s+mode|developer\s+mode|unrestricted\s+mode|god\s+mode)",
+        # 2. Modes développeur / sans restriction / Evil mode
+        r"(?<!explain\s)(?<!about\s)\b(?:enable|enter|activate|switch\s+to)\s+(?:evil\s+mode|developer\s+mode|unrestricted\s+mode|god\s+mode)",
         
-        # 3. Usurpation d'identité admin pour extraction
-        r"(?i)(?<!test\s)(?<!explain\s)\b(?:i\s+am|act\s+as)\s+(?:the\s+)?(?:system\s+)?admin(?:istrator)?\b.*?\b(?:show|give|reveal|output|print)\b.*?\b(?:configuration|system\s+prompt|secrets|credentials)\b",
+        # 3. Usurpation d'identité admin pour extraction de prompt/secrets
+        r"(?<!test\s)(?<!explain\s)\b(?:i\s+am|act\s+as)\s+(?:the\s+)?(?:system\s+)?admin(?:istrator)?\b.*?\b(?:show|give|reveal|output|print)\b.*?\b(?:configuration|system\s+prompt|secrets|credentials)\b",
         
         # 4. Commandes dangereuses (exclut les exemples entre guillemets ou précédés de "like")
-        r"(?i)(?<!explain\s)(?<!documenting\s)(?<!example\s)(?<!like\s)\b(?:run|execute|perform|issue)?\s*(?:['\"]|`)?(?:rm\s+-rf|drop\s+table|sudo\s+su|chmod\s+777|del\s+/f|format\s+c:)",
+        r"(?<!explain\s)(?<!documenting\s)(?<!example\s)(?<!like\s)\b(?:run|execute|perform|issue)?\s*(?:['\"]|`)?(?:rm\s+-rf|drop\s+table|sudo\s+su|chmod\s+777|del\s+/f|format\s+c:)",
         
-        # 5. Injections indirectes (Conteneur de données + Instruction)
-        r"(?i)\b(?:database|record|email|csv|file|output|feed|tool|payload)\b.*?\b(?:ignore|forget|bypass|override|leak|exfiltrate|send\s+all\s+data)\b"
+        # 5. Injections indirectes (Conteneur de données + Instruction malveillante)
+        r"\b(?:database|record|email|csv|file|output|feed|tool|payload)\b.*?\b(?:ignore|forget|bypass|override|leak|exfiltrate|send\s+all\s+data)\b",
+        
+        # 6. Extraction de prompt directe
+        r"(?<!explain\s)(?<!test\s)\b(?:what\s+is|show\s+me|repeat|output)\s+(?:your\s+)?(?:system\s+prompt|initial\s+instructions)\b"
     ]
 
 def get_weak_patterns() -> list:
+    """
+    Motifs plus larges pour le scoring ou les avertissements.
+    """
     return [
-        # Motifs plus larges pour le scoring ML ou les avertissements, mais pas pour le blocage direct
-        r"(?i)\b(?:jailbreak|prompt injection|ignore previous)\b"
+        r"\b(?:jailbreak|prompt\s+injection)\b",
+        r"\b(?:sudo|chmod\s+777|rm\s+-rf)\b"
     ]
 
 
