@@ -18,10 +18,10 @@ except ImportError:
         def predict(self, text): return {"score": 0.0, "risk": "UNKNOWN", "confidence": "low"}
 
 class PolicyEngine:
-    _STRONG_PATTERNS = None
-    _WEAK_PATTERNS = None
- def check_injection(self, prompt: str):
-        # ⚠️ ÉTAPE CRUCIALE : Normaliser le texte AVANT toute vérification
+    def __init__(self):
+        pass
+        
+    def check_injection(self, prompt: str):  # <-- Correct : exactement 4 espaces
         clean_prompt = _normalize_prompt(prompt)
         
         # ⚠️ DÉTECTION SPÉCIFIQUE : Mots inversés (très faible coût CPU)
