@@ -160,9 +160,16 @@ def main():
 
     presets = list(LAYER_PRESETS) if args.all_layers else [args.layers]
 
+    # --- Load corpora ---
     attacks = load_json("attacks.json")
     benign = load_json("benign.json")
     hard_neg = load_json("hard_negatives.json")
+
+    # The legacy adversarial corpus mixes benign entries into the attack
+    # file. The public benchmark keeps attacks-only here; the benign set
+    # lives in benign.json / hard_negatives.json.
+    attacks = [e for e in attacks if e.get("category") != "benign"]
+
     if args.limit:
         attacks = attacks[: args.limit]
         benign = benign[: args.limit]
@@ -222,7 +229,7 @@ def main():
             },
         }
         runs.append(run_report)
-    attacks = [e for e in attacks if e.get("category") != "benign"]
+
         print(f"  Recall (attacks):      {recall:.1%}")
         for c, s in per_category.items():
             print(f"    - {c:28s} {s['detected']}/{s['count']}")
