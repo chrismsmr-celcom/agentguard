@@ -222,7 +222,7 @@ def main():
             },
         }
         runs.append(run_report)
-
+    attacks = [e for e in attacks if e.get("category") != "benign"]
         print(f"  Recall (attacks):      {recall:.1%}")
         for c, s in per_category.items():
             print(f"    - {c:28s} {s['detected']}/{s['count']}")
