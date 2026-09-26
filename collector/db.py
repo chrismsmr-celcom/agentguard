@@ -803,7 +803,7 @@ def init_identity_tables():
 
             # --- Agent Control Room : sessions / events (v1, cf. migration_001) ---
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS sessions (
+                CREATE TABLE IF NOT EXISTS agent_sessions (
                     id TEXT PRIMARY KEY,
                     org_id TEXT NOT NULL,
                     agent_id TEXT NOT NULL,
@@ -820,7 +820,7 @@ def init_identity_tables():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_org_agent ON sessions(org_id, agent_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_org_agent ON agent_sessions(org_id, agent_id)")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS events (
                     id TEXT PRIMARY KEY,
@@ -927,7 +927,7 @@ def init_identity_tables():
 
             # --- Agent Control Room : sessions / events (v1, cf. migration_001) ---
             c.execute("""
-                CREATE TABLE IF NOT EXISTS sessions (
+                CREATE TABLE IF NOT EXISTS agent_sessions (
                     id TEXT PRIMARY KEY,
                     org_id TEXT NOT NULL,
                     agent_id TEXT NOT NULL,
@@ -972,7 +972,7 @@ def init_identity_tables():
                 )
             """)
             try:
-                c.execute("CREATE INDEX IF NOT EXISTS idx_sessions_org_agent ON sessions(org_id, agent_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_org_agent ON agent_sessions(org_id, agent_id)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_events_session_seq ON events(session_id, sequence_no)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_events_org_agent_ts ON events(org_id, agent_id, \"timestamp\")")
             except sqlite3.OperationalError:
