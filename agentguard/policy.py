@@ -151,9 +151,28 @@ class PolicyEngine:
                 return SecurityCheck("prompt_injection", False, RiskLevel.HIGH, f"ML detected threat ({ml_result['score']:.2%})", {"layer": "ml"}, SecurityAction.BLOCK)
                 
         # 🛡️ ÉTAPE 5 : Patterns Regex (sur le texte nettoyé)
-        if PolicyEngine._STRONG_PATTERNS.findall(clean_text):
-            return SecurityCheck("prompt_injection", False, RiskLevel.HIGH, "Strong injection pattern detected", {"layer": "regex"}, SecurityAction.BLOCK)
-            
+                from .patterns import is_didactic_context
+        from .normalizer import normalize_for_detection, reversed_words_variant
+
+        if PolicyEngine._STRONG_PATTERNS.findall(text):
+            if is_didactic_context(text):
+                return SecurityCheck("prompt_injection", True, RiskLevel.MEDIUM,
+                    "Didactic context: quoted payload downgraded to review",
+                    {"layer": "regex", "downgraded": True}, SecurityAction.REVIEW)
+            return SecurityCheck("prompt_injection", False, RiskLevel.HIGH,
+                "Strong injection pattern detected", {"layer": "regex"}, SecurityAction.BLOCK)
+
+        # --- obfuscation fallback passes (v2) ---
+        normalized = normalize_for_detection(text)
+        if normalized != text and PolicyEngine._STRONG_PATTERNS.findall(normalized):
+            return SecurityCheck("prompt_injection", False, RiskLevel.HIGH,
+                "Obfuscated variant detected", {"layer": "regex+normalizer"}, SecurityAction.BLOCK)
+
+        reversed_text = reversed_words_variant(text)
+        if reversed_text != text and PolicyEngine._STRONG_PATTERNS.findall(reversed_text):
+            return SecurityCheck("prompt_injection", False, RiskLevel.HIGH,
+                "Reversed-word variant detected", {"layer": "regex+normalizer"}, SecurityAction.BLOCK)
+
         return SecurityCheck("prompt_injection", True, RiskLevel.LOW, "No injection detected", {"layer": "all_clear"}, SecurityAction.ALLOW)
 
     def check_pii(self, text: str) -> SecurityCheck:
