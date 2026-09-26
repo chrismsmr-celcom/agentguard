@@ -1,5 +1,5 @@
 """
-AgentGuard Cyber Judge v1.0
+AgentGuard Cyber Judge v2.0
 Deterministic cybersecurity judge for AI-agent runtime decisions.
 
 Design goals:
@@ -8,6 +8,12 @@ Design goals:
 - Bounded latency and bounded memory.
 - Uses cybersecurity concepts without pretending to be a complete MITRE/CWE validator.
 - Can optionally consume an existing ML score as a signal.
+
+v2 (benchmark 2026-09-26):
+- Soupape didactique : un BLOCK non-hard-rule declenche par une signature
+  citee dans un cadre educatif (doc, test, fiction) est downgrade en ALERT
+  avec le motif explicite — aligne sur le downgrader du PolicyEngine.
+  Les hard rules (taint MALICIOUS/SECRET -> sink) ne sont JAMAIS downgrades.
 """
 
 from __future__ import annotations
@@ -38,6 +44,25 @@ class AttackType(str, Enum):
     RESOURCE_EXHAUSTION = "resource_exhaustion"
     SUPPLY_CHAIN = "supply_chain"
     UNKNOWN = "unknown"
+
+
+# v2: contexte didactique — local et leger, pas d'import du SDK (ce module
+# doit rester standalone). Memeregle que agentguard.patterns.is_didactic_context.
+_DIDACTIC_MARKERS = re.compile(
+    r"\b(?:explain|explains|explained|explaining|how\s+(?:do|does|did|to)|"
+    r"defen[cs]e|protect|protection|quiz|training|course|blog|article|"
+    r"documentation|doc|novel|fiction|scene|character|sandbox|fake|"
+    r"fixture|verify|report|overview|write\s+(?:a|the)\s+(?:quiz|blog|"
+    r"article|scene|documentation|test)|about\s+it|example)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_didactic_context(text: str) -> bool:
+    """True si la signature d'attaque est citee dans un cadre educatif."""
+    if not _DIDACTIC_MARKERS.search(text):
+        return False
+    return any(q in text for q in ('"', "'", "`", "«", "»"))
 
 
 @dataclass
@@ -349,8 +374,6 @@ class CyberJudge:
         previous = entry["count"]
         entry["count"] = min(previous + 1, 1000000)
 
-        # First occurrence is not anomalous. After a baseline exists, a brand-new
-        # tool can be supplied through context["known_tools"] for stronger evidence.
         context = span_data.get("context") or {}
         known_tools = set(context.get("known_tools") or [])
         if known_tools and tool not in known_tools:
@@ -453,6 +476,24 @@ class CyberJudge:
                 verdict = JudgeVerdict.ALERT
             else:
                 verdict = JudgeVerdict.ALLOW
+
+            # ── v2: SOUPAPE DIDACTIQUE ──
+            # Un BLOCK declenche par une signature d'attaque CITEE (doc de
+            # securite, fixture de test, roman...) devient ALERT — signal
+            # humain, pas blocage dur. Les hard rules ne passent JAMAIS ici.
+            # Un COMMAND_INJECTION reel n'est pas non plus downgrade : on ne
+            # devine pas l'intention d'une commande destructive.
+            if (
+                verdict in (JudgeVerdict.BLOCK, JudgeVerdict.BLOCK_IMMEDIATE)
+                and attack_type is not None
+                and attack_type != AttackType.COMMAND_INJECTION
+                and external is False
+                and _is_didactic_context(text)
+            ):
+                reasons.append(
+                    "didactic downgrade: attack signature quoted in educational/test context -> ALERT"
+                )
+                verdict = JudgeVerdict.ALERT
 
         elapsed_ms = (time.perf_counter() - start) * 1000
 
