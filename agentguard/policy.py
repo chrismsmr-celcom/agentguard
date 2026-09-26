@@ -2,7 +2,6 @@ import os
 import json
 import re
 import structlog
-import unicodedata
 from typing import Optional, Dict, Any, List
 
 from .models import SecurityCheck, RiskLevel, SecurityAction
@@ -13,37 +12,10 @@ try:
     from agentguard_ml import MLDetector
 except ImportError:
     class MLDetector:
-        def __init__(self): 
+        def __init__(self):
             self.enabled = False
-        def predict(self, text): 
+        def predict(self, text):
             return {"score": 0.0, "risk": "UNKNOWN", "confidence": "low"}
-
-
-def _normalize_prompt(text: str) -> str:
-    """Normalise le prompt pour contrer les techniques d'obfuscation courantes."""
-    if not isinstance(text, str):
-        return text
-    
-    # 1. Correction manuelle des homoglyphes spécifiques
-    text = text.replace('ɿ', 'r').replace('і', 'i').replace('ο', 'o').replace('с', 'c')
-    
-    # 2. Normalisation Unicode standard
-    text = unicodedata.normalize('NFKC', text)
-    
-    # 3. Suppression des caractères invisibles (zero-width spaces)
-    text = re.sub(r'[\u200b\u200c\u200d\ufeff\u2060\u200e\u200f]', '', text)
-    
-    # 4. Colle les lettres séparées par des points/espaces (i . g . n . o . r . e -> ignore)
-    text = re.sub(r'(\w)\s*\.\s*(\w)', r'\1\2', text)
-    
-    # 5. Décode les échappements hex (\x67) et unicode (\u006e)
-    text = re.sub(r'\\x([0-9a-fA-F]{2})', lambda m: chr(int(m.group(1), 16)), text)
-    text = re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1), 16)), text)
-    
-    # 6. Révèle le texte caché dans les commentaires HTML (ne pas le supprimer)
-    text = re.sub(r'<!--(.*?)-->', r' \1 ', text, flags=re.DOTALL)
-    
-    return text.strip()
 
 
 class PolicyEngine:
@@ -57,7 +29,7 @@ class PolicyEngine:
         self.use_llm_judge = os.getenv("AGENTGUARD_USE_LLM_JUDGE", "false").lower() in ("true", "1", "on", "yes")
         self.block_on_ambiguous = os.getenv("AGENTGUARD_BLOCK_ON_AMBIGUOUS", "false").lower() in ("true", "1", "on", "yes")
         self.judge_timeout = max(0.5, float(os.getenv("AGENTGUARD_JUDGE_TIMEOUT", "15.0")))
-        
+
         self._redis_client = None
         if redis_url and self.use_llm_judge:
             try:
@@ -109,47 +81,106 @@ class PolicyEngine:
         PolicyEngine._WEAK_PATTERNS = re.compile("|".join(f"(?:{p})" for p in weak), re.IGNORECASE)
 
     def check_injection(self, text: str) -> SecurityCheck:
-        text = str(text or "")
-        if not text.strip(): 
-            return SecurityCheck("prompt_injection", True, RiskLevel.LOW, "Empty prompt")
-        
-        # 🛡️ ÉTAPE 1 : Normaliser le texte pour contrer l'obfuscation
-        clean_text = _normalize_prompt(text)
-        
-        # 🛡️ ÉTAPE 2 : Détection spécifique des mots inversés (très faible coût CPU)
-        if "snoitcurtsni" in clean_text.lower() or "suoiverp" in clean_text.lower():
-            return SecurityCheck("prompt_injection", False, RiskLevel.HIGH, "Reversed keyword obfuscation detected", {"layer": "regex"}, SecurityAction.BLOCK)
+        """
+        Detection pipeline (v3), in strict order:
 
-        # 🛡️ ÉTAPE 3 : Triple Judge (sur le texte nettoyé)
+        1. RAW pass   — strong patterns on the raw text. Raw first means
+                        normalization can never introduce false positives
+                        on clean input, and clean prompts pay only ONE
+                        regex pass (no normalization cost).
+        2. Triple judge / ML layers (on raw text — they are robust to
+           obfuscation by design; feeding them normalized text would double
+           the normalization cost for no gain).
+        3. NORMALIZED pass — only if the raw pass found nothing AND the
+           normalizer actually changed the text (early exit: most benign
+           prompts are untouched by normalization and skip this entirely).
+        4. REVERSED pass — generic reversed-word detection, not a hardcoded
+           keyword list.
+        5. Didactic downgrader — a strong hit in an educational/quoted
+           context becomes REVIEW (human in the loop), not BLOCK.
+
+        Obfuscation/normalization logic lives in agentguard/normalizer.py
+        (single source of truth, unit-tested). Do not inline it here.
+        """
+        from .normalizer import normalize_for_detection, reversed_words_variant
+        from .patterns import is_didactic_context
+
+        text = str(text or "")
+        if not text.strip():
+            return SecurityCheck("prompt_injection", True, RiskLevel.LOW, "Empty prompt")
+
+        # ── ÉTAPE 1 : passe RAW (le texte brut, une seule regex) ──
+        if PolicyEngine._STRONG_PATTERNS.findall(text):
+            # Downgrade didactique : payload entre guillemets + contexte
+            # éducatif (blog, formation, roman, fixture de test...) ->
+            # REVUE HUMAINE, pas blocage dur.
+            if is_didactic_context(text):
+                return SecurityCheck(
+                    "prompt_injection", True, RiskLevel.MEDIUM,
+                    "Didactic context: quoted payload downgraded to review",
+                    {"layer": "regex", "downgraded": True},
+                    SecurityAction.REVIEW,
+                )
+            return SecurityCheck(
+                "prompt_injection", False, RiskLevel.HIGH,
+                "Strong injection pattern detected",
+                {"layer": "regex"}, SecurityAction.BLOCK,
+            )
+
+        # ── ÉTAPE 2 : Triple Judge (texte brut) ──
         if self._triple_judge is not None:
             try:
-                tj_result = self._triple_judge.evaluate(clean_text)
+                tj_result = self._triple_judge.evaluate(text)
                 if tj_result.get("final_verdict") == "DENY":
                     return SecurityCheck("prompt_injection", False, RiskLevel.HIGH, f"[TRIPLE JUDGE] {tj_result.get('reason')}", {"layer": "triple_judge"}, SecurityAction.BLOCK)
-            except Exception as e: 
+            except Exception as e:
                 logger.warning("triple_judge_failed", error=str(e))
-            
-        # 🛡️ ÉTAPE 4 : Détection ML (sur le texte nettoyé)
+
+        # ── ÉTAPE 3 : détection ML (texte brut) ──
         if self.ml_detector.enabled:
-            ml_result = self.ml_detector.predict(clean_text)
+            ml_result = self.ml_detector.predict(text)
             if ml_result["risk"] == "HIGH" and ml_result["score"] >= 0.85:
                 return SecurityCheck("prompt_injection", False, RiskLevel.HIGH, f"ML detected threat ({ml_result['score']:.2%})", {"layer": "ml"}, SecurityAction.BLOCK)
-                
-        # 🛡️ ÉTAPE 5 : Patterns Regex (sur le texte nettoyé)
-        if PolicyEngine._STRONG_PATTERNS.findall(clean_text):
-            return SecurityCheck("prompt_injection", False, RiskLevel.HIGH, "Strong injection pattern detected", {"layer": "regex"}, SecurityAction.BLOCK)
-            
+
+        # ── ÉTAPE 4 : passe NORMALISÉE (fallback anti-obfuscation) ──
+        # Early exit : la grande majorité des prompts (bénins ET attaques
+        # non obfusquées déjà traités plus haut) ne changent pas à la
+        # normalisation -> coût quasi nul sur le trafic propre.
+        normalized = normalize_for_detection(text)
+        if normalized != text and PolicyEngine._STRONG_PATTERNS.findall(normalized):
+            if is_didactic_context(text):
+                return SecurityCheck(
+                    "prompt_injection", True, RiskLevel.MEDIUM,
+                    "Didactic context + obfuscated variant: downgraded to review",
+                    {"layer": "regex+normalizer", "downgraded": True},
+                    SecurityAction.REVIEW,
+                )
+            return SecurityCheck(
+                "prompt_injection", False, RiskLevel.HIGH,
+                "Obfuscated variant detected",
+                {"layer": "regex+normalizer"}, SecurityAction.BLOCK,
+            )
+
+        # ── ÉTAPE 5 : passe MOTS INVERSÉS (générique) ──
+        reversed_text = reversed_words_variant(text)
+        if reversed_text != text and PolicyEngine._STRONG_PATTERNS.findall(reversed_text):
+            return SecurityCheck(
+                "prompt_injection", False, RiskLevel.HIGH,
+                "Reversed-word obfuscation detected",
+                {"layer": "regex+normalizer"}, SecurityAction.BLOCK,
+            )
+
         return SecurityCheck("prompt_injection", True, RiskLevel.LOW, "No injection detected", {"layer": "all_clear"}, SecurityAction.ALLOW)
 
     def check_pii(self, text: str) -> SecurityCheck:
         text = str(text or "")
-        if not text.strip(): 
+        if not text.strip():
             return SecurityCheck("pii_detection", True, RiskLevel.LOW, "Empty text")
         patterns = {"ssn": r"\b\d{3}-\d{2}-\d{4}\b", "credit_card": r"\b(?:\d{4}[-\s]?){3}\d{4}\b"}
         findings = {}
         for name, pattern in patterns.items():
             matches = re.findall(pattern, text)
-            if matches: 
+            if matches:
                 findings[name] = len(matches)
         if findings:
             return SecurityCheck("pii_detection", False, RiskLevel.HIGH, f"PII detected: {findings}", {"pii_types": findings}, SecurityAction.BLOCK)
@@ -158,7 +189,7 @@ class PolicyEngine:
     def check_budget(self, cost: float, max_budget: float, current_spent: float) -> SecurityCheck:
         if current_spent + cost > max_budget:
             return SecurityCheck(
-                "budget_policy", False, RiskLevel.HIGH, 
+                "budget_policy", False, RiskLevel.HIGH,
                 f"Budget exceeded: {current_spent + cost:.4f} > {max_budget:.4f}",
                 {"current_spent": current_spent, "cost": cost, "max_budget": max_budget},
                 SecurityAction.BLOCK
@@ -172,31 +203,31 @@ class PolicyEngine:
             return SecurityCheck("tool_policy", False, RiskLevel.CRITICAL, f"Tool '{tool_name}' not in whitelist for {scope}", {"agent_id": agent_id}, SecurityAction.BLOCK)
         if budget_remaining < 0:
             return SecurityCheck("budget_policy", False, RiskLevel.HIGH, "Budget exceeded", {}, SecurityAction.BLOCK)
-        
+
         # --- Règle DLP (Data Loss Prevention) ---
         if tool_name in ["COMPOSIO_MULTI_EXECUTE_TOOL", "GMAIL_SEND_EMAIL", "send_email"]:
             tools_to_run = params.get("tools", []) if isinstance(params, dict) and "tools" in params else []
-            
+
             if tool_name in ["GMAIL_SEND_EMAIL", "send_email"]:
                 tools_to_run = [{"tool_slug": tool_name, "arguments": params}]
-                
+
             for tool in tools_to_run:
                 if tool.get("tool_slug") in ["GMAIL_SEND_EMAIL", "send_email"]:
                     args = tool.get("arguments", {})
                     recipient = str(args.get("recipient_email", args.get("to", ""))).lower()
                     has_attachment = "attachment" in args or "attachments" in args
-                    
+
                     personal_domains = ["@gmail.com", "@yahoo.com", "@hotmail.com", "@outlook.com", "@icloud.com"]
-                    
+
                     if any(domain in recipient for domain in personal_domains):
                         reason = f"Envoi vers domaine personnel détecté ({recipient})"
                         if has_attachment:
                             reason += " avec pièce jointe. Approbation humaine OBLIGATOIRE."
-                            
+
                         return SecurityCheck(
-                            "data_loss_prevention", 
-                            False, 
-                            RiskLevel.HIGH, 
+                            "data_loss_prevention",
+                            False,
+                            RiskLevel.HIGH,
                             reason,
                             metadata={"requires_approval": True, "recipient": recipient, "has_attachment": has_attachment},
                             action=SecurityAction.REVIEW
@@ -204,18 +235,18 @@ class PolicyEngine:
 
         if tool_name == "execute_command":
             check = self._check_command(params)
-            if not check.passed: 
+            if not check.passed:
                 return check
 
-        try: 
+        try:
             params_string = json.dumps(params, default=str)
-        except Exception: 
+        except Exception:
             params_string = str(params)
-        
+
         dangerous_patterns = re.compile(r"\b(?:delete_all|drop\s+table|truncate|drop\s+database|rm\s+-rf|sudo|chmod\s+777|mkfs|dd\s+if=|attacker|evil\.com)\b", re.IGNORECASE)
         if dangerous_patterns.search(params_string):
             return SecurityCheck("dangerous_params", False, RiskLevel.HIGH, "Dangerous pattern in params", {}, SecurityAction.BLOCK)
-            
+
         return SecurityCheck("tool_policy", True, RiskLevel.LOW, "Tool call approved")
 
     def _check_email(self, params: Dict[str, Any]) -> SecurityCheck:
