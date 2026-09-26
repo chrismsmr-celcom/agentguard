@@ -159,7 +159,7 @@ def _db_run(sql, params=(), fetch=None, commit=False):
 
 
 # ═══════════════════════════════════════════════════════════════
-# CANONICAL EVENT WRITE (Agent Control Room — table `events`/`sessions`)
+# CANONICAL EVENT WRITE (Agent Control Room — table `events`/`agent_sessions`)
 #
 # v1 : dérive un Event à partir du même payload de span déjà validé/redacté
 # par receive_span. C'est une première version honnête : le `policy_chain`
@@ -183,11 +183,11 @@ def _next_sequence_no(cur, p, session_id):
 
 def _ensure_session(cur, p, session_id, org_id, agent_id, model, is_pg):
     """Crée la session au premier event d'un trace_id, sinon no-op."""
-    cur.execute(f"SELECT 1 FROM sessions WHERE id = {p}", (session_id,))
+    cur.execute(f"SELECT 1 FROM agent_sessions WHERE id = {p}", (session_id,))
     if cur.fetchone():
         return
     cur.execute(
-        f"""INSERT INTO sessions (id, org_id, agent_id, status, model, environment)
+        f"""INSERT INTO agent_sessions (id, org_id, agent_id, status, model, environment)
             VALUES ({p}, {p}, {p}, {p}, {p}, {p})""",
         (session_id, org_id, agent_id or "unknown", "running", model, "production"),
     )
@@ -229,7 +229,7 @@ def _write_canonical_event(data, org_id, agent_id):
                 json.dumps(checks), json.dumps(risk_contributors), decision, data.get("block_reason"),
             ),
         )
-        cur.execute(f"UPDATE sessions SET last_event_id = {p}, status = {p} WHERE id = {p}",
+        cur.execute(f"UPDATE agent_sessions SET last_event_id = {p}, status = {p} WHERE id = {p}",
                     (event_id, "blocked" if data["blocked"] else "running", session_id))
         conn.commit()
     finally:
@@ -556,7 +556,7 @@ def get_trajectory(session_id):
 
     rows = [_serialize_event(r, full=False) for r in rows]
 
-    sess_cur_sql = f"SELECT status, risk_level, current_task, model, environment, agent_id FROM sessions WHERE id = {p} AND org_id = {p}"
+    sess_cur_sql = f"SELECT status, risk_level, current_task, model, environment, agent_id FROM agent_sessions WHERE id = {p} AND org_id = {p}"
     if is_postgres():
         conn = get_db()
         cur = conn.cursor()
