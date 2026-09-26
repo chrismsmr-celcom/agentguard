@@ -159,8 +159,82 @@ def _db_run(sql, params=(), fetch=None, commit=False):
 
 
 # ═══════════════════════════════════════════════════════════════
-# SPAN INGESTION
+# CANONICAL EVENT WRITE (Agent Control Room — table `events`/`sessions`)
+#
+# v1 : dérive un Event à partir du même payload de span déjà validé/redacté
+# par receive_span. C'est une première version honnête : le `policy_chain`
+# n'est encore que la liste des security_checks (pas encore la chaîne
+# identity->capability->scope->...->decision complète décrite dans le plan
+# Control Room, qui demande que policy.py/runtime.py sérialisent chaque
+# étape), et `taint_level` reste NULL tant que track_input() n'est pas
+# réellement câblé côté SDK. Le but de ce v1 est d'avoir de la vraie donnée
+# qui coule dans `events` dès maintenant pour brancher la Trajectory
+# Timeline, pas d'avoir déjà toutes les colonnes remplies.
 # ═══════════════════════════════════════════════════════════════
+
+def _next_sequence_no(cur, p, session_id):
+    cur.execute(
+        f"SELECT COALESCE(MAX(sequence_no), 0) + 1 FROM events WHERE session_id = {p}",
+        (session_id,),
+    )
+    row = cur.fetchone()
+    return int(row[0]) if row and row[0] is not None else 1
+
+
+def _ensure_session(cur, p, session_id, org_id, agent_id, model, is_pg):
+    """Crée la session au premier event d'un trace_id, sinon no-op."""
+    cur.execute(f"SELECT 1 FROM sessions WHERE id = {p}", (session_id,))
+    if cur.fetchone():
+        return
+    cur.execute(
+        f"""INSERT INTO sessions (id, org_id, agent_id, status, model, environment)
+            VALUES ({p}, {p}, {p}, {p}, {p}, {p})""",
+        (session_id, org_id, agent_id or "unknown", "running", model, "production"),
+    )
+
+
+def _write_canonical_event(data, org_id, agent_id):
+    """Insère une ligne dans `events` (et crée la `session` si besoin) à
+    partir du payload de span déjà reçu par receive_span. Best-effort :
+    toute exception est avalée par l'appelant, ne doit jamais faire
+    échouer l'ingestion de span existante."""
+    session_id = data["trace_id"]
+    checks = data.get("security_checks") or []
+    failed = [c for c in checks if isinstance(c, dict) and not c.get("passed", True)]
+    risk_contributors = [c.get("check_name", "unknown") for c in failed]
+
+    span_type = data.get("span_type", "")
+    actor = "TOOL" if "tool" in span_type else "MODEL"
+    decision = "BLOCK" if data["blocked"] else "ALLOW"
+    model = data.get("input_data", {}).get("model") if isinstance(data.get("input_data"), dict) else None
+
+    p = sql_placeholder()
+    is_pg = is_postgres()
+    conn = get_db() if is_pg else sqlite3.connect(_get_db_path())
+    cur = conn.cursor()
+    try:
+        _ensure_session(cur, p, session_id, org_id, agent_id, model, is_pg)
+        seq = _next_sequence_no(cur, p, session_id)
+        event_id = f"{data['span_id']}"
+        cur.execute(
+            f"""INSERT INTO events (
+                    id, trace_id, session_id, agent_id, org_id, sequence_no,
+                    actor, type, tool_name, arguments, result,
+                    policy_chain, risk_contributors, decision, reason
+                ) VALUES ({p},{p},{p},{p},{p},{p},{p},{p},{p},{p},{p},{p},{p},{p},{p})""",
+            (
+                event_id, data["trace_id"], session_id, agent_id or "unknown", org_id, seq,
+                actor, span_type, data.get("input_data", {}).get("tool_name") if isinstance(data.get("input_data"), dict) else None,
+                json.dumps(data.get("input_data", {})), json.dumps(data.get("output_data", {})),
+                json.dumps(checks), json.dumps(risk_contributors), decision, data.get("block_reason"),
+            ),
+        )
+        cur.execute(f"UPDATE sessions SET last_event_id = {p}, status = {p} WHERE id = {p}",
+                    (event_id, "blocked" if data["blocked"] else "running", session_id))
+        conn.commit()
+    finally:
+        conn.close()
+
 
 @api_bp.route("/span", methods=["POST"])
 @limiter.limit(lambda: current_app.config["SPAN_RATE_LIMIT"])
@@ -293,6 +367,13 @@ def receive_span():
         finally:
             conn.close()
 
+    try:
+        _write_canonical_event(data, g.org_id, span_agent_id)
+    except Exception:
+        # Best-effort : l'écriture dans `events` (Control Room) ne doit
+        # jamais faire échouer l'ingestion existante de `spans`.
+        current_app.logger.exception("Failed to write canonical event")
+
     if data["blocked"]:
         try:
             import alerting
@@ -422,6 +503,102 @@ def get_trace(trace_id):
         r["security_checks"] = _as_json(r["security_checks"], [])
         r["blocked"] = bool(r["blocked"])
     return jsonify(rows)
+
+
+# ═══════════════════════════════════════════════════════════════
+# TRAJECTORY TIMELINE (Agent Control Room)
+# ═══════════════════════════════════════════════════════════════
+
+_EVENT_JSON_FIELDS = ["arguments", "arguments_sanitized", "result", "policy_chain", "risk_contributors"]
+
+def _serialize_event(r, full=True):
+    for f in _EVENT_JSON_FIELDS:
+        r[f] = _as_json(r.get(f), {} if f != "risk_contributors" else [])
+    if not full:
+        # Ligne allégée pour la liste de la timeline : pas d'arguments/result
+        # bruts (potentiellement volumineux/sensibles), juste de quoi
+        # afficher la ligne et savoir sur quoi cliquer pour l'expand.
+        for f in ("arguments", "arguments_sanitized", "result", "policy_chain"):
+            r.pop(f, None)
+    return r
+
+
+@api_bp.route("/api/trajectory/<session_id>")
+def get_trajectory(session_id):
+    """Timeline ordonnée d'une session — alimente le widget Trajectory Timeline."""
+    p = sql_placeholder()
+    cols = """id, trace_id, session_id, agent_id, "timestamp", sequence_no,
+              actor, type, tool_name, decision, reason, risk_score, risk_contributors,
+              taint_level, prev_event_id, next_event_id"""
+    if is_postgres():
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT {cols} FROM events WHERE session_id = {p} AND org_id = {p} ORDER BY sequence_no",
+            (session_id, g.org_id),
+        )
+        rows = [dict_from_row(r, cur) for r in cur.fetchall()]
+        conn.close()
+    else:
+        conn = sqlite3.connect(_get_db_path())
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                f"SELECT {cols} FROM events WHERE session_id = ? AND org_id = ? ORDER BY sequence_no",
+                (session_id, g.org_id),
+            )
+            rows = [dict_from_row(r, cur) for r in cur.fetchall()]
+        finally:
+            conn.close()
+
+    if not rows:
+        return jsonify({"error": "Session not found or empty"}), 404
+
+    rows = [_serialize_event(r, full=False) for r in rows]
+
+    sess_cur_sql = f"SELECT status, risk_level, current_task, model, environment, agent_id FROM sessions WHERE id = {p} AND org_id = {p}"
+    if is_postgres():
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(sess_cur_sql, (session_id, g.org_id))
+        session_row = dict_from_row(cur.fetchone(), cur)
+        conn.close()
+    else:
+        conn = sqlite3.connect(_get_db_path())
+        cur = conn.cursor()
+        try:
+            cur.execute(sess_cur_sql.replace(p, "?"), (session_id, g.org_id))
+            session_row = dict_from_row(cur.fetchone(), cur)
+        finally:
+            conn.close()
+
+    return jsonify({"session_id": session_id, "session": session_row, "events": rows})
+
+
+@api_bp.route("/api/events/<event_id>")
+def get_event(event_id):
+    """Détail complet d'un event — alimente le panneau expand de la timeline
+    et le Policy Decision Center (drill-down par action)."""
+    p = sql_placeholder()
+    if is_postgres():
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(f"SELECT * FROM events WHERE id = {p} AND org_id = {p}", (event_id, g.org_id))
+        row = dict_from_row(cur.fetchone(), cur)
+        conn.close()
+    else:
+        conn = sqlite3.connect(_get_db_path())
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT * FROM events WHERE id = ? AND org_id = ?", (event_id, g.org_id))
+            row = dict_from_row(cur.fetchone(), cur)
+        finally:
+            conn.close()
+
+    if not row:
+        return jsonify({"error": "Event not found"}), 404
+
+    return jsonify(_serialize_event(row, full=True))
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1813,5 +1990,3 @@ def api_delete_alert_rule(alert_id):
     except Exception as e:
         logger.error("alert_rule_delete_failed", error=str(e), org_id=org_id)
         return jsonify({"error": "Failed to delete alert rule"}), 500
-
-
