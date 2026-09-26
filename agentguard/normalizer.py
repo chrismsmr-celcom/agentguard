@@ -2,13 +2,23 @@
 Text normalization for detection. Applied as a fallback pass when the raw
 text does not match any pattern — raw text is ALWAYS checked first, so
 normalization can never introduce false positives on clean input.
+
+v2 (2026-09-26): fixed against benchmark findings of 2026-09-25/26:
+- ɿ (\u027f) maps to "i", not "r" (attack corpus substitutes it for the
+  leading i of "ignore"); debug showed "rgnore" -> now yields "ignore".
+- Zero-width chars are replaced by a SPACE, not removed: removing them
+  glued words together ("ignoreall"), which broke \b word boundaries.
+- Dot-separated spelled words ("i.g.n.o.r.e.") leave trailing dots on
+  every collapsed word ("ignore. all."); a cleanup pass strips them.
 """
 import re
 import unicodedata
 
-# Confusable homoglyphs (extend as needed; keep the list PUBLIC and small)
+# Confusable homoglyphs (extend as needed; keep the list PUBLIC and small).
+# NOTE: mapping is context-free — map each glyph to the latin letter it is
+# most commonly substituted for in adversarial prompts.
 CONFUSABLES = {
-    "\u027f": "r",   # ɿ -> r
+    "\u027f": "i",   # ɿ -> i (commonly substitutes the i of "ignore")
     "\u0269": "l",   # ɩ -> l
     "\u0251": "a",   # ɑ -> a
     "\u025b": "e",   # ɛ -> e
@@ -20,6 +30,7 @@ CONFUSABLES = {
     "\u0441": "c",   # cyrillic с -> c
 }
 
+# Zero-width chars act as invisible word separators -> replace with a space
 ZERO_WIDTH = re.compile(r"[\u200b\u200c\u200d\u2060\ufeff]")
 
 # \u006e, \x67 literal escape sequences found in agent inputs
@@ -28,6 +39,10 @@ HEX_ESCAPE = re.compile(r"\\x([0-9a-fA-F]{2})")
 
 # "i.g.n.o.r.e" -> "ignore" (letter-dot-letter chains)
 DOT_SEPARATED = re.compile(r"\b(?:([a-z])\.)+([a-z])\b")
+
+# Residual trailing dots left after collapsing spelled-out words:
+# "ignore. all. previous." -> "ignore all previous"
+TRAILING_DOT = re.compile(r"(?<=[a-z])\.(?=\s|$)")
 
 
 def normalize_for_detection(text: str) -> str:
@@ -45,13 +60,17 @@ def normalize_for_detection(text: str) -> str:
     for src, dst in CONFUSABLES.items():
         s = s.replace(src, dst)
 
-    # 4. Strip zero-width characters
-    s = ZERO_WIDTH.sub("", s)
+    # 4. Zero-width chars: replace with a space (they are invisible
+    #    separators; deleting them glues words together)
+    s = ZERO_WIDTH.sub(" ", s)
 
     # 5. Collapse "i.g.n.o.r.e" spelled-out words
     s = DOT_SEPARATED.sub(
         lambda m: "".join(c for c in m.group(0) if c != "."), s
     )
+
+    # 6. Strip residual trailing dots left by pass 5
+    s = TRAILING_DOT.sub("", s)
 
     return s
 
