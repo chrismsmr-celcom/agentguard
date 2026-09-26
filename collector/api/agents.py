@@ -3,9 +3,8 @@ import time
 from datetime import datetime
 import structlog
 from flask import request, jsonify, g
-from collector.db import _db_run
+from collector.api.utils import _db_run, _iso_utc  # <- CORRECTION ICI
 from collector.api import api_bp
-from collector.api.utils import _iso_utc
 from collector.auth import require_auth, require_human_auth
 
 logger = structlog.get_logger("agentguard.api.agents")
@@ -161,10 +160,11 @@ def api_test_agent():
 @api_bp.route("/api/approvals/test", methods=["POST"], endpoint="api_test_approval")
 def api_test_approval():
     if not require_human_auth(): return jsonify({"error": "Human session required"}), 401
+    import secrets
     approval_id = "test_" + secrets.token_hex(4)
     try:
         _ensure_test_agent(g.org_id)
-        _db_run("INSERT INTO approval_requests (id, org_id, agent_id, tool_name, params, reason, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')", (approval_id, g.org_id, TEST_AGENT_ID, "send_email", json.dumps({"to": "partner@gmail.com", "subject": "Q3 customer export", "attachments": ["customers_q3.csv"]}), "Test request from the dashboard: external recipient on a personal domain"), commit=True)
+        _db_run("INSERT INTO approval_requests (id, org_id, agent_id, tool_name, params, reason, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')", (approval_id, g.org_id, TEST_AGENT_ID, "send_email", '{"to": "partner@gmail.com", "subject": "Q3 customer export", "attachments": ["customers_q3.csv"]}', "Test request from the dashboard: external recipient on a personal domain"), commit=True)
     except Exception as exc: return jsonify({"error": f"Database error: {str(exc)}"}), 500
     return jsonify({"id": approval_id, "status": "pending"}), 201
 
