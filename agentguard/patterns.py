@@ -268,7 +268,7 @@ def get_all_strong_patterns() -> List[str]:
     Note : Le flag (?i) a été retiré car re.IGNORECASE est appliqué 
     globalement dans PolicyEngine._compile_patterns().
     """
-    return [
+    return BASE_STRONG_PATTERNS + [
         # 1. Injection directe / Jailbreak (avec lookbehinds pour exclure les contextes éducatifs)
         r"(?<!explain\s)(?<!about\s)(?<!how\s)(?<!discussing\s)(?<!documenting\s)\b(?:forget|ignore|bypass|override|disregard|void|cancel|pretend|enable|enter|activate)\s+(?:all\s+)?(?:previous|prior|your|the|above)\s+(?:instructions|prompts|rules|context|safety|guidelines|directives)",
         
