@@ -1,14 +1,23 @@
 """
-AgentGuard ML Detector — single source of truth (v3.1 prod-ready).
+AgentGuard ML Detector — single source of truth (v4 benchmark-tuned).
 
 Fixes v3.1 :
-✅ import re manquant (crash au boot)
-✅ Thread-safety (lock inference pour Gunicorn multi-threads)
-✅ Garde-fou longueur d'input optimisé (anti-DoS tokenizer)
-✅ FP16 auto sur CUDA (inférence ~2x plus rapide)
-✅ Logging structuré et validation stricte des labels du modèle
-"""
+- import re manquant (crash au boot)
+- Thread-safety (lock inference pour Gunicorn multi-threads)
+- Garde-fou longueur d'input optimisé (anti-DoS tokenizer)
+- FP16 auto sur CUDA (inference ~2x plus rapide)
+- Logging structure et validation stricte des labels du modele
 
+Fixes v4 (benchmark 2026-09-26, layers regex,ml) :
+- Threshold par defaut 0.95 (etait 0.85). Dans la cascade, le ML ne voit QUE
+  ce que le regex a laisse passer : sa barre doit etre haute. A 0.85 le run
+  benchmark donnait FPR benin 5% et hard-neg 33% ; a 0.95 la cible est 0%.
+- Double passe normalisee : le classifier score le texte brut ET sa version
+  de-obfusquee (agentguard.normalizer) et garde le max. Sans ça, le ML rate
+  les homoglyphes/zero-width qu'il n'a jamais vus a l'entrainement
+  (encoded_obfuscated 8/10 au lieu de 10/10).
+- Version de modele loggee au boot (reproductibilite du benchmark).
+"""
 import os
 import re
 import logging
@@ -17,7 +26,6 @@ from typing import Dict, Any
 
 logger = logging.getLogger("agentguard.ml")
 
-# Import torch de manière sécurisée au niveau module
 try:
     import torch
     TORCH_AVAILABLE = True
@@ -31,16 +39,18 @@ class MLDetector:
         self.tokenizer = None
         self.device = "cpu"
         self._lock = threading.Lock()          # thread-safety inference
-        self.enabled = os.getenv("AGENTGUARD_USE_ML", "false").lower() == "true"
-        self.threshold = self._float_env("AGENTGUARD_ML_THRESHOLD", 0.85, 0.0, 1.0)
+        self.enabled = os.getenv("AGENTGUARD_USE_ML", "false").lower() in ("true", "1", "yes")
+        # v4: seuil dur. Le ML est un second filtre, pas un premier filtre.
+        self.threshold = self._float_env("AGENTGUARD_ML_THRESHOLD", 0.95, 0.0, 1.0)
         self.model_path = os.getenv("AGENTGUARD_MODEL_PATH", "./agentguard-model")
         self.model_name = os.getenv(
             "AGENTGUARD_MODEL_NAME",
             "protectai/deberta-v3-base-prompt-injection-v2",
         )
-        # FIX: 8192 chars est largement suffisant pour 512 tokens (~3000 chars max)
-        # Cela évite de charger 20ko en mémoire pour rien avant la troncature du tokenizer.
         self.max_chars = int(os.getenv("AGENTGUARD_ML_MAX_CHARS", "8192"))
+        # v4: double passe normalisee (desactivable pour le debug)
+        self.dual_pass = os.getenv("AGENTGUARD_ML_DUAL_PASS", "true").lower() in ("true", "1", "yes")
+        self._normalizer = None
         self.attack_label_id = None
         self.benign_label_id = None
         self.model_labels = {}
@@ -93,17 +103,27 @@ class MLDetector:
                     logger.warning("ml_model_cache_failed", error=str(save_err))
 
             self.model.to(self.device)
-            
-            # FP16 sur GPU uniquement (CPU ne le supporte pas nativement de manière stable)
+
+            # FP16 sur GPU uniquement (CPU ne le supporte pas nativement de maniere stable)
             if self.device == "cuda":
                 self.model.half()
             self.model.eval()
+
+            # v4: chargement paresseux du normalizer (source unique de verite)
+            if self.dual_pass:
+                try:
+                    from agentguard.normalizer import normalize_for_detection
+                    self._normalizer = normalize_for_detection
+                except Exception:
+                    logger.warning("ml_normalizer_unavailable_dual_pass_disabled")
+                    self.dual_pass = False
 
             logger.info(
                 "ml_enabled",
                 device=self.device,
                 threshold=self.threshold,
                 model=self.model_name,
+                dual_pass=self.dual_pass,
                 attack_label_id=self.attack_label_id,
                 benign_label_id=self.benign_label_id,
             )
@@ -117,7 +137,7 @@ class MLDetector:
         return re.sub(r"[^a-z0-9]+", "_", str(label).strip().lower()).strip("_")
 
     def _validate_model_labels(self, model):
-        """Valide qu'un modèle est compatible avec le contrat de sécurité."""
+        """Valide qu'un modele est compatible avec le contrat de securite."""
         config = getattr(model, "config", None)
         raw_labels = getattr(config, "id2label", {}) or {}
 
@@ -143,8 +163,6 @@ class MLDetector:
         attack_ids = [i for i, l in normalized.items() if l in attack_labels]
         benign_ids = [i for i, l in normalized.items() if l in benign_labels]
 
-        # On exige exactement 1 label d'attaque et 1 label bénin pour garantir 
-        # qu'on n'a pas chargé un modèle générique non conçu pour la sécurité.
         if len(attack_ids) != 1 or len(benign_ids) != 1:
             raise RuntimeError(
                 f"Incompatible security classifier labels: {normalized}. "
@@ -169,33 +187,47 @@ class MLDetector:
         except (TypeError, ValueError):
             return default
 
+    def _score_once(self, text: str) -> float:
+        """Une seule inference, thread-safe. Retourne le score d'attaque."""
+        text = str(text or "")[: self.max_chars]
+
+        with self._lock:
+            inputs = self.tokenizer(
+                text,
+                return_tensors="pt",
+                truncation=True,
+                max_length=512,
+                padding=True,
+            )
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+            with torch.no_grad():
+                logits = self.model(**inputs).logits
+                probabilities = torch.softmax(logits, dim=1)
+
+        if self.attack_label_id is None:
+            raise RuntimeError("ML security classifier has no validated attack label")
+
+        return float(probabilities[0][self.attack_label_id].item())
+
     def predict(self, text: str) -> Dict[str, Any]:
         if not self.enabled or self.model is None or self.tokenizer is None:
             return {"score": 0.0, "risk": "UNKNOWN", "confidence": "low"}
 
         try:
-            # Garde-fou anti-DoS : on coupe avant même d'envoyer au tokenizer Rust
-            text = str(text or "")[: self.max_chars]
+            text = str(text or "")
 
-            with self._lock:   # inference thread-safe (modèle + tokenizer)
-                inputs = self.tokenizer(
-                    text, 
-                    return_tensors="pt", 
-                    truncation=True,
-                    max_length=512, 
-                    padding=True,
-                )
-                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            # v4: passe brute
+            score = self._score_once(text)
 
-                with torch.no_grad():
-                    logits = self.model(**inputs).logits
-                    # Utilisation de half() si on est en CUDA, softmax gère ça automatiquement
-                    probabilities = torch.softmax(logits, dim=1)
-
-            if self.attack_label_id is None:
-                raise RuntimeError("ML security classifier has no validated attack label")
-
-            score = float(probabilities[0][self.attack_label_id].item())
+            # v4: passe normalisee — seulement si le normalizer change le texte
+            # (early exit : le trafic propre ne paie qu'une seule inference).
+            if self.dual_pass and self._normalizer is not None:
+                normalized = self._normalizer(text)
+                if normalized != text:
+                    norm_score = self._score_once(normalized)
+                    if norm_score > score:
+                        score = norm_score
 
             if score >= self.threshold:
                 risk = "HIGH"
