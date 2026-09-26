@@ -800,6 +800,56 @@ def init_identity_tables():
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_identity_events_tenant ON identity_events(tenant_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_identity_events_created ON identity_events(created_at)")
+
+            # --- Agent Control Room : sessions / events (v1, cf. migration_001) ---
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id TEXT PRIMARY KEY,
+                    org_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    ended_at TIMESTAMP,
+                    status TEXT NOT NULL DEFAULT 'running',
+                    current_task TEXT,
+                    current_objective TEXT,
+                    model TEXT,
+                    environment TEXT NOT NULL DEFAULT 'production',
+                    policy_version TEXT,
+                    risk_level TEXT NOT NULL DEFAULT 'low',
+                    last_event_id TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_org_agent ON sessions(org_id, agent_id)")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS events (
+                    id TEXT PRIMARY KEY,
+                    trace_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    org_id TEXT NOT NULL,
+                    sequence_no BIGINT NOT NULL,
+                    "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    actor TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    tool_name TEXT,
+                    arguments JSONB,
+                    arguments_sanitized JSONB,
+                    result JSONB,
+                    policy_chain JSONB,
+                    risk_score DOUBLE PRECISION,
+                    risk_contributors JSONB,
+                    taint_level TEXT,
+                    decision TEXT,
+                    reason TEXT,
+                    prev_event_id TEXT,
+                    next_event_id TEXT,
+                    signature TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_events_session_seq ON events(session_id, sequence_no)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_events_org_agent_ts ON events(org_id, agent_id, \"timestamp\")")
             conn.commit()
         finally:
             conn.close()
@@ -872,6 +922,59 @@ def init_identity_tables():
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_identity_events_tenant ON identity_events(tenant_id)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_identity_events_created ON identity_events(created_at)")
+            except sqlite3.OperationalError:
+                pass
+
+            # --- Agent Control Room : sessions / events (v1, cf. migration_001) ---
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id TEXT PRIMARY KEY,
+                    org_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    ended_at TIMESTAMP,
+                    status TEXT NOT NULL DEFAULT 'running',
+                    current_task TEXT,
+                    current_objective TEXT,
+                    model TEXT,
+                    environment TEXT NOT NULL DEFAULT 'production',
+                    policy_version TEXT,
+                    risk_level TEXT NOT NULL DEFAULT 'low',
+                    last_event_id TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS events (
+                    id TEXT PRIMARY KEY,
+                    trace_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    org_id TEXT NOT NULL,
+                    sequence_no INTEGER NOT NULL,
+                    "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    actor TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    tool_name TEXT,
+                    arguments TEXT,
+                    arguments_sanitized TEXT,
+                    result TEXT,
+                    policy_chain TEXT,
+                    risk_score REAL,
+                    risk_contributors TEXT,
+                    taint_level TEXT,
+                    decision TEXT,
+                    reason TEXT,
+                    prev_event_id TEXT,
+                    next_event_id TEXT,
+                    signature TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_sessions_org_agent ON sessions(org_id, agent_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_events_session_seq ON events(session_id, sequence_no)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_events_org_agent_ts ON events(org_id, agent_id, \"timestamp\")")
             except sqlite3.OperationalError:
                 pass
             conn.commit()
@@ -996,5 +1099,3 @@ __all__ = [
     "sql_false",
     "sql_placeholder",
 ]
-
-
