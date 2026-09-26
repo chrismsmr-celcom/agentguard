@@ -1,21 +1,28 @@
 """
-AgentGuard ML Detector — single source of truth (v3.0 prod-ready).
+AgentGuard ML Detector — single source of truth (v3.1 prod-ready).
 
-Fixes v3.0 :
+Fixes v3.1 :
 ✅ import re manquant (crash au boot)
 ✅ Thread-safety (lock inference pour Gunicorn multi-threads)
-✅ Garde-fou longueur d'input (anti-DoS tokenizer)
+✅ Garde-fou longueur d'input optimisé (anti-DoS tokenizer)
 ✅ FP16 auto sur CUDA (inférence ~2x plus rapide)
-✅ Logging structuré au lieu de warnings
+✅ Logging structuré et validation stricte des labels du modèle
 """
 
 import os
-import re                       # ← FIX CRITIQUE (manquait)
+import re
 import logging
 import threading
 from typing import Dict, Any
 
 logger = logging.getLogger("agentguard.ml")
+
+# Import torch de manière sécurisée au niveau module
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
 
 
 class MLDetector:
@@ -31,12 +38,16 @@ class MLDetector:
             "AGENTGUARD_MODEL_NAME",
             "protectai/deberta-v3-base-prompt-injection-v2",
         )
-        self.max_chars = int(os.getenv("AGENTGUARD_ML_MAX_CHARS", "20000"))
+        # FIX: 8192 chars est largement suffisant pour 512 tokens (~3000 chars max)
+        # Cela évite de charger 20ko en mémoire pour rien avant la troncature du tokenizer.
+        self.max_chars = int(os.getenv("AGENTGUARD_ML_MAX_CHARS", "8192"))
         self.attack_label_id = None
         self.benign_label_id = None
         self.model_labels = {}
 
-        if not self.enabled:
+        if not self.enabled or not TORCH_AVAILABLE:
+            if not TORCH_AVAILABLE and self.enabled:
+                logger.warning("ml_disabled_torch_absent")
             return
 
         try:
@@ -44,8 +55,6 @@ class MLDetector:
                 AutoTokenizer,
                 AutoModelForSequenceClassification,
             )
-            import torch
-            self._torch = torch
 
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -84,7 +93,8 @@ class MLDetector:
                     logger.warning("ml_model_cache_failed", error=str(save_err))
 
             self.model.to(self.device)
-            # FP16 sur GPU uniquement (CPU ne le supporte pas bien)
+            
+            # FP16 sur GPU uniquement (CPU ne le supporte pas nativement de manière stable)
             if self.device == "cuda":
                 self.model.half()
             self.model.eval()
@@ -94,12 +104,10 @@ class MLDetector:
                 device=self.device,
                 threshold=self.threshold,
                 model=self.model_name,
-                attack_label=self.attack_label_id,
+                attack_label_id=self.attack_label_id,
+                benign_label_id=self.benign_label_id,
             )
 
-        except ImportError:
-            logger.warning("ml_disabled_transformers_absent")
-            self.enabled = False
         except Exception as exc:
             logger.warning("ml_load_failed", error=str(exc))
             self.enabled = False
@@ -135,6 +143,8 @@ class MLDetector:
         attack_ids = [i for i, l in normalized.items() if l in attack_labels]
         benign_ids = [i for i, l in normalized.items() if l in benign_labels]
 
+        # On exige exactement 1 label d'attaque et 1 label bénin pour garantir 
+        # qu'on n'a pas chargé un modèle générique non conçu pour la sécurité.
         if len(attack_ids) != 1 or len(benign_ids) != 1:
             raise RuntimeError(
                 f"Incompatible security classifier labels: {normalized}. "
@@ -160,22 +170,27 @@ class MLDetector:
             return default
 
     def predict(self, text: str) -> Dict[str, Any]:
-        if not self.enabled or self.model is None:
+        if not self.enabled or self.model is None or self.tokenizer is None:
             return {"score": 0.0, "risk": "UNKNOWN", "confidence": "low"}
 
         try:
-            text = str(text or "")[: self.max_chars]   # garde-fou anti-DoS
-            torch = self._torch
+            # Garde-fou anti-DoS : on coupe avant même d'envoyer au tokenizer Rust
+            text = str(text or "")[: self.max_chars]
 
-            with self._lock:   # inference thread-safe
+            with self._lock:   # inference thread-safe (modèle + tokenizer)
                 inputs = self.tokenizer(
-                    text, return_tensors="pt", truncation=True,
-                    max_length=512, padding=True,
+                    text, 
+                    return_tensors="pt", 
+                    truncation=True,
+                    max_length=512, 
+                    padding=True,
                 )
                 inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
                 with torch.no_grad():
-                    probabilities = torch.softmax(self.model(**inputs).logits, dim=1)
+                    logits = self.model(**inputs).logits
+                    # Utilisation de half() si on est en CUDA, softmax gère ça automatiquement
+                    probabilities = torch.softmax(logits, dim=1)
 
             if self.attack_label_id is None:
                 raise RuntimeError("ML security classifier has no validated attack label")
