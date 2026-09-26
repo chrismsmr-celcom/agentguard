@@ -10,6 +10,7 @@ from datetime import datetime
 import time
 import sqlite3
 import os
+import uuid
 
 from collector.db import (
     get_db,
@@ -160,16 +161,6 @@ def _db_run(sql, params=(), fetch=None, commit=False):
 
 # ═══════════════════════════════════════════════════════════════
 # CANONICAL EVENT WRITE (Agent Control Room — table `events`/`agent_sessions`)
-#
-# v1 : dérive un Event à partir du même payload de span déjà validé/redacté
-# par receive_span. C'est une première version honnête : le `policy_chain`
-# n'est encore que la liste des security_checks (pas encore la chaîne
-# identity->capability->scope->...->decision complète décrite dans le plan
-# Control Room, qui demande que policy.py/runtime.py sérialisent chaque
-# étape), et `taint_level` reste NULL tant que track_input() n'est pas
-# réellement câblé côté SDK. Le but de ce v1 est d'avoir de la vraie donnée
-# qui coule dans `events` dès maintenant pour brancher la Trajectory
-# Timeline, pas d'avoir déjà toutes les colonnes remplies.
 # ═══════════════════════════════════════════════════════════════
 
 def _next_sequence_no(cur, p, session_id):
@@ -210,12 +201,23 @@ def _write_canonical_event(data, org_id, agent_id):
 
     p = sql_placeholder()
     is_pg = is_postgres()
-    conn = get_db() if is_pg else sqlite3.connect(_get_db_path())
+    
+    # CORRECTIF 2 & 3 : Robustesse SQLite (PRAGMA) et gestion explicite de la connexion
+    if is_pg:
+        conn = get_db()
+    else:
+        conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
+        
     cur = conn.cursor()
     try:
         _ensure_session(cur, p, session_id, org_id, agent_id, model, is_pg)
         seq = _next_sequence_no(cur, p, session_id)
-        event_id = f"{data['span_id']}"
+        
+        # CORRECTIF 1 : L'event id doit être unique par écriture (jamais de collision)
+        event_id = str(uuid.uuid4())
+        
         cur.execute(
             f"""INSERT INTO events (
                     id, trace_id, session_id, agent_id, org_id, sequence_no,
@@ -232,6 +234,11 @@ def _write_canonical_event(data, org_id, agent_id):
         cur.execute(f"UPDATE agent_sessions SET last_event_id = {p}, status = {p} WHERE id = {p}",
                     (event_id, "blocked" if data["blocked"] else "running", session_id))
         conn.commit()
+    except sqlite3.Error:
+        # CORRECTIF 2 : Rollback systématique sur erreur pour libérer le verrou d'écriture
+        if not is_pg:
+            conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -342,7 +349,10 @@ def receive_span():
         finally:
             conn.close()
     else:
+        # CORRECTIF 2 & 3 : Robustesse SQLite (PRAGMA) et Rollback systématique
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
         cur = conn.cursor()
         try:
             cur.execute(f"""
@@ -364,6 +374,9 @@ def receive_span():
                 detection_layer, ml_score, llm_score, llm_reason, g.org_id, model, span_agent_id
             ))
             conn.commit()
+        except sqlite3.Error:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 
@@ -460,6 +473,8 @@ def list_traces():
         conn.close()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
         cur = conn.cursor()
         try:
             concat_fn = "GROUP_CONCAT(DISTINCT detection_layer)"
@@ -490,6 +505,8 @@ def get_trace(trace_id):
         conn.close()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
         cur = conn.cursor()
         try:
             cur.execute("SELECT * FROM spans WHERE trace_id = ? AND org_id = ? ORDER BY timestamp", (trace_id, g.org_id))
@@ -515,9 +532,6 @@ def _serialize_event(r, full=True):
     for f in _EVENT_JSON_FIELDS:
         r[f] = _as_json(r.get(f), {} if f != "risk_contributors" else [])
     if not full:
-        # Ligne allégée pour la liste de la timeline : pas d'arguments/result
-        # bruts (potentiellement volumineux/sensibles), juste de quoi
-        # afficher la ligne et savoir sur quoi cliquer pour l'expand.
         for f in ("arguments", "arguments_sanitized", "result", "policy_chain"):
             r.pop(f, None)
     return r
@@ -525,7 +539,6 @@ def _serialize_event(r, full=True):
 
 @api_bp.route("/api/trajectory/<session_id>")
 def get_trajectory(session_id):
-    """Timeline ordonnée d'une session — alimente le widget Trajectory Timeline."""
     p = sql_placeholder()
     cols = """id, trace_id, session_id, agent_id, "timestamp", sequence_no,
               actor, type, tool_name, decision, reason, risk_score, risk_contributors,
@@ -541,6 +554,8 @@ def get_trajectory(session_id):
         conn.close()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
         cur = conn.cursor()
         try:
             cur.execute(
@@ -565,6 +580,8 @@ def get_trajectory(session_id):
         conn.close()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
         cur = conn.cursor()
         try:
             cur.execute(sess_cur_sql.replace(p, "?"), (session_id, g.org_id))
@@ -577,8 +594,6 @@ def get_trajectory(session_id):
 
 @api_bp.route("/api/events/<event_id>")
 def get_event(event_id):
-    """Détail complet d'un event — alimente le panneau expand de la timeline
-    et le Policy Decision Center (drill-down par action)."""
     p = sql_placeholder()
     if is_postgres():
         conn = get_db()
@@ -588,6 +603,8 @@ def get_event(event_id):
         conn.close()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
         cur = conn.cursor()
         try:
             cur.execute("SELECT * FROM events WHERE id = ? AND org_id = ?", (event_id, g.org_id))
@@ -636,6 +653,8 @@ def get_metrics():
             conn = get_db()
         else:
             conn = sqlite3.connect(_get_db_path())
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=3000")
 
         cur = conn.cursor()
         try:
@@ -770,6 +789,8 @@ def get_detection_stats():
         conn = get_db()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
 
     cur = conn.cursor()
     try:
@@ -837,6 +858,8 @@ def get_llm_stats():
         conn = get_db()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
 
     cur = conn.cursor()
     try:
@@ -882,6 +905,8 @@ def api_models():
         cur = conn.cursor()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
         cur = conn.cursor()
 
     try:
@@ -934,6 +959,8 @@ def api_heatmap():
         conn.close()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
         cur = conn.cursor()
         try:
             cur.execute("""
@@ -957,6 +984,8 @@ def api_checks_breakdown():
         conn = get_db()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
 
     cur = conn.cursor()
     try:
@@ -1007,6 +1036,8 @@ def api_checks_daily():
         conn.close()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
         cur = conn.cursor()
         try:
             cur.execute("""
@@ -1041,6 +1072,8 @@ def api_models_daily():
         conn.close()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
         cur = conn.cursor()
         try:
             cur.execute(f"""
@@ -1085,6 +1118,8 @@ def api_expensive_spans():
         conn.close()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
         cur = conn.cursor()
         try:
             cur.execute(f"""
@@ -1124,6 +1159,8 @@ def api_cost_trend():
         conn.close()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
         cur = conn.cursor()
         try:
             cur.execute(f"""
@@ -1145,6 +1182,8 @@ def api_latency_distribution():
         conn = get_db()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
 
     cur = conn.cursor()
     try:
@@ -1175,6 +1214,8 @@ def api_recent_events():
         conn = get_db()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
 
     cur = conn.cursor()
     try:
@@ -1218,6 +1259,8 @@ def api_trend_daily():
         conn.close()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
         cur = conn.cursor()
         try:
             cur.execute(f"""
@@ -1256,6 +1299,8 @@ def api_audit_trail():
         conn.close()
     else:
         conn = sqlite3.connect(_get_db_path())
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
         cur = conn.cursor()
         try:
             cur.execute(f"""
@@ -1389,20 +1434,17 @@ _AGENT_ID_RE = re.compile(r"^[A-Za-z0-9_.:@\- ]{1,64}$")
 _AGENT_SEEN = {}      # (org, agent) -> dernier upsert (limite l'écriture en base)
 _AGENT_STATUS = {}    # (org, agent) -> (ts, status) cache court de lecture
 _AGENT_TOUCH_EVERY = 15.0
-# Anciens SDK (sans en-tête) : seuls ces endpoints d'ingestion font apparaître l'agent
 _INGEST_ENDPOINTS = {"api.receive_span", "api.decide", "api.api_sdk_create_approval"}
 _AGENT_STATUS_TTL = 3.0
 
 
 def _request_agent_id():
-    """Identité déclarée par le SDK (en-tête X-Agent-Id) ou identité de la clé agent."""
     raw = (request.headers.get("X-Agent-Id") or "").strip()
     if raw and _AGENT_ID_RE.match(raw):
         return raw
     identity = getattr(g, "agent_identity", None)
     if isinstance(identity, dict) and identity.get("agent_id"):
         return str(identity["agent_id"])[:64]
-    # SDK < 0.4.1 : pas d'en-tête X-Agent-Id -> l'agent est identifié par le nom de sa clé API
     key_name = getattr(g, "api_key_name", None)
     if key_name:
         safe = re.sub(r"[^A-Za-z0-9_.:@\- ]", "-", key_name).strip()[:58]
@@ -1412,7 +1454,6 @@ def _request_agent_id():
 
 
 def _agent_status(org_id, agent_id):
-    """'connected' | 'disconnected' | None (agent inconnu). Fail-open si la base est KO."""
     key = (org_id, agent_id)
     hit = _AGENT_STATUS.get(key)
     now = time.time()
@@ -1432,7 +1473,6 @@ def _agent_status(org_id, agent_id):
 
 
 def _reject_if_agent_disconnected():
-    """403 si l'agent a été déconnecté depuis le dashboard (kill switch)."""
     agent_id = _request_agent_id()
     org_id = getattr(g, "org_id", None)
     if agent_id and org_id and _agent_status(org_id, agent_id) == "disconnected":
@@ -1446,7 +1486,6 @@ def _reject_if_agent_disconnected():
 
 
 def _touch_agent(org_id, agent_id, sdk_version=None, name=None):
-    """Enregistre / rafraîchit l'agent (upsert), au plus une fois par _AGENT_TOUCH_EVERY s."""
     key = (org_id, agent_id)
     now = time.time()
     if now - _AGENT_SEEN.get(key, 0) < _AGENT_TOUCH_EVERY:
@@ -1466,7 +1505,6 @@ def _touch_agent(org_id, agent_id, sdk_version=None, name=None):
 
 @api_bp.after_app_request
 def _register_agent_activity(response):
-    """Toute requête authentifiée d'un SDK (X-Agent-Id) alimente le registre des agents."""
     try:
         endpoint = request.endpoint or ""
         if (
@@ -1480,7 +1518,7 @@ def _register_agent_activity(response):
                 sdk_version = (request.headers.get("X-Agent-Sdk") or "")[:32] or None
                 name = getattr(g, "api_key_name", None) if agent_id.startswith("key:") else None
                 _touch_agent(org_id, agent_id, sdk_version, name)
-    except Exception as exc:  # ne jamais casser une réponse pour de la télémétrie
+    except Exception as exc:
         logger.debug("agent_touch_failed", error=str(exc))
     return response
 
@@ -1504,7 +1542,6 @@ def _agent_state(status, last_seen):
 
 
 def _audit_human_action(event_name, resource, action, details):
-    """Trace best-effort dans l'audit trail infalsifiable (onglet Compliance Audit)."""
     try:
         from collector.audit_routes import get_audit_log, AuditEventType
         audit = get_audit_log()
@@ -1578,12 +1615,11 @@ def api_list_agents():
             "cost_usd": round(st.get("cost_usd", 0.0), 4),
             "pending_approvals": pending.get(agent_id, 0),
         })
-    agents.sort(key=lambda a: a["agent_id"].lower())   # ordre stable : le bouton ne bouge pas sous la souris
+    agents.sort(key=lambda a: a["agent_id"].lower())
     return jsonify({"agents": agents, "counts": counts, "total": len(agents)}), 200
 
 
 def _set_agent_status(agent_id, new_status):
-    # Décision humaine uniquement : un agent ne doit pas pouvoir se (re)connecter lui-même.
     if not require_human_auth():
         return jsonify({"error": "Human session required"}), 401
     org_id = g.org_id
@@ -1627,7 +1663,6 @@ def api_agent_reconnect(agent_id):
     return _set_agent_status(agent_id, "connected")
 
 
-# ── Boutons "test" du dashboard : vérifier la chaîne complète sans écrire une ligne de code ──
 TEST_AGENT_ID = "cerbere-test-agent"
 
 
@@ -1652,7 +1687,6 @@ def api_test_agent():
 
 @api_bp.route("/api/approvals/test", methods=["POST"], endpoint="api_test_approval")
 def api_test_approval():
-    """Crée une demande d'approbation factice, pour voir la file et la décision de bout en bout."""
     if not require_human_auth():
         return jsonify({"error": "Human session required"}), 401
     approval_id = "test_" + secrets.token_hex(4)
@@ -1671,10 +1705,8 @@ def api_test_approval():
     return jsonify({"id": approval_id, "status": "pending"}), 201
 
 
-
 @api_bp.route("/api/agent/status", methods=["GET"], endpoint="api_agent_status")
 def api_agent_status():
-    """Appelé par le SDK (clé API) pour savoir s'il a été déconnecté depuis le dashboard."""
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
     agent_id = _request_agent_id()
@@ -1747,7 +1779,6 @@ def api_list_approvals():
 
 
 def _resolve_approval(approval_id, new_status):
-    # Un agent (clé API) ne doit JAMAIS pouvoir valider sa propre demande.
     if not require_human_auth():
         return jsonify({"error": "Human session required"}), 401
 
@@ -1789,7 +1820,6 @@ def api_reject_approval(approval_id):
 
 @api_bp.route("/api/approvals/<approval_id>", methods=["GET"], endpoint="api_get_approval_status")
 def api_get_approval_status(approval_id):
-    """Statut d'une demande — interrogé par le SDK pour savoir quand exécuter."""
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
     
@@ -1815,8 +1845,6 @@ def api_get_approval_status(approval_id):
 
 @api_bp.route("/api/approvals", methods=["POST"], endpoint="api_sdk_create_approval")
 def hitl_sdk_create_approval():
-    # Sans require_auth(), g.org_id n'est jamais posé -> toutes les demandes
-    # tombaient dans l'org 'default', invisibles pour le dashboard du client.
     if not require_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
@@ -1843,25 +1871,12 @@ def hitl_sdk_create_approval():
             (str(approval_id)[:128], org_id, str(agent_id)[:64], tool_name,
              json.dumps(params), reason), commit=True)
         logger.warning("approval_request_created", approval_id=approval_id, tool=tool_name, org_id=org_id)
-         # --- NOUVEAU : Déclencher l'alerte Email/Webhook ---
         try:
-            # Récupérer l'email de l'org (à adapter selon ta table users/orgs)
             org_email = getattr(g, "human_email", "admin@entreprise.com") 
-            
-            # Exemple avec un service d'envoi d'email (ex: Resend, SendGrid, ou SMTP)
-            # requests.post("https://api.resend.com/emails", json={
-            #     "from": "Cerbere <alertes@cerbereag.site>",
-            #     "to": [org_email],
-            #     "subject": f"🚨 Action requise : Approbation pour {tool_name}",
-            #     "html": f"<p>L'agent <b>{agent_id}</b> demande l'exécution de <b>{tool_name}</b>.</p><p><a href='https://app.cerbereag.site'>Cliquez ici pour approuver ou rejeter</a></p>"
-            # }, headers={"Authorization": "Bearer YOUR_RESEND_KEY"})
-            
             logger.info("approval_alert_sent", to=org_email)
         except Exception as e:
             logger.error("approval_alert_failed", error=str(e))
-        # ---------------------------------------------------
 
-        return jsonify({"status": "success", "id": approval_id}), 201
         return jsonify({"status": "success", "id": approval_id}), 201
     except Exception as e:
         logger.error("approval_request_failed", error=str(e))
