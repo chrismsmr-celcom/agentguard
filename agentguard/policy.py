@@ -1,8 +1,6 @@
 import os
 import json
 import re
-import base64
-import requests
 import structlog
 import unicodedata
 from typing import Optional, Dict, Any, List
@@ -22,16 +20,17 @@ except ImportError:
 
 
 def _normalize_prompt(text: str) -> str:
+    """Normalise le prompt pour contrer les techniques d'obfuscation courantes."""
     if not isinstance(text, str):
         return text
     
     # 1. Correction manuelle des homoglyphes spécifiques
     text = text.replace('ɿ', 'r').replace('і', 'i').replace('ο', 'o').replace('с', 'c')
     
-    # 2. Normalisation Unicode standard (gère la majorité des cas)
+    # 2. Normalisation Unicode standard
     text = unicodedata.normalize('NFKC', text)
     
-    # 3. Suppression des caractères invisibles
+    # 3. Suppression des caractères invisibles (zero-width spaces)
     text = re.sub(r'[\u200b\u200c\u200d\ufeff\u2060\u200e\u200f]', '', text)
     
     # 4. Colle les lettres séparées par des points/espaces (i . g . n . o . r . e -> ignore)
@@ -41,24 +40,9 @@ def _normalize_prompt(text: str) -> str:
     text = re.sub(r'\\x([0-9a-fA-F]{2})', lambda m: chr(int(m.group(1), 16)), text)
     text = re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1), 16)), text)
     
-    # 6. Révèle le texte caché dans les commentaires HTML
+    # 6. Révèle le texte caché dans les commentaires HTML (ne pas le supprimer)
     text = re.sub(r'<!--(.*?)-->', r' \1 ', text, flags=re.DOTALL)
     
-    # 7. NOUVEAU : Correction basique du Leetspeak (1->l, 3->e, 4->a, 5->s, @->a, 0->o)
-    leet_map = str.maketrans('01345@', 'oleisa')
-    text = text.translate(leet_map)
-    
-    # 8. NOUVEAU : Tentative de décodage Base64 si la chaîne ressemble à du base64
-    # (On ne décode que si c'est plausible pour éviter les erreurs de perf)
-    if len(text) > 10 and re.match(r'^[A-Za-z0-9+/=]+$', text.replace(' ', '')):
-        try:
-            # On essaie de décoder. Si ça donne du texte lisible avec des mots-clés, on le garde.
-            decoded = base64.b64decode(text).decode('utf-8', errors='ignore')
-            if any(kw in decoded.lower() for kw in ['ignore', 'previous', 'system', 'prompt', 'admin']):
-                text = decoded + " " + text # On garde les deux versions pour la détection
-        except Exception:
-            pass # Si ce n'est pas du base64 valide, on ignore
-            
     return text.strip()
 
 
@@ -120,6 +104,7 @@ class PolicyEngine:
         all_strong = get_all_strong_patterns()
         weak = get_weak_patterns()
 
+        # Note : re.IGNORECASE est appliqué ici globalement, donc pas besoin de (?i) dans les patterns
         PolicyEngine._STRONG_PATTERNS = re.compile("|".join(f"(?:{p})" for p in all_strong), re.IGNORECASE)
         PolicyEngine._WEAK_PATTERNS = re.compile("|".join(f"(?:{p})" for p in weak), re.IGNORECASE)
 
@@ -151,28 +136,9 @@ class PolicyEngine:
                 return SecurityCheck("prompt_injection", False, RiskLevel.HIGH, f"ML detected threat ({ml_result['score']:.2%})", {"layer": "ml"}, SecurityAction.BLOCK)
                 
         # 🛡️ ÉTAPE 5 : Patterns Regex (sur le texte nettoyé)
-                from .patterns import is_didactic_context
-        from .normalizer import normalize_for_detection, reversed_words_variant
-
-        if PolicyEngine._STRONG_PATTERNS.findall(text):
-            if is_didactic_context(text):
-                return SecurityCheck("prompt_injection", True, RiskLevel.MEDIUM,
-                    "Didactic context: quoted payload downgraded to review",
-                    {"layer": "regex", "downgraded": True}, SecurityAction.REVIEW)
-            return SecurityCheck("prompt_injection", False, RiskLevel.HIGH,
-                "Strong injection pattern detected", {"layer": "regex"}, SecurityAction.BLOCK)
-
-        # --- obfuscation fallback passes (v2) ---
-        normalized = normalize_for_detection(text)
-        if normalized != text and PolicyEngine._STRONG_PATTERNS.findall(normalized):
-            return SecurityCheck("prompt_injection", False, RiskLevel.HIGH,
-                "Obfuscated variant detected", {"layer": "regex+normalizer"}, SecurityAction.BLOCK)
-
-        reversed_text = reversed_words_variant(text)
-        if reversed_text != text and PolicyEngine._STRONG_PATTERNS.findall(reversed_text):
-            return SecurityCheck("prompt_injection", False, RiskLevel.HIGH,
-                "Reversed-word variant detected", {"layer": "regex+normalizer"}, SecurityAction.BLOCK)
-
+        if PolicyEngine._STRONG_PATTERNS.findall(clean_text):
+            return SecurityCheck("prompt_injection", False, RiskLevel.HIGH, "Strong injection pattern detected", {"layer": "regex"}, SecurityAction.BLOCK)
+            
         return SecurityCheck("prompt_injection", True, RiskLevel.LOW, "No injection detected", {"layer": "all_clear"}, SecurityAction.ALLOW)
 
     def check_pii(self, text: str) -> SecurityCheck:
